@@ -3,19 +3,27 @@
 tests/05-e2e/intercom.py — internal notes with cloud attachments (T+U).
 
 The portal's intercom is the SME's short-message channel; its flagship
-move is attaching a file FROM the cloud service. This journey:
+move is attaching a file FROM the cloud service. This journey covers
+Epic T (basic messaging) and Epic U (cloud attachments):
 
-  T1  the intercom card is on the landing page and the API lists messages
+  T1  intercom card on the landing page and API lists messages
   T2  a posted note appears in the API — and on the page, XSS-escaped
-  T4  blank / oversized notes are rejected with 400
+  T2b note text with basic HTML tags rendered escaped on the page
+  T3  script tags in text XSS-escaped on page but raw in JSON API
+  T4  blank and oversized notes rejected with 400
+  T4b oversized attachment URLs rejected (MAX_URL guard)
   U1  a cloud file attached by URL lands with real metadata
       (name from Content-Disposition, size, content-type)
   U2  the metadata is a snapshot from the real cloud answer — the
       stand-in cloud is a real container on the compose network, so the
       portal resolves it by NAME (IP literals must stay rejected)
   U3  foreign hosts / foreign ports are rejected (allowlist holds)
-  U4  IP literals and non-https URLs are rejected (SSRF guard holds)
+  U4  IP literals and link-local targets rejected (SSRF guard holds)
   U5  a script-tagged filename renders escaped on the page
+  U6  attachment URLs with query parameters accepted
+  U7  URLs with credentials rejected (SSRF guard)
+  U8  attachment URLs with fragments accepted
+  U9  exact MAX_TEXT length (2000 bytes) accepted
 
 The journey recreates the portal with INTERCOM_ATTACHMENT_HOSTS /
 INTERCOM_ALLOW_HTTP pointing at the stand-in, then restores the default
@@ -149,6 +157,16 @@ def main() -> int:
             else f"validation hole: blank={bad.status_code} oversized={big.status_code}"
         )
 
+        # T4b: oversized attachment URLs rejected (MAX_URL)
+        huge_url = "http://cloud.example.com/s/" + "a" * 1000
+        huge = session.post(portal + "/api/intercom",
+                            json={"text": "x", "attachment_url": huge_url}, timeout=T)
+        (result.ok if huge.status_code == 400 else result.fail)(
+            "oversized attachment URLs rejected"
+            if huge.status_code == 400
+            else f"huge URL accepted: HTTP {huge.status_code}"
+        )
+
         # T2: a note lands — raw in the API, escaped on the page
         sent = session.post(portal + "/api/intercom",
                             json={"text": "Team-Meet <b>verschoben</b> auf 11:00"},
@@ -172,6 +190,30 @@ def main() -> int:
         (result.ok if t2_page else result.fail)(
             "note text rendered XSS-escaped on the page"
             if t2_page else "note text rendered unescaped on the page!"
+        )
+
+        # T3: script payloads are XSS-safely rendered (spec epic T)
+        script_resp = session.post(
+            portal + "/api/intercom",
+            json={"text": "Hello <script>alert('xss')</script> world"},
+            timeout=T,
+        )
+        script_page = session.get(portal + "/", timeout=T).text
+        t3_ok = (
+            script_resp.status_code == 201
+            and "<script>alert" not in script_page
+            and "&lt;script&gt;alert" in script_page
+        )
+        # json API must preserve the raw text (no double-escaping)
+        api_listed = session.get(portal + "/api/intercom", timeout=T).json()
+        t3_api = any(
+            m.get("text") == "Hello <script>alert('xss')</script> world"
+            for m in (api_listed.get("messages") or [])
+        )
+        (result.ok if t3_ok and t3_api else result.fail)(
+            "script tags XSS-escaped on page but raw in JSON API"
+            if t3_ok and t3_api
+            else f"T3 failed: page={t3_ok} api={t3_api} status={script_resp.status_code}"
         )
 
         # ── Epic U: attachments from the cloud ─────────────────────────
@@ -259,6 +301,49 @@ def main() -> int:
                 if u5_page
                 else f"hostile filename leaked: HTTP {hostile.status_code}, "
                      f"escaped={'Rechnung&lt;script&gt;.pdf' in page2.text}"
+            )
+
+            # U6: attachment URLs with query parameters are accepted
+            # (some clouds use ?token=... for direct downloads)
+            param_url = f"http://{CLOUD_NAME}:{CLOUD_PORT}/Angebot_2026.pdf?token=abc123"
+            paramsok = session.post(portal + "/api/intercom",
+                                    json={"text": "x",
+                                          "attachment_url": param_url}, timeout=30)
+            u6 = paramsok.status_code == 201
+            (result.ok if u6 else result.fail)(
+                "attachment URLs with query parameters accepted"
+                if u6 else f"query params rejected: HTTP {paramsok.status_code}"
+            )
+
+            # U7: credentials in URL rejected outright (ssrf guard)
+            # URL parsing normalizes userinfo; the raw input is validated
+            creds = session.post(portal + "/api/intercom",
+                                 json={"text": "x",
+                                       "attachment_url": f"http://user:pass@{CLOUD_NAME}:{CLOUD_PORT}/f"},
+                                 timeout=T)
+            u7 = creds.status_code == 400
+            (result.ok if u7 else result.fail)(
+                "URLs with credentials rejected (SSRF guard)"
+                if u7 else f"credentials accepted: HTTP {creds.status_code}"
+            )
+
+            # U8: fragment in attachment URL accepted (irrelevant for HEAD)
+            frag_url = f"http://{CLOUD_NAME}:{CLOUD_PORT}/Angebot_2026.pdf#page=2"
+            frags = session.post(portal + "/api/intercom",
+                                 json={"text": "x", "attachment_url": frag_url}, timeout=30)
+            u8 = frags.status_code == 201  # HEAD drops the fragment; 202 Accepted
+            (result.ok if u8 else result.fail)(
+                "attachment URLs with fragments accepted"
+                if u8 else f"fragments rejected: HTTP {frags.status_code}"
+            )
+
+            # U9: exact MAX_TEXT length (2000 bytes) accepted
+            exact = session.post(portal + "/api/intercom",
+                                 json={"text": "x" * 2000}, timeout=T)
+            u9 = exact.status_code == 201
+            (result.ok if u9 else result.fail)(
+                "MAX_TEXT (2000 bytes) accepted exactly"
+                if u9 else f"max length rejected: HTTP {exact.status_code}"
             )
     finally:
         stop_cloud_standin()
