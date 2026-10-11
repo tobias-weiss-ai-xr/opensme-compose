@@ -1,0 +1,177 @@
+{
+  "company": "OpenSME Muster GmbH",
+  "domain": "opensme.local",
+  "description": "12 personnel for demo/e2e testing — an imaginary SME company",
+  "users": [
+    {
+      "id": "tobias.weiss",
+      "username": "tweiss",
+      "firstName": "Tobias",
+      "lastName": "Weiß",
+      "displayName": "Tobias Weiß",
+      "email": "tweiss@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["owner", "admin", "developer"],
+      "department": "Management"
+    },
+    {
+      "id": "alexander.ebner",
+      "username": "aebner",
+      "firstName": "Alexander",
+      "lastName": "Ebner",
+      "displayName": "Alexander Ebner",
+      "email": "aebner@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["admin", "finance"],
+      "department": "Finance"
+    },
+    {
+      "id": "sarah.mueller",
+      "username": "smueller",
+      "firstName": "Sarah",
+      "lastName": "Müller",
+      "displayName": "Sarah Müller",
+      "email": "smueller@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["manager", "sales"],
+      "department": "Sales"
+    },
+    {
+      "id": "michael.schmidt",
+      "username": "mschmidt",
+      "firstName": "Michael",
+      "lastName": "Schmidt",
+      "displayName": "Michael Schmidt",
+      "email": "mschmidt@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["developer", "devOps"],
+      "department": "Engineering"
+    },
+    {
+      "id": "lisa.koenig",
+      "username": "lkoenig",
+      "firstName": "Lisa",
+      "lastName": "König",
+      "displayName": "Lisa König",
+      "email": "lkoenig@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["developer"],
+      "department": "Engineering"
+    },
+    {
+      "id": "thomas.bauer",
+      "username": "tbauer",
+      "firstName": "Thomas",
+      "lastName": "Bauer",
+      "displayName": "Thomas Bauer",
+      "email": "tbauer@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["sales"],
+      "department": "Sales"
+    },
+    {
+      "id": "anna.schulz",
+      "username": "aschulz",
+      "firstName": "Anna",
+      "lastName": "Schulz",
+      "displayName": "Anna Schulz",
+      "email": "aschulz@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["finance"],
+      "department": "Finance"
+    },
+    {
+      "id": "david.woelfel",
+      "username": "dwoelfel",
+      "firstName": "David",
+      "lastName": "Wölfel",
+      "displayName": "David Wölfel",
+      "email": "dwoelfel@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["developer"],
+      "department": "Engineering"
+    },
+    {
+      "id": "julia.hofmann",
+      "username": "jhofmann",
+      "firstName": "Julia",
+      "lastName": "Hofmann",
+      "displayName": "Julia Hofmann",
+      "email": "jhofmann@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["hr"],
+      "department": "HR"
+    },
+    {
+      "id": "peter.maier",
+      "username": "pmaier",
+      "firstName": "Peter",
+      "lastName": "Maier",
+      "displayName": "Peter Maier",
+      "email": "pmaier@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["support"],
+      "department": "Support"
+    },
+    {
+      "id": "claudia.fischer",
+      "username": "cfischer",
+      "firstName": "Claudia",
+      "lastName": "Fischer",
+      "displayName": "Claudia Fischer",
+      "email": "cfischer@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["marketing"],
+      "department": "Marketing"
+    },
+    {
+      "id": "markus.weber",
+      "username": "mweber",
+      "firstName": "Markus",
+      "lastName": "Weber",
+      "displayName": "Markus Weber",
+      "email": "mweber@opensme.local",
+      "password": "DemoPass123!",
+      "roles": ["devOps"],
+      "department": "Engineering"
+    }
+  ],
+  "roles": {
+    "owner": "Company owner with full access",
+    "admin": "System administrator",
+    "manager": "Department manager",
+    "developer": "Software developer",
+    "devOps": "Infrastructure engineer",
+    "finance": "Finance team member",
+    "sales": "Sales team member",
+    "hr": "Human resources",
+    "support": "Customer support",
+    "marketing": "Marketing team member"
+  },
+  "groups": [
+    {
+      "name": "opensme-engineering",
+      "displayName": "Engineering Team",
+      "description": "All developers and DevOps",
+      "members": ["michael.schmidt", "lisa.koenig", "david.woelfel", "markus.weber"]
+    },
+    {
+      "name": "opensme-management",
+      "displayName": "Management Team",
+      "description": "Company leadership",
+      "members": ["tobias.weiss", "alexander.ebner", "sarah.mueller"]
+    },
+    {
+      "name": "opensme-office",
+      "displayName": "Office Team",
+      "description": "Finance, HR, Marketing",
+      "members": ["alexander.ebner", "anna.schulz", "julia.hofmann", "claudia.fischer"]
+    },
+    {
+      "name": "opensme-all",
+      "displayName": "All Employees",
+      "description": "Every employee in the company",
+      "members": ["tobias.weiss", "alexander.ebner", "sarah.mueller", "michael.schmidt", "lisa.koenig", "thomas.bauer", "anna.schulz", "david.woelfel", "julia.hofmann", "peter.maier", "claudia.fischer", "markus.weber"]
+    }
+  ]
+}

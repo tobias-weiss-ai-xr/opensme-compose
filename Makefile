@@ -345,6 +345,18 @@ restore-from:
 	@bash scripts/restore.sh $(BACKUP)
 
 # ---------------------------------------------------------------------------
+# Demo User Provisioning
+# ---------------------------------------------------------------------------
+provision-demo-users:
+	@bash scripts/provision-demo-users.sh --wait
+
+provision-demo-users-clean:
+	@bash scripts/provision-demo-users.sh --wait --clean
+
+provision-demo-users-dry:
+	@bash scripts/provision-demo-users.sh --dry-run
+
+# ---------------------------------------------------------------------------
 # Bootstrap / Cleanup
 # ---------------------------------------------------------------------------
 bootstrap:
@@ -402,6 +414,11 @@ help:
 	@echo "    make status              Show container status"
 	@echo "    make logs                Tail logs"
 	@echo "    make pull                Pull images"
+	@echo ""
+	@echo -e "  $(GREEN)Demo Third-Party Setup$(NC)"
+	@echo "    make provision-demo-users    Provision 12 demo users in Zitadel (12 person SME)"
+	@echo "    make provision-demo-users-clean  Delete + re-provision demo users"
+	@echo "    make provision-demo-users-dry    Show demo user config (JSON) without provisioning"
 	@echo ""
 	@echo -e "  $(GREEN)Testing (Spec / Contract / Test scaffold)$(NC)"
 	@echo "    make lint                Layer 0: compose-check + yaml-lint + env-check + secret-scan"

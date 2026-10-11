@@ -178,7 +178,57 @@ def main() -> int:
         check_file(f, result)
     check_deploy_script(result)
     check_env_generator(result)
+    check_demo_users(result)
     return 0 if result.summary() else 1
+
+
+def check_demo_users(result: Result) -> None:
+    """bootstrap/demo-users.json offers 12 pre-configured users for demos."""
+    DEMO_USERS = ROOT / "bootstrap" / "demo-users.json"
+    DEMO_SCRIPT = ROOT / "scripts" / "provision-demo-users.sh"
+    
+    if not DEMO_USERS.is_file():
+        result.fail("bootstrap/demo-users.json missing")
+        return
+    result.ok("bootstrap/demo-users.json present")
+    
+    # Validate JSON structure
+    import json
+    try:
+        data = json.loads(DEMO_USERS.read_text())
+    except json.JSONDecodeError as e:
+        result.fail(f"bootstrap/demo-users.json: invalid JSON: {e}")
+        return
+    result.ok("bootstrap/demo-users.json valid JSON")
+    
+    # Check required top-level keys
+    for key in ("company", "domain", "users", "groups"):
+        if key not in data:
+            result.fail(f"bootstrap/demo-users.json missing '{key}' key")
+    result.ok("bootstrap/demo-users.json has all required keys")
+    
+    users = data.get("users", [])
+    if not isinstance(users, list) or len(users) < 12:
+        result.fail(f"bootstrap/demo-users.json needs at least 12 users, has {len(users) if isinstance(users, list) else 'not a list'}")
+    else:
+        result.ok(f"bootstrap/demo-users.json: {len(users)} demo users configured")
+    
+    # Each user needs required fields
+    required_user_fields = {"username", "firstName", "lastName", "displayName", "email", "password"}
+    for i, user in enumerate(users):
+        uname = user.get("username", "unknown")
+        missing = required_user_fields - set(user.keys())
+        if missing:
+            result.fail(f"bootstrap/demo-users.json user[{i}] ({uname}): missing {missing}")
+        else:
+            result.ok(f"bootstrap/demo-users.json user[{i}] ({uname}): all required fields")
+    
+    if not DEMO_SCRIPT.is_file():
+        result.fail("scripts/provision-demo-users.sh missing")
+    elif not DEMO_SCRIPT.stat().st_mode & 0o111:
+        result.fail("scripts/provision-demo-users.sh is not executable")
+    else:
+        result.ok("scripts/provision-demo-users.sh present and executable")
 
 
 if __name__ == "__main__":
