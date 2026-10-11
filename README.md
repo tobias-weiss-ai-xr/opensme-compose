@@ -814,7 +814,7 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 | `ZITADEL_ADMIN_PASSWORD` | `CHANGEME_*` | Zitadel admin password |
 | `ZITADEL_ADMIN_EMAIL` | `admin@...` | Zitadel admin email |
 | `OC_ADMIN_PASSWORD` | `CHANGEME_*` | OpenCloud admin password |
-| `OC_OIDC_SECRET` | `CHANGEME_*` | OpenCloud ↔ Zitadel OIDC client secret |
+| `OC_OIDC_CLIENT_SECRET` | `CHANGEME_*` | OpenCloud ↔ Zitadel OIDC client secret (Zitadel-minted; also `OC_OIDC_CLIENT_ID`) |
 | `TRAEFIK_ACME_EMAIL` | `admin@...` | Let's Encrypt registration email |
 | `TRAEFIK_USERS` | `admin:$$apr1$$...` | Traefik dashboard basic-auth (htpasswd) |
 | `NOSDESK_DB_PASSWORD` | `CHANGEME_*` | Nosdesk ticketing DB password (required for `--profile ticketing`) |
@@ -1046,7 +1046,9 @@ Zitadel has a built-in project/app management UI at
 2. Navigate to **Projects** → **opensme** → **Applications**
 3. Create a new application with redirect URI
    `https://cloud.your-domain` (no trailing slash)
-4. Copy the client ID and secret into `.env` as `OC_OIDC_CLIENT_ID` / `OC_OIDC_SECRET`
+4. Copy the client ID and secret into `.env` as `OC_OIDC_CLIENT_ID` / `OC_OIDC_CLIENT_SECRET`
+   (scripts/zitadel-client.sh does this automatically; legacy `OC_OIDC_SECRET`
+   is only kept as an alias for older `.env` files)
 
 </details>
 
