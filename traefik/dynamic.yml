@@ -10,16 +10,3 @@ http:
       headers:
         customResponseHeaders:
           Strict-Transport-Security: "max-age=31536000"
-# ── BEGIN MAILCOW ROUTER (managed by scripts/mailcow.sh) ──
-  routers:
-    mailcow-ui:
-      rule: "Host(`mail.opensme.local`)"
-      entrypoints: [websecure]
-      service: mailcow-web
-      tls: {}
-  services:
-    mailcow-web:
-      loadBalancer:
-        servers:
-          - url: "http://nginx-mailcow:28080"
-# ── END MAILCOW ROUTER ──
