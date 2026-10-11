@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 mod feeds;
 mod intercom;
+mod logout;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -732,7 +733,9 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/announcements", get(handle_announcements))
         .route("/api/feeds", get(handle_feeds))
         .route("/api/intercom", get(handle_intercom_list))
-        .route("/api/intercom", post(handle_intercom_post));
+        .route("/api/intercom", post(handle_intercom_post))
+        .route("/api/logout", post(logout::handle_logout))
+        .route("/logged-out", get(logout::handle_logged_out));
 
     if config.ai.is_some() {
         router = router.route("/api/ai/chat", post(handle_ai_chat));
@@ -958,7 +961,11 @@ async fn main() {
 mod tests {
     use super::*;
 
-    fn cfg_with(ticketing: &str, ai: Option<AiConfig>, announcements: &str) -> AppConfig {
+    pub(crate) fn cfg_with(
+        ticketing: &str,
+        ai: Option<AiConfig>,
+        announcements: &str,
+    ) -> AppConfig {
         AppConfig {
             opencloud_url: "https://cloud.example".into(),
             mail_url: String::new(),
