@@ -492,7 +492,8 @@ openSME-compose/
 │   ├── backup.sh              # Backup PostgreSQL + Traefik + volumes
 │   ├── restore.sh             # Restore from backup
 │   ├── zitadel-client.sh      # Idempotent OIDC client registration for OpenCloud
-│   └── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
+│   ├── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
+│   └── provision-demo-users.sh # Provision 12 demo users in Zitadel (12 person SME)
 ├── postgres-init/
 │   ├── 00-create-databases.sql # Auto-creates 7 databases on first start
 │   └── 01-create-users.sh      # Per-service database users
@@ -941,6 +942,12 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
   Human-readable seed documents (onboarding, charter, decision records)
   are in `bootstrap/seed-content/` — see its README for how to load them
   into the Cloud / Paperless / Team Notes.
+  
+  **Demo Users:** Provision 12 pre-configured users in Zitadel for demo purposes
+  (`12 person SME Company`): run `make provision-demo-users` (uses the
+  machine PAT from `idm/secrets/masterkey`). Configuration in
+  `bootstrap/demo-users.json`; Use `--clean` to remove existing users first,
+  or `--dry-run` to print the user JSON without provisioning.
 - **crap-cms** (`--profile cms`): alpha software; upstream publishes
   `:latest` only (no semver tags yet — pin via `CMS_IMAGE` once they do).
   First login: `admin@crap.studio` / `admin123` — **change immediately**.
