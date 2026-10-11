@@ -497,7 +497,7 @@ openSME-compose/
 
 ## Development
 
-The Portal is a Rust application using [Axum](https://axum.rs/):
+The Portal is a Rust application using [Axum](https://axum.rs/). It provides the landing page, ⌘K fast-switch, optional service cards, AI assistant, RSS feeds, and a built-in intercom for short internal notes with cloud-attachment metadata (in-memory store, capped at 50 messages).
 
 ```bash
 cd portal
@@ -519,6 +519,8 @@ Environment variables for local development:
 | `BPM_URL` | *(empty — card hidden)* | Workflow (Operaton) card — set to `https://bpm.<domain>` with `--profile camunda` |
 | `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON banner array (`info`/`warn`) |
 | `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | AI assistant (OpenAI-compatible `/v1/chat/completions`) — `AI_API_URL=http://ai:8080` with `--profile ai` |
+| `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400) |
+| `INTERCOM_ALLOW_HTTP` | `false` | Dev mode: allow http:// attachment URLs — NEVER enable in production (SSRF risk) |
 
 ### Code quality
 
