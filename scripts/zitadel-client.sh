@@ -278,22 +278,31 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 # ── 1) readiness + auth probe via the proven project-search endpoint ────────
+# Docker's health state goes green slightly before the management API answers:
+# right after `zitadel setup` the _search route can still return 404 for a
+# short window, so transient failures (connect / 404 / 5xx) are retried and
+# only credential errors (401/403) abort immediately.
 projects_json=""
-if ! projects_json="$(api POST /management/v1/projects/_search '{}')"; then
-  warn "IdP not reachable at ${IDP_URL} — skipping OIDC client registration."
+code=""
+for _ in $(seq 1 24); do
+  if projects_json="$(api POST /management/v1/projects/_search '{}' 2>/dev/null)"; then
+    code="$(api_http)"
+    [[ "$code" == "200" ]] && break
+    [[ "$code" == "401" || "$code" == "403" ]] && break
+  fi
+  sleep 5
+done
+if [[ "$code" == "200" ]]; then
+  :  # ready
+elif [[ "$code" == "401" || "$code" == "403" ]]; then
+  err "Zitadel rejected the machine PAT (HTTP ${code}). Check /machinekey/pat."
+  exit 1
+else
+  warn "IdP management API not ready at ${IDP_URL} after retries" \
+       "(last HTTP ${code:-no-response})."
   warn "Start the stack first (./scripts/demo.sh or make up), then rerun this script."
   exit 0
 fi
-code="$(api_http)"
-case "$code" in
-  200) ;;
-  401|403)
-    err "Zitadel rejected the machine PAT (HTTP ${code}). Check /machinekey/pat."
-    exit 1 ;;
-  *)
-    err "Unexpected HTTP ${code} from the IdP management API."
-    exit 1 ;;
-esac
 
 # ── 2) idempotent lookup by persisted client id, then by app name ───────────
 FOUND_PROJECT=""

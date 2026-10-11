@@ -261,6 +261,19 @@ docker compose \
   --profile standalone \
   up -d --build
 
+# Traefik was started early (above) so the IdP edge exists for the OIDC
+# client registration, but the Docker provider does not always pick up
+# containers that join the network AFTER traefik itself (portal/opencloud
+# -> 404 on their https routes until traefik re-evaluates). Force one
+# clean reload so every late-starting service is routed.
+docker compose \
+  -f docker-compose.yml \
+  -f idm/zitadel.yml \
+  -f opencloud/opencloud.yml \
+  -f profiles/demo.dev.yml \
+  --profile standalone \
+  restart traefik
+
 echo ""
 ok "openSME Demo is running!"
 
