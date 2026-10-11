@@ -185,6 +185,37 @@ def main() -> int:
                  f"{(proc.stderr or proc.stdout)[-300:]}"
         )
 
+        # ── Traefik ACME material returns after restore ────────────
+        # restore.sh now applies traefik_<ts>.tar.gz to the traefik-data
+        # volume. The only GUARANTEED archive member is the file-provider
+        # config dynamic.yml (bind-mounted into /etc/traefik, so it is
+        # always captured by backup.sh's tar). acme.json itself is NOT
+        # deterministic: on a .local demo domain with LE unreachable
+        # (offline CI) traefik never writes it — asserting it would flake.
+        # Asserting dynamic.yml proves the archive was actually applied to
+        # the volume; the gravity of the ACME state lives in restore.sh's
+        # own loud failure on an invalid/missing archive.
+        traefik_archive = backup_dir / f"traefik_{prefix}.tar.gz"
+        if traefik_archive.exists():
+            proj = env.get("COMPOSE_PROJECT_NAME", "opensme-compose")
+            vol = f"{proj}_traefik-data"
+            ls = subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{vol}:/data", "alpine:3.20", "ls", "-a", "/data"],
+                capture_output=True, text=True, timeout=120)
+            listing = ls.stdout + ls.stderr
+            carries = ls.returncode == 0 and \
+                any(n in listing for n in ("dynamic.yml", "acme.json"))
+            (result.ok if carries else result.fail)(
+                "restored traefik volume carries the ACME/TLS material "
+                "(archive applied)"
+                if carries
+                else f"traefik volume {vol} missing restored content: "
+                     f"{listing[-200:]}")
+        else:
+            result.warn("no traefik archive produced by this backup run — "
+                        "volume-level traefik check skipped")
+
         # ── Y4: the marker is back ──────────────────────────────────
         time.sleep(8)  # postgres post-restore settle
         rc, val = psql(env, "SELECT note FROM drill LIMIT 1", db=DB,

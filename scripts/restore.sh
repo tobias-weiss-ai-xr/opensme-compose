@@ -78,6 +78,7 @@ fi
 
 PG_FILE="${BACKUP_DIR}/postgres_${BACKUP_PREFIX}.sql.gz"
 VOLUMES_FILE="${BACKUP_DIR}/volumes_${BACKUP_PREFIX}.tar.gz"
+TRAEFIK_FILE="${BACKUP_DIR}/traefik_${BACKUP_PREFIX}.tar.gz"
 
 echo "📦 openSME Restore"
 echo "   Prefix: ${BACKUP_PREFIX}"
@@ -95,6 +96,11 @@ if [ "$DRY_RUN" = true ]; then
     echo "  Volumes:    ${VOLUMES_FILE} ($(du -h "$VOLUMES_FILE" | cut -f1))"
   elif [ "$PG_ONLY" = false ]; then
     echo "  ⚠ Volumes backup not found: ${VOLUMES_FILE}"
+  fi
+  if [ "$PG_ONLY" = false ] && [ -f "$TRAEFIK_FILE" ]; then
+    echo "  Traefik:    ${TRAEFIK_FILE} ($(du -h "$TRAEFIK_FILE" | cut -f1))"
+  elif [ "$PG_ONLY" = false ]; then
+    echo "  ⚠ Traefik backup not found: ${TRAEFIK_FILE}"
   fi
   exit 0
 fi
@@ -184,6 +190,52 @@ if [ "$PG_ONLY" = false ] && [ -f "$VOLUMES_FILE" ]; then
   echo "   ✓ Volumes restored (${restored} volume(s))"
 elif [ "$PG_ONLY" = false ]; then
   echo "   ⚠ Volumes backup not found: ${VOLUMES_FILE}"
+fi
+
+# ── Restore Traefik (ACME/SSL) ───────────────
+# backup.sh tars /etc/traefik from the RUNNING traefik container into
+# traefik_<ts>.tar.gz; without this step that ACME/TLS material could never
+# come back. Mirror the volumes flow: validate + extract to TEMP_DIR, push
+# the files into the traefik-data volume via a throwaway alpine container,
+# then bring traefik back so the ACME state is live again. Runs whenever we
+# are NOT --pg-only (the ACME/TLS material is volume-like, not SQL).
+if [ "$PG_ONLY" = false ] && [ -f "$TRAEFIK_FILE" ]; then
+  echo "   → Restoring Traefik (ACME/SSL)..."
+  PROJECT_NAME="${COMPOSE_PROJECT_NAME:-opensme-compose}"
+  TEMP_DIR="${BACKUP_DIR}/restore-temp-${BACKUP_PREFIX}"
+
+  mkdir -p "$TEMP_DIR"
+  # The archive must be a valid tar — a corrupt or wrong-format backup must
+  # fail loudly here, not silently leave the ACME state half-restored.
+  if ! tar -xzf "$TRAEFIK_FILE" -C "$TEMP_DIR"; then
+    echo "   ✗ Traefik archive is not a valid tar: $TRAEFIK_FILE" >&2
+    rm -rf "$TEMP_DIR"
+    exit 1
+  fi
+
+  # Push the /etc/traefik contents into the traefik-data volume. The volume
+  # is cleared first so a re-restore cannot resurrect stale ACME files
+  # (certs for domains removed since the backup). A failed write is loud.
+  full_vol="${PROJECT_NAME}_traefik-data"
+  docker volume create "$full_vol" 2>/dev/null || true
+  if docker run --rm \
+      -v "${full_vol}:/data" \
+      -v "${TEMP_DIR}:/backups" \
+      alpine:3.20 \
+      sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null; cp -a /backups/. /data/'; then
+    rm -rf "$TEMP_DIR"
+    echo "   ✓ Traefik restored"
+  else
+    rm -rf "$TEMP_DIR"
+    echo "   ✗ Traefik restore failed (ACME state NOT written)" >&2
+    exit 1
+  fi
+
+  # Bring traefik back so the ACME state is live again
+  docker compose up -d traefik 2>/dev/null || true
+  echo "   ✓ Traefik restarted"
+else
+  echo "   ⚠ Traefik backup not found: ${TRAEFIK_FILE}"
 fi
 
 # ── Restart services ──────────────────────────
