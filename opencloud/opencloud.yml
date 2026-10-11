@@ -64,7 +64,11 @@ services:
       OC_IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
       OC_OIDC_ISSUER: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
       OC_OIDC_CLIENT_ID: ${OC_OIDC_CLIENT_ID:-opencloud}
-      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_SECRET:-CHANGEME_oidc_secret}
+      # The persistent OIDC client is registered by scripts/zitadel-client.sh
+      # (idempotent, first demo boot); it writes the Zitadel-issued secret into
+      # .env as OC_OIDC_CLIENT_SECRET. OC_OIDC_SECRET is kept as a legacy
+      # fallback for older .env files / overlay consumers.
+      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:-${OC_OIDC_SECRET:-CHANGEME_oidc_client}}
       PROXY_ROLE_ASSIGNMENT_DRIVER: oidc
       # Local POSIX filesystem backend (no MinIO/S3 required).
       OC_STORAGE_USERS_DRIVER: ocis

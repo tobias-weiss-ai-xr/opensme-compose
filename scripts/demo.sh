@@ -105,7 +105,7 @@ LDAP_ADMIN_PASSWORD=$(pw)
 LDAP_USER_PASSWORD=$(pw)
 ZITADEL_ADMIN_PASSWORD=$(pw)
 OC_ADMIN_PASSWORD=$(pw)
-OC_OIDC_SECRET=$(pw)
+OC_OIDC_CLIENT_SECRET=$(pw)
 OC_S3_SECRET_KEY=$(pw)
 COLLABORA_PASSWORD=$(pw)
 NOSDESK_DB_PASSWORD=$(pw)
@@ -147,6 +147,14 @@ if ! grep -q '^NOSDESK_MFA_KEK=' .env; then
 fi
 # Older .env files stored a bare apr1 hash; Traefik basicauth needs
 # 'user:hash' — regenerate so the dashboard is actually usable.
+# OpenCloud <-> Zitadel OIDC client secret. scripts/zitadel-client.sh replaces
+# this with the Zitadel-issued secret on the first boot that registers the
+# persistent OIDC client; keeping it present prevents the CHANGEME fallback.
+if ! grep -q '^OC_OIDC_CLIENT_SECRET=' .env; then
+  printf '\nOC_OIDC_CLIENT_SECRET=%s\n' "$(pw)" >> .env
+  ok "Appended OC_OIDC_CLIENT_SECRET to existing .env (new required var)"
+fi
+
 TU_VAL=$(grep -m1 '^TRAEFIK_USERS=' .env | cut -d= -f2-)
 if [[ "$TU_VAL" != *:* ]]; then
   TRAEFIK_PASS=$(pw)
@@ -206,6 +214,38 @@ docker compose "${CF[@]}" run --rm zitadel init
 if ! docker compose "${CF[@]}" run --rm --user 0:0 zitadel setup --masterkeyFile /secrets/masterkey --steps /steps.yaml; then
   err "Zitadel setup failed — check the logs above"
   exit 1
+fi
+
+# ── Register the persistent OpenCloud OIDC client (idempotent) ──
+# OpenCloud logs in through Zitadel; without a registered OIDC client the web
+# login is a dead end. The IdP (and the Traefik edge it sits behind) is started
+# BEFORE the rest of the stack so the registration finishes before OpenCloud's
+# first boot: the script writes the Zitadel-issued client id + secret into .env,
+# which the full `up` below then passes to the opencloud container. Idempotent
+# and cheap: on revisits the script reports "already registered" and exits 0.
+info "Starting the IdP (Zitadel) ahead of the rest of the stack..."
+docker compose "${CF[@]}" up -d traefik zitadel
+IDP_READY="no"
+for _ in $(seq 1 60); do
+  # container-health == the /debug/ready healthcheck passing inside the image
+  st=$(docker compose "${CF[@]}" ps --format json zitadel 2>/dev/null || true)
+  if printf '%s' "$st" | grep -qi '"health":"healthy"'; then
+    IDP_READY="yes"; break
+  fi
+  # bail early if the container died (don't spin the full 5 minutes)
+  if printf '%s' "$st" | grep -qEi '"state":"(exited|dead|removed)"'; then
+    break
+  fi
+  sleep 5
+done
+if [[ "$IDP_READY" == "yes" ]]; then
+  info "Registering the persistent OpenCloud OIDC client in Zitadel (idempotent)..."
+  if ! "${SCRIPT_DIR}/zitadel-client.sh"; then
+    warn "OIDC client registration failed — see the message above (the e2e suite degrades to a warning)"
+  fi
+else
+  warn "Zitadel did not become healthy — skipping OIDC client registration"
+  warn "(web login against the IdP would fail; the e2e suite degrades to a warning)"
 fi
 
 # ── Build and start ──────────────────────────
