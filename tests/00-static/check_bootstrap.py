@@ -286,10 +286,11 @@ def check_demo_users(result: Result) -> None:
     result.ok("bootstrap/demo-users.json valid JSON")
     
     # Check required top-level keys
-    for key in ("company", "domain", "users", "groups"):
-        if key not in data:
-            result.fail(f"bootstrap/demo-users.json missing '{key}' key")
-    result.ok("bootstrap/demo-users.json has all required keys")
+    missing_keys = [k for k in ("company", "domain", "users", "groups") if k not in data]
+    if missing_keys:
+        result.fail(f"bootstrap/demo-users.json missing top-level key(s): {missing_keys}")
+    else:
+        result.ok("bootstrap/demo-users.json has all required top-level keys")
 
     users = data.get("users", [])
     if not isinstance(users, list) or len(users) < 12:
