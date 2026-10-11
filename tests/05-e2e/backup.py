@@ -95,6 +95,23 @@ def main() -> int:
         except (tarfile.TarError, EOFError) as e:
             result.fail(f"Traefik archive corrupt: {e}")
 
+        # K4: the restore plan covers the Traefik archive — backup.sh writes
+        # traefik_<ts>.tar.gz, so restore.sh MUST offer it back in its dry-run
+        # plan. The dry-run needs no stack state, only the archive files in
+        # BACKUP_DIR, so this pins the round trip without a live stack.
+        traefik_name = tgz_files[-1].name
+        prefix = traefik_name[len("traefik_"):-len(".tar.gz")]
+        dry = subprocess.run(
+            ["bash", "scripts/restore.sh", "--dry-run", prefix],
+            cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
+        plan = dry.stdout + dry.stderr
+        covers = dry.returncode == 0 and traefik_name in plan
+        (result.ok if covers else result.fail)(
+            "restore plan covers the traefik archive"
+            if covers
+            else f"restore.sh --dry-run does not list the traefik archive "
+                 f"(rc={dry.returncode}): {plan[-300:]}")
+
         # restore sanity: gunzip integrity (CRC check over the whole stream)
         try:
             with gzip.open(sql_files[-1], "rb") as fh:
