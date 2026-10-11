@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 mod feeds;
 mod intercom;
+mod metrics;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -587,6 +588,31 @@ async fn handle_health() -> impl IntoResponse {
     Json(serde_json::json!({"status": "ok"}))
 }
 
+/// Prometheus scrape endpoint (text exposition format).
+async fn handle_metrics() -> impl IntoResponse {
+    match metrics::global().render() {
+        Ok(body) => (
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
+            body,
+        ),
+        Err(e) => {
+            warn!(%e, "metrics render failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                )],
+                format!("metrics gather error: {e}"),
+            )
+        }
+    }
+}
+
 async fn handle_services(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
     let services = get_services(&config);
     Json(serde_json::json!({ "services": services }))
@@ -718,6 +744,32 @@ async fn security_headers(
     res
 }
 
+/// Prometheus instrumentation for every served request: one counter
+/// increment + one latency observation, labelled by method, matched route
+/// and status code (see metrics.rs).
+async fn track_metrics(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let start = std::time::Instant::now();
+    let method = request.method().to_string();
+    // MatchedPath is populated by routing before router-level middleware
+    // runs, so the route label is the route pattern, not the raw URI.
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let response = next.run(request).await;
+    metrics::global().record_request(
+        &method,
+        &route,
+        response.status().as_u16(),
+        start.elapsed().as_secs_f64(),
+    );
+    response
+}
+
 fn build_router(config: Arc<AppConfig>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -739,7 +791,9 @@ fn build_router(config: Arc<AppConfig>) -> Router {
     }
 
     router
+        .route("/metrics", get(handle_metrics))
         .layer(middleware::from_fn(security_headers))
+        .layer(middleware::from_fn(track_metrics))
         .layer(cors)
         .with_state(config)
 }
@@ -822,6 +876,7 @@ async fn handle_intercom_post(
     };
 
     let msg = config.intercom_store.push(text, attachment);
+    metrics::global().inc_intercom_message();
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "message": msg })),
@@ -1557,5 +1612,70 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── Prometheus /metrics ─────────────────────────────────────────
+
+    async fn metrics_body() -> String {
+        let resp = respond(cfg_with("", None, ""), "GET", "/metrics", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("metrics body is UTF-8")
+    }
+
+    fn metric_value(body: &str, name: &str) -> u64 {
+        body.lines()
+            .find_map(|line| {
+                let rest = line.strip_prefix(name)?.strip_prefix(' ')?;
+                rest.parse().ok()
+            })
+            .expect("metric line present")
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_exposes_all_families() {
+        let body = metrics_body().await;
+        for name in [
+            "http_requests_total",
+            "http_request_duration_seconds",
+            "active_sessions",
+            "intercom_messages_total",
+            "sso_logins_total",
+            "sso_login_failures_total",
+        ] {
+            assert!(body.contains(name), "{name} missing from /metrics");
+        }
+        // the /metrics scrape itself is counted (middleware is active)
+        assert!(
+            body.contains("http_requests_total{method=\"GET\",route=\"/metrics\",status=\"200\"}")
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_observe_regular_requests_too() {
+        let resp = respond(cfg_with("", None, ""), "GET", "/health", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = metrics_body().await;
+        assert!(
+            body.contains("http_requests_total{method=\"GET\",route=\"/health\",status=\"200\"}")
+        );
+    }
+
+    #[tokio::test]
+    async fn intercom_post_increments_intercom_counter() {
+        let before = metric_value(&metrics_body().await, "intercom_messages_total");
+        let resp = respond(
+            cfg_with("", None, ""),
+            "POST",
+            "/api/intercom",
+            Some(serde_json::json!({ "text": "count me" })),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let after = metric_value(&metrics_body().await, "intercom_messages_total");
+        assert!(
+            after > before,
+            "intercom counter should increase: {before} -> {after}"
+        );
     }
 }
