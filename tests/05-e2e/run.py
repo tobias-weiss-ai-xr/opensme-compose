@@ -877,7 +877,10 @@ def section_user_lifecycle(result: Result, session, disc: dict, client_id: str,
     # 1) provision: create the user WITH their initial password
     uid, pw = _provision_user(session, idp_base, pat, uname)
     if not uid:
-        result.fail(f"user provisioning failed: {str(j)[:100]}")
+        # `j` is local to _provision_user — never reference it here (NameError
+        # on the failure path would mask the real diagnosis).
+        result.fail("user provisioning failed: POST /v2/users/human returned "
+                    "no userId")
         return
     result.ok(f"provisioned identity {uname} ({uid})")
 

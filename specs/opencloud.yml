@@ -18,7 +18,8 @@ services:
       - OPENCLOUD_DOMAIN
       - OC_ADMIN_USERNAME
       - OC_ADMIN_PASSWORD
-      - OC_OIDC_SECRET
+      - OC_OIDC_CLIENT_ID       # Zitadel-minted, persisted by scripts/zitadel-client.sh
+      - OC_OIDC_CLIENT_SECRET   # canonical key (OC_OIDC_SECRET kept as legacy alias only)
       - OC_S3_ENDPOINT
       - OC_S3_ACCESS_KEY
       - OC_S3_SECRET_KEY

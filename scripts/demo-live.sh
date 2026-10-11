@@ -117,7 +117,7 @@ ZITADEL_ADMIN_PASSWORD=$(pw)
 # ── OpenCloud ──
 OC_ADMIN_USERNAME=admin
 OC_ADMIN_PASSWORD=$(pw)
-OC_OIDC_SECRET=$(pw)
+OC_OIDC_CLIENT_SECRET=$(pw)   # canonical key; opencloud.yml keeps OC_OIDC_SECRET as legacy alias
 
 # ── Portal (empty = hidden from landing page) ──
 MAIL_URL=
