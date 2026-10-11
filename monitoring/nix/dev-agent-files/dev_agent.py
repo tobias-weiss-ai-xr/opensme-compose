@@ -28,7 +28,7 @@ from collections import deque
 # ─── Configuration ────────────────────────────────────────────────────────────
 OPERATOR_NAME = os.environ.get("OPERATOR_NAME", "opensme-dev-agent")
 OPERATOR_NAMESPACE = os.environ.get("OPERATOR_NAMESPACE", "opensme")
-OPERATOR_VERSION = "3.1.0-docker"
+OPERATOR_VERSION = os.environ.get("OPERATOR_VERSION", "3.1.0-docker")
 WATCH_NAMESPACES = os.environ.get("OPERATOR_WATCH_NAMESPACES", "opensme,default").split(",")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3-30b-a3b:latest")
@@ -40,6 +40,10 @@ MAX_PODS_PER_CYCLE = int(os.environ.get("MAX_PODS_PER_CYCLE", "3"))
 LOG_VERBOSITY = os.environ.get("LOG_VERBOSITY", "info")
 HISTORY_FILE = os.environ.get("HISTORY_FILE", "/var/lib/opensme/analysis-history.json")
 HISTORY_MAX = int(os.environ.get("HISTORY_MAX", "100"))
+# Upper bound on in-memory analysis cache entries. Entries are normally
+# dropped when they expire on lookup, but keys that are never looked up
+# again would otherwise accumulate forever on a long-running agent.
+CACHE_MAX_ENTRIES = int(os.environ.get("CACHE_MAX_ENTRIES", "500"))
 # All HTTP endpoints (probes + metrics + API) share one server on this port.
 METRICS_PORT = int(os.environ.get("OPERATOR_METRICS_BIND_ADDRESS", "0.0.0.0:8080").split(":")[-1])
 
@@ -56,11 +60,17 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
 # Unhealthy container statuses (Docker)
+# Note: Docker's health "starting" state is transient during the healthcheck
+# start-period — a container still warming up is NOT unhealthy. Flagging it
+# fires false-positive LLM analyses on every normal container start, so it is
+# deliberately excluded (matches the documented intent: exited, restarting,
+# unhealthy, OOMKilled); a container that never becomes healthy transitions
+# to "unhealthy" once its start-period elapses and is then caught.
 UNHEALTHY_STATUSES = {
     "exited", "restarting", "dead", "removing",
 }
 UNHEALTHY_HEALTH = {
-    "unhealthy", "starting",
+    "unhealthy",
 }
 
 # Statuses where logs are typically empty or unhelpful
@@ -367,6 +377,13 @@ def set_cached(key, analysis):
     ttl = ANALYSIS_TTL
     if len(analysis_cache) > 10:
         ttl = min(ttl * 2, ANALYSIS_TTL_MAX)
+    # Bound memory: once the cache passes its cap, drop expired entries so
+    # stale analyses for long-forgotten containers cannot accumulate.
+    if len(analysis_cache) >= CACHE_MAX_ENTRIES:
+        now = time.time()
+        for k in [k for k, e in analysis_cache.items()
+                  if now - e.get("timestamp", 0) >= e.get("ttl", 0)]:
+            del analysis_cache[k]
     analysis_cache[key] = {
         "timestamp": time.time(),
         "analysis": analysis,
@@ -467,10 +484,13 @@ def reconcile():
 def reconcile_loop():
     """Background reconcile loop."""
     global startup_complete
-    # Warmup the LLM model
+    # Warmup the LLM model. Dispatch through call_llm() so the warmup targets
+    # the configured backend (ollama | openai | saia | tud) instead of always
+    # dialing OLLAMA_URL — previously a saia/tud/openai deployment warmed up
+    # (and possibly stalled on) the wrong endpoint before serving probes.
     t0 = time.time()
     try:
-        call_ollama("Hello", model=OLLAMA_MODEL)
+        call_llm("Hello")
     except Exception:
         pass
     model_warmup_time = time.time() - t0
@@ -533,7 +553,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def start_server():
     """Start the HTTP server in a background thread."""
     global ready
-    server = http.server.HTTPServer(("0.0.0.0", METRICS_PORT), Handler)
+    # Threading server: /status (and /metrics) run blocking `docker` CLI
+    # calls; on a single-threaded server one slow request would stall the
+    # /healthz and /ready probes past the compose healthcheck timeout.
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", METRICS_PORT), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     ready = True

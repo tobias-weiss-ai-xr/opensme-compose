@@ -52,7 +52,11 @@ services:
       OPERATOR_NAMESPACE: opensme
       OPERATOR_VERSION: "3.1.0"
       OPERATOR_LOG_LEVEL: ${LOG_LEVEL:-info}
-      OPERATOR_WATCH_NAMESPACES: ${DEV_AGENT_WATCH_NAMESPACES:-opensme-compose,default}
+      # Python observer filters by CONTAINER-NAME substring (dev_agent.py),
+      # not the compose project label — the stack's containers are named
+      # opensme-*, so the default must be "opensme" ("opensme-compose" is the
+      # Go bot's exact-match label default and would match nothing here).
+      OPERATOR_WATCH_NAMESPACES: ${DEV_AGENT_WATCH_NAMESPACES:-opensme,default}
       # LLM backend (ollama | saia | tud | openai)
       LLM_BACKEND: ${DEV_AGENT_LLM_BACKEND:-ollama}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}

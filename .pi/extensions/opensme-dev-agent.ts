@@ -12,7 +12,13 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 
 const AGENT_ID = "com.opensme.agent";
 const IMAGE = process.env.DEV_MAINTENANCE_BOT_IMAGE ?? "opensme-dev-maintenance-bot:latest";
-const STATE_VOL = "opensme_dev-maintenance-bot-state";
+// Compose prefixes named volumes with the project name — the stack's
+// verified project name is "opensme-compose" (see scripts/backup.sh), so
+// the overlay creates opensme-compose_dev-maintenance-bot-state, NOT the
+// bare "opensme_dev-maintenance-bot-state" name. Override via
+// DEV_AGENT_STATE_VOL when a custom COMPOSE_PROJECT_NAME is in use.
+const STATE_VOL =
+	process.env.DEV_AGENT_STATE_VOL ?? "opensme-compose_dev-maintenance-bot-state";
 const API_PORT = process.env.DEV_AGENT_API_PORT ?? "8082";
 
 /** Query the agent CLI against its state volume (no running container needed). */
