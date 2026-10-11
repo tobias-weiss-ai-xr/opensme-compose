@@ -478,7 +478,11 @@ openSME-compose/
 ├── portal/                     # Rust/Axum portal (service directory)
 │   ├── Cargo.toml
 │   ├── Dockerfile
-│   └── src/main.rs
+│   └── src/
+│       ├── main.rs            # Axum router, service cards, SSO wiring
+│       ├── app.js             # Frontend (HTMX + hyperscript)
+│       ├── feeds.rs           # RSS feed aggregator
+│       └── intercom.rs        # Internal notes with cloud attachment metadata
 ├── scripts/
 │   ├── init-env.sh           # Generate working .env (random secrets)
 │   ├── start.sh               # Start stack (core + zitadel + opencloud)
@@ -486,10 +490,54 @@ openSME-compose/
 │   ├── demo.sh                # One-command demo with random passwords
 │   ├── demo-live.sh           # Deploy to server with Let's Encrypt
 │   ├── backup.sh              # Backup PostgreSQL + Traefik + volumes
-│   └── restore.sh             # Restore from backup
+│   ├── restore.sh             # Restore from backup
+│   ├── zitadel-client.sh      # Idempotent OIDC client registration for OpenCloud
+│   └── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
 ├── postgres-init/
 │   ├── 00-create-databases.sql # Auto-creates 7 databases on first start
 │   └── 01-create-users.sh      # Per-service database users
+├── opensme-knowledge/           # Structured knowledge for AI agents (RAG)
+│   ├── CONTRIBUTING.md         # Knowledge contribution guidelines
+│   ├── README.md              # Knowledge base overview
+│   ├── common.json            # Common openSME terminology
+│   ├── camunda.json           # Camunda BPMN knowledge base
+│   ├── invoice-ninja.json     # Invoice Ninja knowledge
+│   ├── opencloud.json         # OpenCloud/S3 knowledge
+│   ├── operaton.json          # Operaton/BPMN knowledge
+│   ├── paperless.json         # Paperless-ngx knowledge
+│   ├── postgres.json          # PostgreSQL knowledge
+│   ├── sogo.json              # SOGo groupware knowledge
+│   ├── stalwart.json          # Stalwart mail server knowledge
+│   ├── traefik.json           # Traefik reverse proxy knowledge
+│   └── zitadel.json           # Zitadel IdP knowledge
+├── openspec/                    # OpenSpec spec-driven development
+│   ├── config.yaml             # OpenSpec configuration
+│   └── specs/                  # Service specifications (spec.md per change)
+│       ├── bpm-engine/spec.md
+│       ├── dev-agent-compose/spec.md
+│       ├── dev-agent-extensions/spec.md
+│       ├── dev-agent-knowledge/spec.md
+│       ├── dev-agent-privacy/spec.md
+│       ├── dev-agent/spec.md
+│       ├── perf-bench/spec.md
+│       ├── perf-boot/spec.md
+│       ├── perf-budgets/spec.md
+│       ├── perf-ops/spec.md
+│       └── perf-tuning/spec.md
+├── tests/                       # Automated test pyramid (layers 0-6)
+│   ├── 00-static/              # Layer 0: stack-free contract checks + secrets
+│   ├── 01-specs/               # Layer 1: spec compliance (schema + image pins)
+│   ├── 02-contracts/           # Layer 2: contract validation (networks, ports, security)
+│   ├── 03-smoke/               # Layer 3: multi-service smoke tests
+│   ├── 04-integration/         # Layer 4: integration (resilience, backup, exposure...)
+│   ├── 05-e2e/                # Layer 5: end-to-end journeys + SSO flows
+│   ├── 06-security/           # Layer 6: access scan + SSRF/attack surface
+│   ├── 07-bench/              # (optional) live-host benchmarks
+│   ├── 08-k8s/                 # (optional) Kubernetes cluster validation
+│   ├── conftest.py            # Shared test fixtures + Result helper
+│   ├── README.md              # Test pyramid documentation
+│   ├── requirements.txt       # Test dependencies
+│   └── run.py                 # layered test runner
 └── docs/
     └── assets/
         └── teaser.svg
