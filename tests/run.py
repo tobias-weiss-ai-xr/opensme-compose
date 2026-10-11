@@ -55,6 +55,7 @@ LAYERS = {
             ("Compose config gate", "tests/00-static/compose_config.py"),
             ("Platform versions (k3s/docker)", "tests/00-static/check_platform.py"),
             ("Bootstrap seed data (BPMN)", "tests/00-static/check_bootstrap.py"),
+            ("Backup/restore contract", "tests/00-static/check_backup_restore.py"),
         ],
         "requires_stack": False,
     },
