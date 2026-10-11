@@ -338,9 +338,9 @@ Each feature is a separate Docker Compose file. Combine via `COMPOSE_FILE`:
 | `idm/casdoor.yml` | Casdoor (lightweight IAM) | `auth.*` | Alternative IAM (128 MB) |
 | `opencloud/opencloud.yml` | OpenCloud + Collabora | `cloud.*`, `collabora.*` | For file sync & office |
 | `opencloud/minio.yml` | SeaweedFS (S3 storage) | `minio.*` | For production (not needed for `ocis` storage) |
-| `mail/stalwart.yml` | Stalwart Mail Server | `mail.*` | For email |
-| `mail/sogo.yml` | SOGo Groupware | `webmail.*` | For webmail / calendar |
-| `mail/mailcow-dockerized` (submodule) | Full mailcow stack (mail + groupware) | `mail.*` | The all-in-one mail option — see below |
+| `mail/stalwart.yml` | Stalwart Mail Server | `mail.*` | Default mail backend (`MAIL_BACKEND=stalwart`) |
+| `mail/sogo.yml` | SOGo Groupware | `webmail.*` | Default mail backend (`MAIL_BACKEND=stalwart`) |
+| `mail/mailcow-dockerized` (submodule) | Full mailcow stack (mail + groupware) | `mail.*` | **Alternative** backend (`MAIL_BACKEND=mailcow`) — strict XOR, see below |
 | `services/invoice-ninja.yml` | Invoice Ninja | `invoices.*` | For invoicing (`--profile invoice`) |
 | `services/paperless.yml` | Paperless-ngx + Gotenberg + Tika | `paperless.*` | For document management (`--profile paperless`) |
 | `services/cryptpad.yml` | CryptPad | `pad.*` | For collaborative docs (`--profile collab`) |
@@ -363,27 +363,48 @@ Each feature is a separate Docker Compose file. Combine via `COMPOSE_FILE`:
 | `monitoring/ollama.yml` | Ollama | — | Local LLM for agents |
 | `monitoring/taskfleet.yml` | taskfleet | — | Parallel LLM task orchestration |
 
-### Mailcow (full mail server, git submodule)
+### Mail backend switch — Stalwart ↔ mailcow (strict XOR)
 
-For a complete mail + groupware stack in one move, openSME ships the
-upstream [mailcow-dockerized](https://github.com/mailcow/mailcow-dockerized)
-as a pinned git submodule (`mail/mailcow-dockerized` — GPL-3.0 in its own
-tree, nothing copied into this repository). It supersedes the thin
-Stalwart+SOGo overlays when you want Dovecot/Postfix/Rspamd/SOGo with a
-batteries-included admin UI:
+The stack runs **one mail backend at a time**, selected with
+`MAIL_BACKEND=stalwart|mailcow` in `.env` (default `stalwart`). The two are
+**strictly exclusive** — both would fight over `mail.*` on the Traefik edge
+and the SMTP/IMAP host ports — so the boot paths guard the switch:
+`make up` and `scripts/mailcow.sh` refuse a conflicting combination
+(pinned by `tests/00-static/check_mail_backend.py`).
+
+| | Stalwart + SOGo (default) | mailcow (submodule) |
+|---|---|---|
+| **What you get** | SMTP/IMAP (Stalwart, Rust) + webmail/calendar (SOGo) | Full mailcow: Dovecot/Postfix/Rspamd/SOGo + admin UI |
+| **Footprint** | ~200 MB | ~2 GB extra RAM (demo-lean: ClamAV / full-text off) |
+| **License** | Apache-2.0 tree (upstreams in their own licenses) | GPL-3.0 tree (vendored submodule, nothing copied in) |
+| **Admin surface** | Stalwart config + SOGo | mailcow web admin (through the edge) |
+| **When to choose** | Lean default, minimal moving parts | Batteries-included admin UI, full-featured |
 
 ```bash
+# Default backend (stalwart) — plain overlays, see "Add features (overlays)"
+export COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:mail/stalwart.yml:mail/sogo.yml"
+docker compose up -d
+
+# mailcow — switch, then drive the submodule via the make targets
+# .env:  MAIL_BACKEND=mailcow
 git submodule update --init mail/mailcow-dockerized
-scripts/mailcow.sh up mail.example.org    # renders conf, boots, wires Traefik
-scripts/mailcow.sh down                   # unwires router, stops — core untouched
+make mailcow-up            # renders conf, boots, wires Traefik (scripts/mailcow.sh up)
+make mailcow-status        # health overview
+make mailcow-down          # stops + unwires — core untouched
+make mailcow-purge         # ... and destroys the mail volumes (⚠ data loss)
+
+# back to the default backend (requires MAIL_BACKEND=stalwart or unset)
+export COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:mail/stalwart.yml:mail/sogo.yml"
+docker compose up -d
 ```
 
 TLS stays at the openSME Traefik; mailcow's own ACME is disabled and the
 UI is only reachable through the edge. Secrets live in the gitignored
 `mail/mailcow.conf` (rendered from `.env`). On hosts booted with
 `ipv6.disable=1` the wrapper automatically patches mailcow's dual-stack
-listeners to IPv4. Note ~2 GB extra RAM with the demo-lean defaults
-(ClamAV / full-text search off); E2E journey: `tests/05-e2e/mailcow_journey.py`.
+listeners to IPv4. mailcow boots its own dedicated E2E job in CI
+(`.github/workflows/mailcow.yml`) and the delivery-round-trip journey
+`tests/05-e2e/mailcow_journey.py`.
 
 ### Docker Compose file order
 
@@ -810,6 +831,7 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 | `OPENSME_DOMAIN` | `opensme.graphwiz.ai` | Root domain shared by all services |
 | `PORTAL_DOMAIN` | `home.opensme.graphwiz.ai` | Portal hostname |
 | `ZITADEL_DOMAIN` | `auth.opensme.graphwiz.ai` | SSO hostname |
+| `MAIL_BACKEND` | `stalwart` | Mail backend switch — `stalwart` (Stalwart+SOGo overlays, default) or `mailcow` (pinned submodule via `make mailcow-up`). Strict XOR. |
 | `POSTGRES_PASSWORD` | `CHANGEME_*` | PostgreSQL superuser password |
 | `ZITADEL_ADMIN_PASSWORD` | `CHANGEME_*` | Zitadel admin password |
 | `ZITADEL_ADMIN_EMAIL` | `admin@...` | Zitadel admin email |
@@ -930,8 +952,9 @@ make restore-from BACKUP=<ts>  # Restore from backup
 | `scripts/init-env.sh` | Generate a working `.env` from `.env.example` (random secrets; refuses to clobber) |
 | `scripts/demo.sh` | Launch minimal demo with random passwords (boots + prints health summary) |
 | `scripts/demo-live.sh` | Deploy to server with Let's Encrypt |
-| `scripts/backup.sh` | Backup PostgreSQL + Traefik + volumes (`--volumes`, `--dry-run`, `--services`) |
-| `scripts/restore.sh` | Restore from backup (`--list`, `--pg-only`, `--volumes-only`) |
+| `scripts/backup.sh` | Backup PostgreSQL + Traefik + volumes (`--volumes`, `--dry-run`, `--no-stop`, `--services`) |
+| `scripts/restore.sh` | Restore from backup (`--list`, `--dry-run`, `--pg-only`, `--volumes-only`) |
+| `scripts/mailcow.sh` | Drive the mailcow mail backend (pinned submodule; requires `MAIL_BACKEND=mailcow` — strict XOR with Stalwart) |
 | `bootstrap/bpmn-deploy.sh` | Deploy sample BPMN processes to the Operaton engine |
 
 ## Backup &amp; Restore

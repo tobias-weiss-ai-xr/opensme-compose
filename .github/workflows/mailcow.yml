@@ -1,20 +1,15 @@
 name: E2E — mailcow (full mail server)
 
-# Heavy opt-in job for the mailcow integration (git submodule, pinned to
-# an upstream release). The main CI workflow stays fast; this one pays for
-# the ~1.5 GB image pull and the extra ~2 GB RAM of a real mail stack.
+# First-class mail backend under MAIL_BACKEND=mailcow: this job runs on
+# every push to main (like the main CI) and pays for the ~1.5 GB image
+# pull + ~2 GB RAM of a real mail stack, so the mailcow path cannot rot
+# silently while only the Stalwart path is exercised.
 # ubuntu-latest runners have IPv6 in the kernel (mailcow needs it) and
 # free SMTP/IMAP ports, so no host preparation is required.
 
 on:
   push:
     branches: [main, feat/mailcow]
-    paths:
-      - "mail/**"
-      - "scripts/mailcow.sh"
-      - "tests/05-e2e/mailcow_journey.py"
-      - "tests/05-e2e/exposure.py"
-      - ".github/workflows/mailcow.yml"
   workflow_dispatch:
 
 permissions:
@@ -60,6 +55,7 @@ jobs:
         env:
           OPENSME_DOMAIN: opensme.local
           MAILCOW_HOSTNAME: mail.opensme.local
+          MAIL_BACKEND: mailcow
         run: bash scripts/mailcow.sh up mail.opensme.local
 
       - name: Wait for mailcow web UI

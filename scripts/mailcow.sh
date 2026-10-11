@@ -56,6 +56,27 @@ die()  { echo "${RED}✗${NC} $*" >&2; exit 1; }
 MAILCOW_HOSTNAME="${MAILCOW_HOSTNAME:-mail.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}"
 MAIL_DOMAIN="${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
 
+# ── strict backend XOR ────────────────────────────────────────────
+# Only one mail stack at a time: mailcow and Stalwart(+SOGo) would both
+# claim mail.* on the edge and the SMTP/IMAP host ports. The switch is
+# `MAIL_BACKEND=stalwart|mailcow` in .env (default: stalwart); mailcow.sh
+# refuses to boot unless the switch says mailcow and Stalwart/SOGo are
+# not running.
+backend_switch_ok() {
+  local b="${MAIL_BACKEND:-}"
+  if [[ -z "$b" && -f "${REPO_DIR}/.env" ]]; then
+    b="$(grep -E '^MAIL_BACKEND=' "${REPO_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2)"
+  fi
+  if [[ "$b" != "mailcow" ]]; then
+    die "mail backend switch: MAIL_BACKEND=${b:-<unset>} — mailcow requires 'MAIL_BACKEND=mailcow' in .env (Stalwart is the default; the backends are strictly exclusive). Set the switch and retry."
+  fi
+  local running
+  running="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^(opensme-stalwart|opensme-sogo)(-|$)' || true)"
+  if [[ -n "$running" ]]; then
+    die "Stalwart/SOGo containers are still running: $(echo "$running" | tr '\n' ' ') — stop them first (mail backends are exclusive, they would fight over mail.* and the SMTP/IMAP ports)."
+  fi
+}
+
 require_submodule() {
   [[ -f "${SUBMODULE_DIR}/docker-compose.yml" ]] || die \
     "submodule missing — run: git submodule update --init mail/mailcow-dockerized"
@@ -254,7 +275,15 @@ PYEOF
   docker network disconnect "${PROJECT}_mailcow-network" "${TRAEFIK_CONTAINER}" 2>/dev/null || true
 }
 
+restore_stalwart_hint() {
+  echo "  To return to the default backend: set MAIL_BACKEND=stalwart in .env,"
+  echo "  then start the stack with the stalwart+sogo overlays:"
+  echo "    export COMPOSE_FILE=\"docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:mail/stalwart.yml:mail/sogo.yml\""
+  echo "    docker compose up -d"
+}
+
 cmd_up() {
+  backend_switch_ok
   require_submodule
   if [[ ! -f "${CONF}" ]]; then
     # refuse to render fresh credentials over an EXISTING database volume:
@@ -308,6 +337,7 @@ cmd_down() {
     compose down
     info "mailcow stopped (volumes kept); openSME core untouched"
   fi
+  restore_stalwart_hint
 }
 
 cmd_status() {

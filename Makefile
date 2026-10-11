@@ -26,6 +26,7 @@
         container smoke integration e2e security \
         bootstrap bpm-deploy clean help \
         up down status logs pull \
+        mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
         up-soho up-small up-medium up-all \
         nix-build nix-load nix-images \
         agent-build agent-status
@@ -97,6 +98,11 @@ FULL_COMPOSE := $(COMPOSE) $(COMPOSE_FILES) $(COMPOSE_PROFILES)
 # Docker Compose Operations
 # ---------------------------------------------------------------------------
 up:
+	@if [ "$${MAIL_BACKEND:-$$(grep -E '^MAIL_BACKEND=' .env 2>/dev/null | head -1 | cut -d= -f2 || true)}" = "mailcow" ] \
+	   && case "$${COMPOSE_FILE:-}" in *"mail/stalwart.yml"*) true;; *) false;; esac; then \
+	  echo -e "$(RED)✗ MAIL_BACKEND=mailcow but mail/stalwart.yml is in COMPOSE_FILE — mail backends are strictly exclusive (XOR); remove the stalwart overlay or switch back to MAIL_BACKEND=stalwart$(NC)"; \
+	  exit 1; \
+	fi
 	@echo -e "$(BLUE)── starting openSME (profile: $(PROFILE), $(TIER_SERVICES)) ──$(NC)"
 	@$(FULL_COMPOSE) --env-file $(TEST_ENV) up -d
 	@echo -e "$(GREEN)✓ Stack started ($(TIER_SERVICES))$(NC)"
@@ -134,6 +140,24 @@ logs:
 pull:
 	@$(FULL_COMPOSE) pull
 	@echo -e "$(GREEN)✓ Images pulled$(NC)"
+
+# ---------------------------------------------------------------------------
+# Mail backend — switch MAIL_BACKEND=stalwart|mailcow (strict XOR)
+# ---------------------------------------------------------------------------
+mailcow-up:      ## Boot the mailcow mail stack (requires MAIL_BACKEND=mailcow in .env)
+	@bash scripts/mailcow.sh up
+
+mailcow-down:    ## Stop + unwire mailcow (keeps volumes)
+	@bash scripts/mailcow.sh down
+
+mailcow-purge:   ## Stop + unwire mailcow AND destroy its data volumes
+	@bash scripts/mailcow.sh down --purge
+
+mailcow-status:  ## mailcow health overview
+	@bash scripts/mailcow.sh status
+
+mailcow-logs:    ## Follow mailcow logs
+	@bash scripts/mailcow.sh logs
 
 # ---------------------------------------------------------------------------
 # Disk hygiene
@@ -350,6 +374,7 @@ help:
 	@echo "    Core: Traefik, PostgreSQL, PgBouncer, Redis, Memcached, Portal"
 	@echo "    IDM:  Zitadel (default) or Casdoor (idm/casdoor.yml)"
 	@echo "    Overlays: opencloud, stalwart, sogo, paperless, monitoring"
+	@echo "    Mail backend (XOR): MAIL_BACKEND=stalwart (default) | mailcow → make mailcow-up/-down"
 	@echo "    Service profiles:"
 	@echo "      --profile invoice   Invoice Ninja (invoicing)"
 	@echo "      --profile paperless Paperless-ngx + Gotenberg (document management)"

@@ -1,6 +1,13 @@
 # ═══════════════════════════════════════════════════════════════
 # specs/mail.yml — Mail server and groupware
 # ═══════════════════════════════════════════════════════════════
+#
+# Mail backend switch (strict XOR — MAIL_BACKEND=stalwart|mailcow, never
+# both; they would fight over mail.* and the SMTP/IMAP host ports):
+#   stalwart (default) — these Stalwart/SOGo services.
+#   mailcow            — the pinned mailcow-dockerized submodule driven by
+#                        scripts/mailcow.sh (MAIL_BACKEND=mailcow). Stalwart
+#                        and SOGo must not be mounted in that mode.
 
 services:
   stalwart:
