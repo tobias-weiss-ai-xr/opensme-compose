@@ -32,6 +32,26 @@ DEPLOY_SCRIPT = ROOT / "bootstrap" / "bpmn-deploy.sh"
 ENV_GEN_SCRIPT = ROOT / "scripts" / "init-env.sh"
 OPERATON_NS = "http://operaton.org/schema/1.0/bpmn"
 
+SEED_DIR = ROOT / "bootstrap" / "seed-content"
+SEED_README = SEED_DIR / "README.md"
+# The content documents advertised in seed-content/README.md (name -> purpose).
+SEED_DOCUMENTS = {
+    "01-welcome.md": "orientation note mapping services -> what they do",
+    "02-team-charter.md": "a 'how we work' agreement members can adopt",
+    "03-decision-record.md": "RFC-style record that mirrors the approval workflow",
+    "04-onboarding-checklist.md": "repeatable new-member checklist",
+}
+# Editorial rule from seed-content/README.md: keep each document under ~40 lines.
+SEED_MAX_LINES = 40
+# Contents ship inside the repo — they must never carry credentials.
+SECRET_MARKERS = (
+    "BEGIN RSA PRIVATE KEY",
+    "BEGIN OPENSSH PRIVATE KEY",
+    "BEGIN EC PRIVATE KEY",
+    "BEGIN PRIVATE KEY",
+    "AKIA",
+)
+
 
 def local(tag: str) -> str:
     """Strip the {namespace} prefix from an ElementTree tag."""
@@ -96,6 +116,69 @@ def check_file(path: Path, result: Result) -> None:
         result.fail(f"{name}: conditionExpression without xmlns:xsi declaration")
     elif "conditionExpression" in raw:
         result.ok(f"{name}: conditionExpression xsi namespace declared")
+
+
+def check_seed_content(result: Result) -> None:
+    """bootstrap/seed-content/ ships sample Markdown documents (see its
+    README for the editorial contract): every documented file must be
+    present, non-empty, start with an H1, end with a newline, stay under
+    the ~40-line budget, and never carry credentials."""
+    if not SEED_DIR.is_dir():
+        result.fail(f"{SEED_DIR} missing")
+        return
+    result.ok("bootstrap/seed-content/ present")
+
+    if not SEED_README.is_file():
+        result.fail("bootstrap/seed-content/README.md missing")
+        return
+    result.ok("bootstrap/seed-content/README.md present")
+
+    docs = {p.name: p for p in sorted(SEED_DIR.glob("*.md")) if p != SEED_README}
+    missing = sorted(set(SEED_DOCUMENTS) - set(docs))
+    if missing:
+        result.fail(
+            f"bootstrap/seed-content/ missing documented file(s): {missing} "
+            "— README.md 'Documents' table advertises them"
+        )
+    else:
+        result.ok(f"bootstrap/seed-content/: all {len(SEED_DOCUMENTS)} documented files present")
+
+    for name, purpose in sorted(SEED_DOCUMENTS.items()):
+        path = docs.get(name)
+        if path is None:
+            continue
+        checks = 0
+        raw = path.read_text()
+        if not raw.strip():
+            result.fail(f"{name}: empty document")
+        else:
+            checks += 1
+            result.ok(f"{name}: non-empty")
+        if not raw.startswith("# "):
+            result.fail(f"{name}: does not start with an H1 heading")
+        else:
+            checks += 1
+            result.ok(f"{name}: starts with H1 ({raw.splitlines()[0][2:].strip()!r})")
+        if not raw.endswith("\n"):
+            result.fail(f"{name}: missing trailing newline")
+        else:
+            checks += 1
+            result.ok(f"{name}: ends with newline")
+        lines = len(raw.splitlines())
+        if lines > SEED_MAX_LINES:
+            result.fail(f"{name}: {lines} lines > ~{SEED_MAX_LINES} editorial budget "
+                        "(seed-content/README.md)")
+        else:
+            checks += 1
+            result.ok(f"{name}: {lines} lines within editorial budget")
+        hits = [m for m in SECRET_MARKERS if m in raw]
+        if hits:
+            result.fail(f"{name}: credential marker(s) in shipped doc: {hits}")
+        else:
+            checks += 1
+            result.ok(f"{name}: no credential markers")
+        if checks == 5:
+            result.ok(f"{name}: seed document passes ({purpose})")
 
 
 def check_deploy_script(result: Result) -> None:
@@ -178,6 +261,7 @@ def main() -> int:
         check_file(f, result)
     check_deploy_script(result)
     check_env_generator(result)
+    check_seed_content(result)
     check_demo_users(result)
     return 0 if result.summary() else 1
 
@@ -206,15 +290,24 @@ def check_demo_users(result: Result) -> None:
         if key not in data:
             result.fail(f"bootstrap/demo-users.json missing '{key}' key")
     result.ok("bootstrap/demo-users.json has all required keys")
-    
+
     users = data.get("users", [])
     if not isinstance(users, list) or len(users) < 12:
-        result.fail(f"bootstrap/demo-users.json needs at least 12 users, has {len(users) if isinstance(users, list) else 'not a list'}")
+        result.fail(
+            f"bootstrap/demo-users.json needs at least 12 users, has "
+            f"{len(users) if isinstance(users, list) else 'not a list'}"
+        )
     else:
         result.ok(f"bootstrap/demo-users.json: {len(users)} demo users configured")
-    
-    # Each user needs required fields
-    required_user_fields = {"username", "firstName", "lastName", "displayName", "email", "password"}
+
+    # Each user needs every field the provisioning script consumes
+    # (scripts/provision-demo-users.sh: identity, names, mail, credentials
+    # and group membership from roles/department).
+    required_user_fields = {
+        "id", "username", "firstName", "lastName", "displayName",
+        "email", "password", "roles", "department",
+    }
+    seen_ids, seen_usernames = set(), set()
     for i, user in enumerate(users):
         uname = user.get("username", "unknown")
         missing = required_user_fields - set(user.keys())
@@ -222,6 +315,29 @@ def check_demo_users(result: Result) -> None:
             result.fail(f"bootstrap/demo-users.json user[{i}] ({uname}): missing {missing}")
         else:
             result.ok(f"bootstrap/demo-users.json user[{i}] ({uname}): all required fields")
+        if uname in seen_usernames:
+            result.fail(f"bootstrap/demo-users.json: duplicate username {uname!r}")
+        seen_usernames.add(uname)
+        uid = user.get("id")
+        if uid in seen_ids:
+            result.fail(f"bootstrap/demo-users.json: duplicate user id {uid!r}")
+        seen_ids.add(uid)
+        email = user.get("email", "")
+        if email and not email.endswith(f"@{data.get('domain', '')}"):
+            result.fail(
+                f"bootstrap/demo-users.json user {uname!r}: email {email!r} not under "
+                f"domain @{data.get('domain', '')} (provisioning assumes it)"
+            )
+        if not user.get("password"):
+            result.fail(f"bootstrap/demo-users.json user {uname!r}: empty password")
+        roles = user.get("roles")
+        if not isinstance(roles, list) or not roles:
+            result.fail(f"bootstrap/demo-users.json user {uname!r}: roles must be a non-empty list")
+        if not user.get("department"):
+            result.fail(f"bootstrap/demo-users.json user {uname!r}: empty department")
+
+    if len(users) == 12 and len(seen_usernames) == 12 and len(seen_ids) == 12:
+        result.ok("bootstrap/demo-users.json: 12 unique users with unique ids/usernames")
     
     if not DEMO_SCRIPT.is_file():
         result.fail("scripts/provision-demo-users.sh missing")
