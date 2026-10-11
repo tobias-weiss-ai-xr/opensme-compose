@@ -262,10 +262,11 @@ docker compose \
   up -d --build
 
 # Traefik was started early (above) so the IdP edge exists for the OIDC
-# client registration, but the Docker provider does not always pick up
+# client registration, but the Docker provider does not reliably pick up
 # containers that join the network AFTER traefik itself (portal/opencloud
-# -> 404 on their https routes until traefik re-evaluates). Force one
-# clean reload so every late-starting service is routed.
+# -> 404 on their https routes until traefik re-evaluates). Reload once
+# with the app set settled — the edge wait below escalates if the provider
+# still missed a service.
 docker compose \
   -f docker-compose.yml \
   -f idm/zitadel.yml \
@@ -279,21 +280,39 @@ ok "openSME Demo is running!"
 
 # ── Verify the stack actually came up ────────
 # A one-command bootstrap should not print "running" while the Portal is
-# still unreachable. The wait is bounded and never fails the boot: a slow
-# or absent container reports status instead of aborting.
-info "Waiting for the Portal to be reachable..."
-PORTAL_READY="no"
-for _ in $(seq 1 45); do
-  health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
-    http://localhost:8080/health 2>/dev/null || echo 000)
-  [[ "$health" == "200" ]] && { PORTAL_READY="yes"; break; }
+# still unreachable — and "reachable" means THROUGH THE EDGE: the e2e
+# suite talks to portal.<domain> via Traefik, not to 127.0.0.1:8080. The
+# wait is bounded, self-healing (a Traefik reload is triggered when the
+# https route stays silent) and never fails the boot.
+PORTAL_HOST="${PORTAL_DOMAIN:-portal.opensme.local}"
+info "Waiting for the Portal through the edge (https://${PORTAL_HOST})..."
+EDGE_READY="no"
+for i in $(seq 1 15); do
+  health=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
+    --resolve "${PORTAL_HOST}:443:127.0.0.1" \
+    "https://${PORTAL_HOST}/health" 2>/dev/null || echo 000)
+  if [[ "$health" == "200" ]]; then
+    EDGE_READY="yes"
+    break
+  fi
+  # escalating self-heal: the docker provider can miss a late-joining
+  # container, so a fresh Traefik reload eventually wires every route up
+  if (( i % 3 == 0 )); then
+    docker compose \
+      -f docker-compose.yml \
+      -f idm/zitadel.yml \
+      -f opencloud/opencloud.yml \
+      -f profiles/demo.dev.yml \
+      --profile standalone \
+      restart traefik >/dev/null 2>&1 || true
+  fi
   sleep 5
 done
-if [[ "$PORTAL_READY" == "yes" ]]; then
-  ok "Portal is up (http://localhost:8080/health)"
+if [[ "$EDGE_READY" == "yes" ]]; then
+  ok "Portal reachable through the edge (https://${PORTAL_HOST}/health)"
 else
-  warn "Portal did not answer on http://localhost:8080/health yet."
-  warn "Check the logs: docker compose ${CF[*]} logs portal"
+  warn "Portal not reachable through the edge (https://${PORTAL_HOST}/health) yet."
+  warn "Direct backend: docker compose ${CF[*]} logs portal"
 fi
 
 echo ""
