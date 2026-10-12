@@ -1016,7 +1016,7 @@ async fn main() {
 mod tests {
     use super::*;
 
-    fn cfg_with(ticketing: &str, ai: Option<AiConfig>, announcements: &str) -> AppConfig {
+    pub(crate) fn cfg_with(ticketing: &str, ai: Option<AiConfig>, announcements: &str) -> AppConfig {
         AppConfig {
             opencloud_url: "https://cloud.example".into(),
             mail_url: String::new(),
@@ -1637,7 +1637,14 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_exposes_all_families() {
-        let body = metrics_body().await;
+        // The track_metrics middleware counts a request only AFTER the handler
+        // ran (counter increment happens post-next.run), so a first /metrics
+        // scrape never contains itself. Make a normal request first (counted),
+        // scrape once, then scrape again: the second body carries both the
+        // /health hit and the /metrics scrape itself.
+        let _ = respond(cfg_with("", None, ""), "GET", "/health", None).await;
+        let _ = metrics_body().await; // scrape #1 (counted by scrape #2)
+        let body = metrics_body().await; // scrape #2: full picture
         for name in [
             "http_requests_total",
             "http_request_duration_seconds",
@@ -1648,7 +1655,11 @@ mod tests {
         ] {
             assert!(body.contains(name), "{name} missing from /metrics");
         }
-        // the /metrics scrape itself is counted (middleware is active)
+        // an ordinary request and the /metrics scrape are both observed
+        // (middleware is active on both routes)
+        assert!(
+            body.contains("http_requests_total{method=\"GET\",route=\"/health\",status=\"200\"}")
+        );
         assert!(
             body.contains("http_requests_total{method=\"GET\",route=\"/metrics\",status=\"200\"}")
         );
