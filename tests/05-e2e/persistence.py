@@ -190,44 +190,55 @@ def main() -> int:
     else:
         result.fail(f"stack not functional after restart: idp={idp_ok} portal={portal_ok}")
 
-    # ── P4: data survives recreate (force-recreate) ──────────────────
-    # Write a second marker, force-recreate containers, verify marker survives
+    # ── P4: data survives recreate (force-recreate) ──────────
+    # Write a second marker, force-recreate containers, verify marker back
     DB2 = "e2e_persist_p4"
     MARKER2 = "e2e_marker_survives_recreate"
     try:
         psql(f"DROP DATABASE IF EXISTS {DB2}")
         psql(f"CREATE DATABASE {DB2}")
-        r = compose("exec", "-T", "postgres",
-                    "psql", "-U", "opensme", "-d", DB2, "-Atc",
-                    f"CREATE TABLE {MARKER2} (note text); "
-                    f"INSERT INTO {MARKER2} VALUES ('p4-before-recreate');",
-                    timeout=120)
-        if r.returncode != 0:
-            result.fail(f"P4 marker write failed: {r.stderr[:120]}")
+        try:
+            r = compose("exec", "-T", "postgres",
+                        "psql", "-U", "opensme", "-d", DB2, "-Atc",
+                        f"CREATE TABLE {MARKER2} (note text); "
+                        f"INSERT INTO {MARKER2} VALUES ('p4-before-recreate');",
+                        timeout=120)
+        except (RuntimeError, subprocess.SubprocessError) as e:
+            result.fail(f"P4 marker write failed: {e}")
+            return 1
+        
+        # Force recreate all containers
+        recreate = compose("up", "-d", "--force-recreate", timeout=600)
+        if recreate.returncode != 0:
+            result.fail(f"P4 force-recreate failed: {recreate.stderr[:150]}")
+            return 1
+        
+        # Wait for postgres to be healthy again with retry
+        deadline = time.time() + 120
+        val2 = None
+        while time.time() < deadline:
+            try:
+                val2 = compose("exec", "-T", "postgres", "psql", "-U", "opensme",
+                              "-d", DB2, "-Atc", f"SELECT note FROM {MARKER2}",
+                              timeout=30).stdout.strip()
+                if val2 == "p4-before-recreate":
+                    break
+            except (RuntimeError, subprocess.SubprocessError):
+                pass
+            time.sleep(4)
+        
+        if val2 == "p4-before-recreate":
+            result.ok("P4 marker survived force-recreate (volumes hold state across --force-recreate)")
         else:
-            # Force recreate all containers
-            recreate = compose("up", "-d", "--force-recreate", "--build", timeout=600)
-            if recreate.returncode != 0:
-                result.fail(f"P4 force-recreate failed: {recreate.stderr[:150]}")
-            else:
-                time.sleep(10)  # Allow containers to start
-                try:
-                    val2 = compose("exec", "-T", "postgres", "psql", "-U", "opensme",
-                                  "-d", DB2, "-Atc", f"SELECT note FROM {MARKER2}",
-                                  timeout=120).stdout.strip()
-                    if val2 == "p4-before-recreate":
-                        result.ok("P4 marker survived force-recreate (volumes hold state across --force-recreate)")
-                    else:
-                        result.fail(f"P4 data LOST across force-recreate: marker={val2!r}")
-                except (RuntimeError, subprocess.SubprocessError) as e:
-                    result.fail(f"P4 marker read failed after recreate: {e}")
-                # Cleanup P4 database
-                try:
-                    psql(f"DROP DATABASE IF EXISTS {DB2}")
-                except (RuntimeError, subprocess.SubprocessError):
-                    pass
+            result.fail(f"P4 data LOST across force-recreate: marker={val2!r}")
     except (RuntimeError, subprocess.SubprocessError) as e:
         result.fail(f"P4 setup failed: {e}")
+    finally:
+        # Always attempt cleanup of P4 database
+        try:
+            psql(f"DROP DATABASE IF EXISTS {DB2}")
+        except (RuntimeError, subprocess.SubprocessError):
+            pass
 
     # cleanup: drop the P1-P3 journey database in every case
     try:

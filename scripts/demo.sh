@@ -82,19 +82,6 @@ info "Docker ${DOCKER_VERSION}, Compose ${COMPOSE_VERSION}"
 # ── Check RAM ─────────────────────────────────
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
 TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
-
-if ! docker compose version &>/dev/null; then
-  err "Docker Compose v2 not found. Install: https://docs.docker.com/compose/install/"
-  exit 1
-fi
-
-DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+' | head -1)
-COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "unknown")
-info "Docker ${DOCKER_VERSION}, Compose ${COMPOSE_VERSION}"
-
-# ── Check RAM ─────────────────────────────────
-TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
-TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 if [ "$TOTAL_RAM_GB" -gt 0 ] && [ "$TOTAL_RAM_GB" -lt 4 ]; then
   warn "Only ${TOTAL_RAM_GB} GB RAM detected. 4 GB minimum recommended."
   warn "The demo may run slowly or fail."
@@ -106,8 +93,6 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # ── Generate .env if not exists ───────────────
-if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
-
 # Random password generator (needed by the generation block below AND the
 # upgrade-append block — must be defined unconditionally)
 pw() { openssl rand -base64 24; }
@@ -435,4 +420,3 @@ if docker ps --format '{{.Names}}' | grep -qi 'opensme-camunda\|opensme-operaton
 fi
 info "Sample documents (loading guide + files): bootstrap/seed-content/"
 info "    see bootstrap/seed-content/README.md — load into Cloud / Paperless / Team Notes"
-fi

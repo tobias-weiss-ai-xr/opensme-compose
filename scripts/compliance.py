@@ -39,7 +39,7 @@ def run(cmd, cwd=None):
 
 
 def parse_results(stdout):
-    """Extract test results (counts) from the setzen output."""
+    """Extract test results (counts) from the test-suite output."""
     passed = re.search(r'(\d+) passed', stdout)
     failed = re.search(r'(\d+) failed', stdout)
     warnings = re.search(r'(\d+) warnings?', stdout)
