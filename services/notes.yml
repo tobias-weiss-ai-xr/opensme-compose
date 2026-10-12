@@ -31,8 +31,12 @@ services:
     profiles: ["notes"]
     environment:
       # DO NOT set DJANGO_SETTINGS_MODULE — the lasuite/impress-backend image
-      # ships a single impress/settings.py and configures the module itself;
-      # 'impress.settings.Production' (upstream repo layout) doesn't exist here
+      # ships a single impress/settings.py (not the upstream settings/ package).
+      # The image DEFAULTS to DJANGO_CONFIGURATION=Development, which appends
+      # django_extensions (absent from the image) to INSTALLED_APPS and dies
+      # at import — pin the Production configuration class.
+      DJANGO_SETTINGS_MODULE: impress.settings
+      DJANGO_CONFIGURATION: Production
       DJANGO_SECRET_KEY: ${NOTES_DJANGO_SECRET_KEY:-CHANGEME_notes}
       ALLOWED_HOSTS: "notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai},notes-backend"
       DATA_DIR: /data
