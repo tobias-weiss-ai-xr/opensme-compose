@@ -101,7 +101,7 @@ ztcurl() {
 wait_zitadel() {
     if ! $WAIT; then return 0; fi
     info "Waiting for Zitadel at https://$EXTERNAL_HOST..."
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         if ztcurl -k "https://$CURL_HOST/healthz" >/dev/null 2>&1; then
             info "Zitadel is ready"
             return 0
@@ -319,7 +319,7 @@ main() {
         
         # Normalize email to use configured domain
         local email_local
-        email_local=$(echo "$email" | sed "s/@.*//")
+        email_local=${email%%@*}
         email="${email_local}@${DOMAIN}"
         
         # Check if user exists
