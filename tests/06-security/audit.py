@@ -259,11 +259,11 @@ def check_no_changeme_in_env(result):
 def check_restart_policy(result, loader):
     """All services should have restart: unless-stopped or restart: always.
 
-    Exception: taskfleet is on-demand (run via docker compose run),
-    so restart: no is correct.
+    Exceptions: taskfleet and dev-maintenance-bot are on-demand (run via
+    docker compose run / periodic trigger), so restart: no is correct.
     """
     # Services where restart: no is intentional
-    NO_RESTART_EXCEPTIONS = {"taskfleet"}
+    NO_RESTART_EXCEPTIONS = {"taskfleet", "dev-maintenance-bot"}
     for svc_name, svc in sorted(loader.services.items()):
         restart = svc["data"].get("restart")
         if restart in ("unless-stopped", "always"):
