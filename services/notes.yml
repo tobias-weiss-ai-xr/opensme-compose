@@ -96,7 +96,7 @@ services:
     profiles: ["notes"]
     environment:
       NOTES_BACKEND_URL: http://notes-backend:3010
-      NOTES_Y_PROVIDER_URL: http://notes-y-provider:1234
+      NOTES_Y_PROVIDER_URL: http://notes-y-provider:4444
     networks:
       - opensme-net
     depends_on:
