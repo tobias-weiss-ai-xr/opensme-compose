@@ -153,6 +153,14 @@ def check_seed_content(result: Result) -> None:
         )
     else:
         result.ok(f"bootstrap/seed-content/: all {len(SEED_DOCUMENTS)} documented files present")
+    # The README 'Documents' table is the contract — flag files it does not
+    # advertise so docs and table cannot drift apart.
+    unadvertised = sorted(set(docs) - set(SEED_DOCUMENTS))
+    if unadvertised:
+        result.fail(
+            f"bootstrap/seed-content/: file(s) not advertised in README.md "
+            f"'Documents' table: {unadvertised}"
+        )
 
     for name, purpose in sorted(SEED_DOCUMENTS.items()):
         path = docs.get(name)
@@ -259,24 +267,6 @@ def check_env_generator(result: Result) -> None:
             result.ok("init-env.sh is idempotent (no-clobber)")
 
 
-def main() -> int:
-    result = Result("bootstrap-seed-data")
-    if not BPMN_DIR.is_dir():
-        result.fail(f"{BPMN_DIR} missing")
-    else:
-        files = sorted(BPMN_DIR.glob("*.bpmn"))
-        if not files:
-            result.fail("bootstrap/bpmn/ has no .bpmn files")
-        for f in files:
-            check_file(f, result)
-        check_deploy_script(result)
-        check_env_generator(result)
-    # seed-content + demo-users checks run regardless of bpmn/ state.
-    check_seed_content(result)
-    check_demo_users(result)
-    return 0 if result.summary() else 1
-
-
 def check_demo_users(result: Result) -> None:
     """bootstrap/demo-users.json offers 12 pre-configured users for demos."""
     DEMO_USERS = ROOT / "bootstrap" / "demo-users.json"
@@ -363,6 +353,24 @@ def check_demo_users(result: Result) -> None:
         result.fail("scripts/provision-demo-users.sh is not executable")
     else:
         result.ok("scripts/provision-demo-users.sh present and executable")
+
+
+def main() -> int:
+    result = Result("bootstrap-seed-data")
+    if not BPMN_DIR.is_dir():
+        result.fail(f"{BPMN_DIR} missing")
+    else:
+        files = sorted(BPMN_DIR.glob("*.bpmn"))
+        if not files:
+            result.fail("bootstrap/bpmn/ has no .bpmn files")
+        for f in files:
+            check_file(f, result)
+        check_deploy_script(result)
+        check_env_generator(result)
+    # seed-content + demo-users checks run regardless of bpmn/ state.
+    check_seed_content(result)
+    check_demo_users(result)
+    return 0 if result.summary() else 1
 
 
 if __name__ == "__main__":
