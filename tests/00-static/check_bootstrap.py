@@ -14,6 +14,17 @@ demo time — Operaton rejects a deployment (HTTP 400) when:
     at instance start: Boolean cannot be cast to String),
   * a <conditionExpression> omits the xsi namespace declaration.
 
+Beyond the BPMN payloads it also validates the other bootstrap content:
+
+  * bootstrap/seed-content/*.md — every document advertised in its README
+    must be present, non-empty, start with an H1, end with a newline, stay
+    inside the ~40-line editorial budget, and carry no credential markers;
+  * bootstrap/demo-users.json — must be valid JSON declaring a non-empty
+    top-level structure, at least 12 users each carrying every field the
+    provisioning script consumes (id, username, firstName, lastName,
+    displayName, email, password, roles, department), with unique
+    ids/usernames and emails under the configured domain.
+
 Usage: python3 tests/00-static/check_bootstrap.py
 """
 
