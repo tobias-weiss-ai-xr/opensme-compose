@@ -141,7 +141,10 @@ def main() -> bool:
     # The flow composes Invoice exports and the DMS ingest — both must
     # answer at the edge but never without credentials.
     flow_urls = {
-        "invoice-api": [s["url"] for s in services if s.get("id") == "invoice"],
+        # bare /api/v1/ is NOT an Invoice Ninja API endpoint (the Laravel app
+        # serves the SPA fallback there, HTTP 200 HTML) — probe a real
+        # resource collection, which is always token-walled
+        "invoice-api": [s["url"] + "/api/v1/invoices" for s in services if s.get("id") == "invoice"],
         "archive-api": [s["url"] for s in services if s.get("id") == "archive"],
     }
     for name, urls in flow_urls.items():
@@ -149,7 +152,7 @@ def main() -> bool:
             result.skip(f"{name}: function not deployed")
             continue
         base = urls[0].rstrip("/")
-        api = base + ("/api/v1/" if "invoice" in name else "/api/documents/")
+        api = base if "invoice" in name else base + "/api/documents/"
         try:
             r = session.get(api, allow_redirects=False, timeout=T)
         except requests.RequestException as e:
