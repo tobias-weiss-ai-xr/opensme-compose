@@ -25,7 +25,7 @@ x-service-defaults: &service-defaults
 services:
   notes-backend:
     <<: *service-defaults
-    image: lasuite/impress:latest-backend
+    image: lasuite/impress-backend:latest
     container_name: opensme-notes-backend
     restart: unless-stopped
     profiles: ["notes"]
@@ -88,7 +88,7 @@ services:
 
   notes-frontend:
     <<: *service-defaults
-    image: lasuite/impress:latest-frontend
+    image: lasuite/impress-frontend:latest
     container_name: opensme-notes-frontend
     restart: unless-stopped
     profiles: ["notes"]
