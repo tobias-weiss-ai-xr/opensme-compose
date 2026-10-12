@@ -88,7 +88,7 @@ services:
       memory: 256M
 
   synapse:
-    image: element-hq/synapse:latest
+    image: matrixdotorg/synapse:latest
     compose_file: services/synapse.yml
     required: false
     profiles: [chat]
@@ -106,7 +106,7 @@ services:
       memory: 384M
 
   element-web:
-    image: elementio/element-web:latest
+    image: vectorim/element-web:latest
     compose_file: services/element.yml
     required: false
     profiles: [element]

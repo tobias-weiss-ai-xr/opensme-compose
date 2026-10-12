@@ -73,7 +73,9 @@ catalog:
     domain_env: null
     host_prefix: notes
     service: notes-frontend
-    router: notes
+    # notesapp (not 'notes') — live traefik silently dropped the 'notes'
+    # router name during the 2026-10-13 deploy; renamed and verified
+    router: notesapp
 
   - id: chat
     tile: Chat
