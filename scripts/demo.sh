@@ -8,6 +8,12 @@
 # Usage:
 #   ./scripts/demo.sh                    # first run (creates .env)
 #   ./scripts/demo.sh --force-env        # regenerate .env with new passwords
+#   ./scripts/demo.sh --with-demo-users  # provision 12 demo users after stack boot
+#   ./scripts/demo.sh --with-bpmn        # deploy sample BPMN workflows
+#   ./scripts/demo.sh --with-seed-content # show seed content location
+#   ./scripts/demo.sh --all-demo         # full demo: users + BPMN + seed content hint
+#   ./scripts/demo.sh --help, -h         # show this help message
+#   Combinable: ./scripts/demo.sh --with-demo-users --with-bpmn
 #
 # Services accessible at http://localhost:8080 (Portal only).
 # Zitadel and OpenCloud are routed through Traefik on localhost.
@@ -28,6 +34,34 @@ ok()    { echo -e "${GREEN}[OK]${NC}   $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 
+# ── Parse flags FIRST so --help works ──────────
+FORCE_ENV=false
+WITH_DEMO_USERS=false
+WITH_BPMN=false
+WITH_SEED_CONTENT=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h)
+      echo "Usage: ./scripts/demo.sh [OPTIONS]"
+      echo ""
+      echo "Options:"
+      echo "  --force-env         Regenerate .env with new passwords"
+      echo "  --with-demo-users   Provision 12 demo users after stack is ready"
+      echo "  --with-bpmn         Deploy sample BPMN workflows (if engine active)"
+      echo "  --with-seed-content  Show seed content location hint"
+      echo "  --all-demo          All of the above (users + BPMN + seed content)"
+      echo "  --help, -h          Show this help message"
+      exit 0
+      ;;
+    --force-env)         FORCE_ENV=true;;
+    --with-demo-users)   WITH_DEMO_USERS=true;;
+    --with-bpmn)         WITH_BPMN=true;;
+    --with-seed-content)  WITH_SEED_CONTENT=true;;
+    --all-demo)           WITH_DEMO_USERS=true; WITH_BPMN=true; WITH_SEED_CONTENT=true;;
+  esac
+done
+
 # ── Prerequisites ─────────────────────────────
 info "Checking prerequisites..."
 
@@ -35,6 +69,19 @@ if ! command -v docker &>/dev/null; then
   err "Docker not found. Install Docker first: https://docs.docker.com/engine/install/"
   exit 1
 fi
+
+if ! docker compose version &>/dev/null; then
+  err "Docker Compose v2 not found. Install: https://docs.docker.com/compose/install/"
+  exit 1
+fi
+
+DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+' | head -1)
+COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "unknown")
+info "Docker ${DOCKER_VERSION}, Compose ${COMPOSE_VERSION}"
+
+# ── Check RAM ─────────────────────────────────
+TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
+TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
 if ! docker compose version &>/dev/null; then
   err "Docker Compose v2 not found. Install: https://docs.docker.com/compose/install/"
@@ -59,11 +106,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # ── Generate .env if not exists ───────────────
-FORCE_ENV=false
-if [[ "${1:-}" == "--force-env" ]]; then
-  FORCE_ENV=true
-  warn "Regenerating .env (--force-env)"
-fi
+if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
 
 # Random password generator (needed by the generation block below AND the
 # upgrade-append block — must be defined unconditionally)
@@ -326,6 +369,28 @@ for c in opensme-portal opensme-zitadel opensme-opencloud \
   esac
 done
 
+# ── Demo bootstrap
+if [[ "$WITH_DEMO_USERS" == true ]]; then
+  info "Provisioning 12 demo users for OpenSME Muster GmbH..."
+  ./scripts/provision-demo-users.sh --wait --verbose
+  ok "Demo users provisioned"
+fi
+
+if [[ "$WITH_BPMN" == true ]]; then
+  if docker ps --format '{{.Names}}' | grep -qi 'opensme-camunda\|opensme-operaton'; then
+    info "Deploying sample BPMN processes..."
+    ./bootstrap/bpmn-deploy.sh
+    ok "BPMN processes deployed"
+  else
+    warn "No workflow engine running — skipping BPMN deployment"
+  fi
+fi
+
+if [[ "$WITH_SEED_CONTENT" == true ]]; then
+  info "Seed content available in bootstrap/seed-content/"
+  info "  Load manually via your preferred service (OpenCloud, Paperless, etc.)"
+fi
+
 # ── Get admin password ────────────────────────
 ADMIN_PW=$(grep ZITADEL_ADMIN_PASSWORD .env | cut -d= -f2)
 OC_ADMIN=$(grep OC_ADMIN_PASSWORD .env | cut -d= -f2)
@@ -370,3 +435,4 @@ if docker ps --format '{{.Names}}' | grep -qi 'opensme-camunda\|opensme-operaton
 fi
 info "Sample documents (loading guide + files): bootstrap/seed-content/"
 info "    see bootstrap/seed-content/README.md — load into Cloud / Paperless / Team Notes"
+fi
