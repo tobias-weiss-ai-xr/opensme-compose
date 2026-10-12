@@ -116,7 +116,7 @@ services:
       - "traefik.http.routers.notesapp.tls=true"
       - "traefik.http.routers.notesapp.tls.certresolver=letsencrypt"
       - "traefik.http.routers.notesapp.entrypoints=websecure"
-      - "traefik.http.services.notes.loadbalancer.server.port=8080"
+      - "traefik.http.services.notesapp.loadbalancer.server.port=8080"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:8080/"]
       interval: 20s
