@@ -48,7 +48,10 @@ services:
       postgres:
         condition: service_healthy
     entrypoint: ["/bin/sh"]
-    command: ["-c", "sh /entrypoint-setup.sh && exec /usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml --daemonize=false"]
+    # no --daemonize: matrixdotorg/synapse homeserver.py takes -D as a bare
+    # flag (store_true) — "--daemonize=false" aborts with 'ignored explicit
+    # argument'. Foreground is what we want under docker anyway.
+    command: ["-c", "sh /entrypoint-setup.sh && exec /usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml"]
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.matrix.rule=Host(`matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`)"
