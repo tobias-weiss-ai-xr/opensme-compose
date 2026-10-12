@@ -54,7 +54,7 @@ services:
       COLLABORATION_API_URL: "https://notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/collaboration/api/"
       COLLABORATION_WS_URL: "wss://notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/collaboration/ws/"
       COLLABORATION_SERVER_SECRET: ${NOTES_COLLABORATION_SECRET:-CHANGEME_notes_collab}
-      Y_PROVIDER_API_BASE_URL: http://notes-y-provider:1234
+      Y_PROVIDER_API_BASE_URL: http://notes-y-provider:4444
       Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:-CHANGEME_notes_collab}
       AWS_S3_ENDPOINT_URL: "http://minio:9000"
       AWS_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
@@ -134,7 +134,8 @@ services:
     networks:
       - opensme-net
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:1234/"]
+      # the app listens on 4444 (see its own startup log), not 1234
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:4444/"]
       interval: 20s
       timeout: 10s
       retries: 5
