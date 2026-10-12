@@ -77,6 +77,21 @@ Volumes, 7 Tage Retention).
   Reservation-Summen pro Tier (soho 6G / small 20G / medium 40G).
 - **Datenschutz in den Agents**: Strip-then-Review-Anonymisierung vor jedem
   LLM-Kontakt; Healing nur mit explizitem Consent.
+- **Funktionskatalog (Portal-Tiles)**: Das Portal zeigt genau die
+  SME-Geschäftsfunktionen (OpenCloud, Webmail, Workflow, Invoice,
+  Archive, Chat, Notes, Support, Website, Shop) — jede nur wenn ihre
+  URL konfiguriert ist, keine Infrastruktur-Tiles (IdP, Collabora,
+  Mail-Backend). Contract: `contracts/tiles.yml`, geprüft von
+  `tests/00-static/check_tiles.py`.
+- **Interoperabilität (Saga-Mechanismen)**: Jeder Saga-Schritt reitet auf
+  einem deklarierten Contract — OIDC-IdM-Swappbarkeit (Zitadel ↔
+  Casdoor), interne SMTP-Submission über Stalwart (Invoice, OpenCloud),
+  Share-Link-Shape über Intercom-Host-Allowlist, http(s)-only Feeds mit
+  Graceful Degradation, REST-only Prozess-Engine ohne geteilte DB,
+  Quote-to-Cash als Komposition öffentlicher APIs (Invoice-Exports →
+  BPMN-Freigabe → DMS-Ingest). Contract: `contracts/interop.yml`,
+  geprüft von `tests/00-static/check_interop.py`; Saga-Smoke:
+  `tests/05-e2e/saga_smoke.py`.
 
 ## 8. Architektur-Entscheidungen
 

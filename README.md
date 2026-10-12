@@ -563,9 +563,9 @@ Environment variables for local development:
 | `IDP_URL` | *(empty — card hidden)* | Zitadel link on landing page |
 | `OPENCLOUD_URL` | `https://cloud.opensme.graphwiz.ai` | OpenCloud link |
 | `MAIL_URL` | *(empty — card hidden)* | Webmail link |
-| `COLLABORA_URL` | *(empty — card hidden)* | Collabora link |
 | `TICKETING_URL` / `CMS_URL` / `SHOP_URL` | *(empty — cards hidden)* | Support / Website / Shop cards |
 | `BPM_URL` | *(empty — card hidden)* | Workflow (Operaton) card — set to `https://bpm.<domain>` with `--profile camunda` |
+| `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` | *(empty — cards hidden)* | Invoice / Archive / Chat / Notes cards — set to the service's domain with the matching profile |
 | `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON banner array (`info`/`warn`) |
 | `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | AI assistant (OpenAI-compatible `/v1/chat/completions`) — `AI_API_URL=http://ai:8080` with `--profile ai` |
 | `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400) |
@@ -898,6 +898,7 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 | `CMS_IMAGE` | upstream `:latest` | crap-cms image override — pin once upstream tags releases |
 | `TICKETING_URL` / `CMS_URL` / `SHOP_URL` | *(empty — cards hidden)* | Portal cards for ticketing / website / store |
 | `BPM_URL` | *(empty — card hidden)* | Portal card for the BPM/Workflow service (Operaton) |
+| `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` | *(empty — cards hidden)* | Portal cards for invoice / archive / chat / notes (profiles `invoice` / `paperless` / `synapse` / notes service) |
 | `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON array of portal banners: `[{'level':'info\|warn','text':'…'}]` |
 | `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | OpenAI-compatible endpoint for the portal AI assistant — set `AI_API_URL=http://ai:8080` with `--profile ai` |
 | `AI_IMAGE` | `…llama.cpp:server-b11223` | llama.cpp image override (build-numbered tags) |

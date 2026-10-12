@@ -508,6 +508,37 @@ Integration facts (deliberately honest):
 
 ---
 
+## SME Sagas — cross-service journeys (S1–S6)
+
+> *Als Mitarbeitende,r Gov-Führungen,r Backoffice oder Supporter erreiche
+> ich jedes Geschäftsziel über genau einen Einstieg: das Portal. Jede
+> Saga reitet auf bestehenden Service-Contracts — das Portal navigiert,
+> es mediiert keine Geschäftsdaten.*
+
+Spec: openspec capability `sme-function-catalog` (portal-catalog +
+sme-interoperability). Contracts: `contracts/tiles.yml`,
+`contracts/interop.yml`; static layer: `tests/00-static/check_tiles.py`,
+`tests/00-static/check_interop.py`.
+
+| Saga | Journey (user story) | Navigation edges | Deep tests |
+|------|----------------------|------------------|------------|
+| S1 Daily work |MA öffnet Portal → Cloud/Webmail/Notes | tiles → service edges answer | `run.py` (webmail, cloud), `webmail.py` |
+| S2 Quote-to-cash | BO erstellt Angebot → Rechnung → Freigabe → Ablage | invoice → workflow → archive | `saga_smoke.py` P5 (auth-walled APIs), `check_bootstrap.py` (BPMN) |
+| S3 Approvals | GF genehmigt Urlaub/Rechnung im Cockpit | workflow tile → engine | `run.py` SSO, `bootstrap/bpmn-deploy.sh` |
+| S4 Customer service | SUP löst Ticket im Helpdesk | support tile → ticketing | overlay reachability (`run.py` apps) |
+| S5 External visibility | MA publiziert News/Shop; Portal liest Feeds | website/shop tiles, `/api/feeds` degrade | `saga_smoke.py` P2, `feeds.rs` unit tests |
+| S6 Knowledge | Team verlinkt Notes-Snippets in Intercom | notes tile, share-link shape | `check_interop.py` (share links), `intercom.py` |
+
+```bash
+# saga navigation smoke — works against demo stack OR live deployment:
+python3 tests/05-e2e/saga_smoke.py opensme.local
+python3 tests/05-e2e/saga_smoke.py home.opensme.graphwiz.ai
+```
+
+Skips are saga preconditions, not failures: an overlay that is not
+deployed skips its saga step visibly. A rendered tile whose edge does
+not answer is always a failure — "no tile to nowhere".
+
 ## Running
 
 ```bash

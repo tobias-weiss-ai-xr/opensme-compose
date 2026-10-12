@@ -1,0 +1,79 @@
+# ═══════════════════════════════════════════════════════════════
+# contracts/interop.yml — Cross-service interoperability
+# ═══════════════════════════════════════════════════════════════
+# Every saga step rides on an existing service contract (API/env).
+# The portal navigates; it never mediates business data.
+# Capability: openspec `sme-interoperability`. Validated by
+# tests/00-static/check_interop.py.
+
+name: sme-interoperability
+description: >
+  Integration surfaces between catalog services: central SSO (IdM
+  swap point), internal SMTP submission, share-link shape, news
+  feeds, REST-only process engine and the document flow
+  (invoice → approval → archive).
+severity: warning
+
+surfaces:
+  # ── Identity: one central IdP, swappable at compose level ──
+  oidc:
+    idm_services: [zitadel, casdoor]   # swap point (both shipped)
+    portal_env: IDP_URL
+    rule: >
+      Catalog apps authenticate via OIDC against the configured IdM.
+      Swapping Zitadel ↔ Casdoor must not require portal code changes.
+
+  # ── Mail: internal SMTP submission only ──
+  smtp_submission:
+    provider: stalwart
+    consumers:
+      - service: invoiceninja
+        env_file: services/invoice-ninja.yml
+        env: MAIL_HOST
+      - service: opencloud
+        env_file: opencloud/opencloud.yml
+        env: NOTIFICATIONS_SMTP_HOST
+    rule: >
+      Apps send via the internal SMTP submission host (stalwart) only;
+      users read mail exclusively through the Webmail surface (SOGo).
+
+  # ── News: server-side feed aggregation, graceful degradation ──
+  feeds:
+    portal_env: PORTAL_FEEDS
+    schemes: [http, https]
+    rule: >
+      The portal fetches http(s) URLs only, renders an empty column
+      on feed failure and never depends on feeds for availability.
+
+  # ── File shares: link shape, no proxying ──
+  share_links:
+    portal_env: INTERCOM_ATTACHMENT_HOSTS
+    default_from: OPENCLOUD_DOMAIN
+    rule: >
+      Intercom attachments must match the configured cloud host
+      (https://<cloud>/s/… shape). The portal validates hostnames
+      but never proxies or caches file content.
+
+  # ── Processes: REST-only engine access ──
+  processes:
+    engine: camunda
+    portal_env: BPM_URL
+    bootstrap:
+      - bootstrap/bpmn/invoice-approval.bpmn
+      - bootstrap/bpmn/vacation-request.bpmn
+    rule: >
+      The portal talks to the engine over REST (BPM_URL) only and
+      holds no database credentials for it. BPMN is deployed from
+      bootstrap/bpmn at stack startup.
+
+  # ── Document flow: quote-to-cash composition ──
+  document_flow:
+    participants: [invoiceninja, camunda, paperless-ngx]
+    artifacts:
+      - invoice-approval.bpmn          # engine: approval decision
+      - invoiceninja-storage volume    # source: invoices/documents
+      - paperless-export volume        # sink: DMS ingest
+    rule: >
+      Quote-to-cash composes public service APIs and volume exports
+      (invoice → approval → archive); no point-to-point code in the
+      portal.

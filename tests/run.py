@@ -57,6 +57,8 @@ LAYERS = {
             ("Bootstrap seed data (BPMN)", "tests/00-static/check_bootstrap.py"),
             ("Backup/restore contract", "tests/00-static/check_backup_restore.py"),
             ("Mail backend switch (XOR)", "tests/00-static/check_mail_backend.py"),
+            ("Portal function catalog (tiles)", "tests/00-static/check_tiles.py"),
+            ("Interoperability surfaces", "tests/00-static/check_interop.py"),
         ],
         "requires_stack": False,
     },

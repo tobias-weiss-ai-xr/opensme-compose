@@ -336,11 +336,14 @@ services:
       OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       MAIL_URL: ${MAIL_URL:-}
       IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
-      COLLABORA_URL: ${COLLABORA_URL:-}
       TICKETING_URL: ${TICKETING_URL:-}
       CMS_URL: ${CMS_URL:-}
       SHOP_URL: ${SHOP_URL:-}
       BPM_URL: ${BPM_URL:-}
+      INVOICE_URL: ${INVOICE_URL:-}
+      PAPERLESS_URL: ${PAPERLESS_URL:-}
+      CHAT_URL: ${CHAT_URL:-}
+      NOTES_URL: ${NOTES_URL:-}
       PORTAL_ANNOUNCEMENTS: ${PORTAL_ANNOUNCEMENTS:-}
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
       AI_API_URL: ${AI_API_URL:-}

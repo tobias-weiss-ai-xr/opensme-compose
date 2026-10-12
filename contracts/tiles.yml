@@ -1,0 +1,123 @@
+# ═══════════════════════════════════════════════════════════════
+# contracts/tiles.yml — Portal function catalog (tile wiring)
+# ═══════════════════════════════════════════════════════════════
+# The portal landing page is the SME function catalog: exactly the
+# end-user business functions below may appear as tiles, each only
+# when its URL env var is configured. Infrastructure never gets a
+# tile (see `excluded`). Validated by tests/00-static/check_tiles.py.
+#
+# Catalog functions (spec: openspec capability `portal-catalog`):
+#   id          tile name      service           routed host
+#   opencloud   OpenCloud      opencloud         cloud.<OPENSME_DOMAIN>
+#   webmail     Webmail        sogo              webmail.*   (SOGO_DOMAIN)
+#   workflow    Workflow       camunda           bpm.*       (CAMUNDA_DOMAIN)
+#   invoice     Invoice        invoiceninja-web  invoices.*
+#   archive     Archive        paperless-ngx     paperless.*
+#   notes       Notes          notes-frontend    notes.*
+#   chat        Chat           element-web       element.*
+#   support     Support        ticketing         help.*
+#   website     Website        cms               www.*
+#   shop        Shop           store             shop.*
+
+name: portal-function-catalog
+description: >
+  Every portal tile maps to a deployed, routed service: the URL env
+  var is passed through to the portal, the backing service exists in
+  the compose chain with a Traefik router, and every routed service
+  in the stack is either a catalog function or on the exclusion list.
+severity: warning
+
+catalog:
+  - id: opencloud
+    tile: OpenCloud
+    url_env: OPENCLOUD_URL
+    domain_env: OPENCLOUD_DOMAIN
+    service: opencloud
+    router: opencloud
+    # core function — always deployed, URL derived from OPENCLOUD_DOMAIN
+    default_url: true
+
+  - id: webmail
+    tile: Webmail
+    url_env: MAIL_URL
+    domain_env: SOGO_DOMAIN
+    service: sogo
+    router: sogo
+
+  - id: workflow
+    tile: Workflow
+    url_env: BPM_URL
+    domain_env: CAMUNDA_DOMAIN
+    service: camunda
+    router: camunda
+
+  - id: invoice
+    tile: Invoice
+    url_env: INVOICE_URL
+    domain_env: null          # host composed from OPENSME_DOMAIN prefix
+    host_prefix: invoices
+    service: invoiceninja-web # router lives on the nginx front
+    router: invoices
+
+  - id: archive
+    tile: Archive
+    url_env: PAPERLESS_URL
+    domain_env: null
+    host_prefix: paperless
+    service: paperless-ngx
+    router: paperless
+
+  - id: notes
+    tile: Notes
+    url_env: NOTES_URL
+    domain_env: null
+    host_prefix: notes
+    service: notes-frontend
+    router: notes
+
+  - id: chat
+    tile: Chat
+    url_env: CHAT_URL
+    domain_env: null
+    host_prefix: element
+    service: element-web
+    router: element
+
+  - id: support
+    tile: Support
+    url_env: TICKETING_URL
+    domain_env: null
+    host_prefix: help
+    # the compose service is `nosdesk` (image ghcr.io/nosdesk/nosdesk);
+    # its router is named `ticketing`
+    service: nosdesk
+    router: ticketing
+
+  - id: website
+    tile: Website
+    url_env: CMS_URL
+    domain_env: null
+    host_prefix: www
+    service: cms
+    router: cms
+
+  - id: shop
+    tile: Shop
+    url_env: SHOP_URL
+    domain_env: null
+    host_prefix: shop
+    service: store
+    router: store
+
+excluded:
+  # Infrastructure surfaces — no end-user journey starts here.
+  - id: portal       # the catalog itself
+  - id: traefik      # edge router (dashboard)
+  - id: zitadel      # IdP — transparent SSO, never a tile
+  - id: casdoor      # IdP swap point — same rule
+  - id: stalwart     # mail backend admin — users read mail via SOGo
+  - id: collabora    # embedded editor inside OpenCloud — never a tile
+  - id: cryptpad     # alternative embedded editor (collab profile)
+  - id: seaweedfs    # S3 storage admin UI
+  - id: synapse      # Matrix homeserver API — UI is element-web
+  - id: ai           # vLLM/OpenAI-compatible API — surfaced as AI card

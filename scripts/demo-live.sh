@@ -121,8 +121,11 @@ OC_OIDC_CLIENT_SECRET=$(pw)   # canonical key; opencloud.yml keeps OC_OIDC_SECRE
 
 # ── Portal (empty = hidden from landing page) ──
 MAIL_URL=
-COLLABORA_URL=
 BPM_URL=
+# INVOICE_URL=https://invoice.${OPENSME_DOMAIN}   # --profile invoice
+# PAPERLESS_URL=https://docs.${OPENSME_DOMAIN}    # --profile paperless
+# CHAT_URL=https://chat.${OPENSME_DOMAIN}         # --profile synapse
+# NOTES_URL=https://notes.${OPENSME_DOMAIN}
 
 # ── Traefik ──
 TRAEFIK_ACME_EMAIL=${ACME_EMAIL}

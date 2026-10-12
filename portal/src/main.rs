@@ -24,11 +24,14 @@ struct AppConfig {
     opencloud_url: String,
     mail_url: String,
     idp_url: String,
-    collabora_url: String,
     ticketing_url: String,
     cms_url: String,
     shop_url: String,
     bpm_url: String,
+    invoice_url: String,
+    paperless_url: String,
+    chat_url: String,
+    notes_url: String,
     portal_domain: String,
     opensme_domain: String,
     announcements: Arc<Vec<Announcement>>,
@@ -173,14 +176,16 @@ fn render_announcements(announcements: &[Announcement]) -> String {
 /// Emoji glyph for a service/func card (decorative, never user-controlled).
 fn service_icon(id: &str) -> &'static str {
     match id {
-        "identity" => "🔐",
         "opencloud" => "☁",
-        "collabora" => "📝",
         "webmail" => "✉",
         "support" => "🆘",
         "website" => "🌐",
         "shop" => "🛒",
         "workflow" => "⚙",
+        "invoice" => "🧾",
+        "archive" => "🗄",
+        "chat" => "🗨",
+        "notes" => "📋",
         _ => "🧩",
     }
 }
@@ -498,14 +503,9 @@ fn build_landing_page(config: &AppConfig) -> String {
 fn get_services(config: &AppConfig) -> Vec<Service> {
     let mut services = Vec::new();
 
-    if !config.idp_url.is_empty() {
-        services.push(Service {
-            id: "identity".into(),
-            name: "Identity".into(),
-            description: "Single sign-on and user management".into(),
-            url: config.idp_url.clone(),
-        });
-    }
+    // Catalog functions only — infrastructure (identity/auth, embedded
+    // editors, mail backends) never gets a tile; see openspec capability
+    // portal-catalog.
 
     // OpenCloud — only if URL differs from the raw default
     if !config.opencloud_url.is_empty() {
@@ -514,16 +514,6 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
             name: "OpenCloud".into(),
             description: "Cloud storage, file sharing and collaboration".into(),
             url: config.opencloud_url.clone(),
-        });
-    }
-
-    // Collabora — only if explicitly configured (not empty)
-    if !config.collabora_url.is_empty() {
-        services.push(Service {
-            id: "collabora".into(),
-            name: "Collabora".into(),
-            description: "Online document editing".into(),
-            url: config.collabora_url.clone(),
         });
     }
 
@@ -574,6 +564,46 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
             name: "Workflow".into(),
             description: "BPMN process engine — Cockpit, Tasklist and REST API".into(),
             url: config.bpm_url.clone(),
+        });
+    }
+
+    // Invoice (Invoice Ninja) — only if explicitly configured (not empty)
+    if !config.invoice_url.is_empty() {
+        services.push(Service {
+            id: "invoice".into(),
+            name: "Invoice".into(),
+            description: "Invoicing — quotes, invoices and payments".into(),
+            url: config.invoice_url.clone(),
+        });
+    }
+
+    // Archive (Paperless-ngx) — only if explicitly configured (not empty)
+    if !config.paperless_url.is_empty() {
+        services.push(Service {
+            id: "archive".into(),
+            name: "Archive".into(),
+            description: "Document archive — full-text searchable records".into(),
+            url: config.paperless_url.clone(),
+        });
+    }
+
+    // Chat (Element/Synapse) — only if explicitly configured (not empty)
+    if !config.chat_url.is_empty() {
+        services.push(Service {
+            id: "chat".into(),
+            name: "Chat".into(),
+            description: "Team messaging — channels and direct messages".into(),
+            url: config.chat_url.clone(),
+        });
+    }
+
+    // Notes (Impress) — only if explicitly configured (not empty)
+    if !config.notes_url.is_empty() {
+        services.push(Service {
+            id: "notes".into(),
+            name: "Notes".into(),
+            description: "Shared notes — links and snippets for the team".into(),
+            url: config.notes_url.clone(),
         });
     }
 
@@ -948,11 +978,14 @@ fn load_config() -> Arc<AppConfig> {
         opencloud_url: load_env("OPENCLOUD_URL", "https://cloud.opensme.graphwiz.ai"),
         mail_url: load_env("MAIL_URL", ""),
         idp_url: load_env("IDP_URL", ""),
-        collabora_url: load_env("COLLABORA_URL", ""),
         ticketing_url: load_env("TICKETING_URL", ""),
         cms_url: load_env("CMS_URL", ""),
         shop_url: load_env("SHOP_URL", ""),
         bpm_url: load_env("BPM_URL", ""),
+        invoice_url: load_env("INVOICE_URL", ""),
+        paperless_url: load_env("PAPERLESS_URL", ""),
+        chat_url: load_env("CHAT_URL", ""),
+        notes_url: load_env("NOTES_URL", ""),
         announcements,
         ai,
         // One shared client: connection pooling, 30s default timeout.
@@ -1025,11 +1058,14 @@ mod tests {
             opencloud_url: "https://cloud.example".into(),
             mail_url: String::new(),
             idp_url: "https://auth.example".into(),
-            collabora_url: String::new(),
             ticketing_url: ticketing.into(),
             cms_url: String::new(),
             shop_url: String::new(),
             bpm_url: String::new(),
+            invoice_url: String::new(),
+            paperless_url: String::new(),
+            chat_url: String::new(),
+            notes_url: String::new(),
             portal_domain: "portal.example".into(),
             opensme_domain: "example".into(),
             announcements: Arc::new(parse_announcements(announcements)),
@@ -1126,19 +1162,53 @@ mod tests {
     }
 
     #[test]
+    fn identity_and_collabora_never_tiled() {
+        // Infrastructure exclusion (portal-catalog spec): auth is SSO
+        // plumbing (idp_url may be set for redirects), Collabora is an
+        // embedded editor inside OpenCloud — neither ever becomes a tile.
+        let c = cfg_with("", None, "");
+        let services = get_services(&c);
+        assert!(!services.iter().any(|s| s.id == "identity"));
+        assert!(!services.iter().any(|s| s.id == "collabora"));
+        assert!(!services.iter().any(|s| s.name == "Identity"));
+        assert!(!services.iter().any(|s| s.name == "Collabora"));
+    }
+
+    #[test]
+    fn invoice_archive_chat_notes_gated_on_url() {
+        let mut c = cfg_with("", None, "");
+        for name in ["Invoice", "Archive", "Chat", "Notes"] {
+            assert!(!get_services(&c).iter().any(|s| s.name == name));
+        }
+
+        c.invoice_url = "https://invoice.example".into();
+        c.paperless_url = "https://docs.example".into();
+        c.chat_url = "https://chat.example".into();
+        c.notes_url = "https://notes.example".into();
+        let services = get_services(&c);
+        assert!(services.iter().any(|s| s.name == "Invoice"));
+        assert!(services.iter().any(|s| s.name == "Archive"));
+        assert!(services.iter().any(|s| s.name == "Chat"));
+        assert!(services.iter().any(|s| s.name == "Notes"));
+    }
+
+    #[test]
     fn service_ids_are_stable_unique_and_complete() {
         // Fully-configured portal: every card carries a stable id.
         let c = AppConfig {
-            collabora_url: "https://office.example".into(),
             mail_url: "https://mail.example".into(),
             ticketing_url: "https://help.example".into(),
             cms_url: "https://www.example".into(),
             shop_url: "https://shop.example".into(),
             bpm_url: "https://bpm.example".into(),
+            invoice_url: "https://invoice.example".into(),
+            paperless_url: "https://docs.example".into(),
+            chat_url: "https://chat.example".into(),
+            notes_url: "https://notes.example".into(),
             ..cfg_with("", None, "")
         };
         let services = get_services(&c);
-        assert_eq!(services.len(), 8, "all eight cards configured");
+        assert_eq!(services.len(), 10, "all ten catalog cards configured");
 
         let ids: Vec<&str> = services.iter().map(|s| s.id.as_str()).collect();
         assert!(
@@ -1151,9 +1221,15 @@ mod tests {
             ids.len(),
             "service ids must be unique: {ids:?}"
         );
-        assert!(ids.contains(&"identity"));
         assert!(ids.contains(&"opencloud"));
+        assert!(ids.contains(&"webmail"));
         assert!(ids.contains(&"workflow"));
+        assert!(ids.contains(&"invoice"));
+        assert!(ids.contains(&"archive"));
+        assert!(ids.contains(&"chat"));
+        assert!(ids.contains(&"notes"));
+        assert!(!ids.contains(&"identity"));
+        assert!(!ids.contains(&"collabora"));
     }
 
     #[test]
