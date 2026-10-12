@@ -252,15 +252,15 @@ def main() -> int:
     result = Result("bootstrap-seed-data")
     if not BPMN_DIR.is_dir():
         result.fail(f"{BPMN_DIR} missing")
-        return 0 if result.summary() else 1
-
-    files = sorted(BPMN_DIR.glob("*.bpmn"))
-    if not files:
-        result.fail("bootstrap/bpmn/ has no .bpmn files")
-    for f in files:
-        check_file(f, result)
-    check_deploy_script(result)
-    check_env_generator(result)
+    else:
+        files = sorted(BPMN_DIR.glob("*.bpmn"))
+        if not files:
+            result.fail("bootstrap/bpmn/ has no .bpmn files")
+        for f in files:
+            check_file(f, result)
+        check_deploy_script(result)
+        check_env_generator(result)
+    # seed-content + demo-users checks run regardless of bpmn/ state.
     check_seed_content(result)
     check_demo_users(result)
     return 0 if result.summary() else 1
@@ -316,6 +316,12 @@ def check_demo_users(result: Result) -> None:
             result.fail(f"bootstrap/demo-users.json user[{i}] ({uname}): missing {missing}")
         else:
             result.ok(f"bootstrap/demo-users.json user[{i}] ({uname}): all required fields")
+        blank = [k for k in ("username", "firstName", "lastName", "displayName", "email")
+                 if not str(user.get(k, "")).strip()]
+        if blank:
+            result.fail(f"bootstrap/demo-users.json user[{i}] ({uname}): blank field(s) {blank}")
+        else:
+            result.ok(f"bootstrap/demo-users.json user[{i}] ({uname}): identity fields non-blank")
         if uname in seen_usernames:
             result.fail(f"bootstrap/demo-users.json: duplicate username {uname!r}")
         seen_usernames.add(uname)
