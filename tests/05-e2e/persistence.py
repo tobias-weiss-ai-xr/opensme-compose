@@ -12,6 +12,8 @@ stack comes back. This journey drives the real lifecycle:
       `down` (volumes kept), comes back `up -d`, and the row survives
   P3  after the round trip the stack is not merely "up" but USEFUL:
       IdP discovery and portal health answer again
+  P4  data survives `docker compose up -d --force-recreate --build`:
+      marker row persists even when containers are destroyed and rebuilt
 
 The e2e database is created and dropped by the journey itself (idempotent);
 the stack's own volumes are never touched.
@@ -188,7 +190,46 @@ def main() -> int:
     else:
         result.fail(f"stack not functional after restart: idp={idp_ok} portal={portal_ok}")
 
-    # cleanup: drop the journey database in every case
+    # ── P4: data survives recreate (force-recreate) ──────────────────
+    # Write a second marker, force-recreate containers, verify marker survives
+    DB2 = "e2e_persist_p4"
+    MARKER2 = "e2e_marker_survives_recreate"
+    try:
+        psql(f"DROP DATABASE IF EXISTS {DB2}")
+        psql(f"CREATE DATABASE {DB2}")
+        r = compose("exec", "-T", "postgres",
+                    "psql", "-U", "opensme", "-d", DB2, "-Atc",
+                    f"CREATE TABLE {MARKER2} (note text); "
+                    f"INSERT INTO {MARKER2} VALUES ('p4-before-recreate');",
+                    timeout=120)
+        if r.returncode != 0:
+            result.fail(f"P4 marker write failed: {r.stderr[:120]}")
+        else:
+            # Force recreate all containers
+            recreate = compose("up", "-d", "--force-recreate", "--build", timeout=600)
+            if recreate.returncode != 0:
+                result.fail(f"P4 force-recreate failed: {recreate.stderr[:150]}")
+            else:
+                time.sleep(10)  # Allow containers to start
+                try:
+                    val2 = compose("exec", "-T", "postgres", "psql", "-U", "opensme",
+                                  "-d", DB2, "-Atc", f"SELECT note FROM {MARKER2}",
+                                  timeout=120).stdout.strip()
+                    if val2 == "p4-before-recreate":
+                        result.ok("P4 marker survived force-recreate (volumes hold state across --force-recreate)")
+                    else:
+                        result.fail(f"P4 data LOST across force-recreate: marker={val2!r}")
+                except (RuntimeError, subprocess.SubprocessError) as e:
+                    result.fail(f"P4 marker read failed after recreate: {e}")
+                # Cleanup P4 database
+                try:
+                    psql(f"DROP DATABASE IF EXISTS {DB2}")
+                except (RuntimeError, subprocess.SubprocessError):
+                    pass
+    except (RuntimeError, subprocess.SubprocessError) as e:
+        result.fail(f"P4 setup failed: {e}")
+
+    # cleanup: drop the P1-P3 journey database in every case
     try:
         psql(f"DROP DATABASE IF EXISTS {DB}")
     except (RuntimeError, subprocess.SubprocessError):
