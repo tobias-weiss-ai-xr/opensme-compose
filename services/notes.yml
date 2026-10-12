@@ -134,8 +134,9 @@ services:
     networks:
       - opensme-net
     healthcheck:
-      # the app listens on 4444 (see its own startup log), not 1234
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:4444/"]
+      # every path returns 403 without an API key — "any HTTP answer" is the
+      # health signal; use node fetch (wget --spider fails on 403)
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4444/').then(r=>process.exit(0)).catch(()=>process.exit(1))"]
       interval: 20s
       timeout: 10s
       retries: 5
