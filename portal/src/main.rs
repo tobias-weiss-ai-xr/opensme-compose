@@ -1016,7 +1016,11 @@ async fn main() {
 mod tests {
     use super::*;
 
-    pub(crate) fn cfg_with(ticketing: &str, ai: Option<AiConfig>, announcements: &str) -> AppConfig {
+    pub(crate) fn cfg_with(
+        ticketing: &str,
+        ai: Option<AiConfig>,
+        announcements: &str,
+    ) -> AppConfig {
         AppConfig {
             opencloud_url: "https://cloud.example".into(),
             mail_url: String::new(),
