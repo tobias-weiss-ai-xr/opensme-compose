@@ -356,6 +356,9 @@ provision-demo-users-clean:
 provision-demo-users-dry:
 	@bash scripts/provision-demo-users.sh --dry-run
 
+compliance:
+	@python3 scripts/compliance.py
+
 # ---------------------------------------------------------------------------
 # Bootstrap / Cleanup
 # ---------------------------------------------------------------------------
@@ -419,6 +422,7 @@ help:
 	@echo "    make provision-demo-users    Provision 12 demo users in Zitadel (12 person SME)"
 	@echo "    make provision-demo-users-clean  Delete + re-provision demo users"
 	@echo "    make provision-demo-users-dry    Show demo user config (JSON) without provisioning"
+	@echo "    make compliance              Generate compliance reports (JSON + MD)"
 	@echo ""
 	@echo -e "  $(GREEN)Demo Quickstart$(NC)"
 	@echo "    ./scripts/demo.sh              Full demo stack (core + Zitadel + OpenCloud)"
