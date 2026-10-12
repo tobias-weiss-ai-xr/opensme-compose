@@ -32,12 +32,11 @@ services:
       synapse:
         condition: service_healthy
     profiles: ["element"]
-    # the vectorim/element-web nginx listens on :80 (not 8080 like the old
-    # elementio layout) and the container runs unprivileged — without
-    # NET_BIND_SERVICE nginx dies with 'bind() to 0.0.0.0:80 failed (13)'
-    cap_add:
-      - NET_BIND_SERVICE
     environment:
+      # entrypoint envsubst renders listen ${ELEMENT_WEB_PORT}; default 80 is
+      # unbindable (unprivileged container, capability +ep lost via entrypoint
+      # user switch) — use the unprivileged 8080 like the old elementio layout
+      ELEMENT_WEB_PORT: "8080"
       ELEMENT_DEFAULT_SERVER_URL: "https://matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
     networks:
       - opensme-net
@@ -47,9 +46,9 @@ services:
       - "traefik.http.routers.element.tls=true"
       - "traefik.http.routers.element.tls.certresolver=letsencrypt"
       - "traefik.http.routers.element.entrypoints=websecure"
-      - "traefik.http.services.element.loadbalancer.server.port=80"
+      - "traefik.http.services.element.loadbalancer.server.port=8080"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:80/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://localhost:8080/"]
       interval: 20s
       timeout: 10s
       retries: 5
