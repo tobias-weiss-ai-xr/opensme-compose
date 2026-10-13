@@ -373,6 +373,10 @@ bpm-deploy:
 	@echo -e "$(BLUE)── deploying BPMN seed processes ──$(NC)"
 	@./bootstrap/bpmn-deploy.sh
 
+survey-deploy:
+	@echo -e "$(BLUE)── provisioning example LimeSurvey survey ──$(NC)"
+	@./bootstrap/survey-deploy.sh
+
 clean:
 	@rm -rf tests/05-e2e/test-results/ tests/05-e2e/playwright-report/
 	@rm -f /tmp/opensme-test-*.json

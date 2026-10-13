@@ -113,6 +113,13 @@ names; override with `OPERATON_URL`, `SYNAPSE_CONTAINER`,
   `<process>` element, or Operaton rejects the deployment.
 - **Portal banners** — set `PORTAL_ANNOUNCEMENTS` in `.env` to a JSON
   array of `{"level":"info|warn","text":"…"}` objects.
+- **Example survey** — `make survey-deploy` (or `./bootstrap/survey-deploy.sh`)
+  provisions the seeded survey „Beispiel: Datei-Upload“ (text question +
+  file-upload question, active, public). Uploaded files are mirrored to
+  OpenCloud by the `limesurvey-cloud-sync` sidecar (folder
+  „Umfragen/LimeSurvey“). Idempotent — re-running prints the URL only.
+  Custom seed surveys can later live in `surveys/` as `.lss` files
+  (import via the LimeSurvey admin UI).
 
 ## seed-content/
 

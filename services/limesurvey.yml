@@ -100,5 +100,55 @@ services:
           cpus: "0.1"
           memory: 96M
 
+  # ── OpenCloud mirror ────────────────────────────────────────────
+  # Uploads submitted to LimeSurvey land in the shared limesurvey-uploads
+  # volume; this sidecar mirrors them to OpenCloud (folder
+  # "Umfragen/LimeSurvey") every minute using the same WebDAV account as
+  # the portal (CLOUD_WEBDAV_USER/PASS, see .env). If CLOUD_WEBDAV_URL is
+  # empty the sidecar idles — the survey tool works standalone.
+  limesurvey-cloud-sync:
+    <<: *service-defaults
+    image: rclone/rclone:${RCLONE_TAG:-latest}
+    container_name: opensme-limesurvey-cloud-sync
+    restart: unless-stopped
+    profiles: ["surveys"]
+    entrypoint: /bin/sh
+    # rclone needs its own obscured form of the password (rclone obscure)
+    command:
+      - -c
+      - |
+        if [ -z "$$CLOUD_WEBDAV_URL" ] || [ -z "$$CLOUD_WEBDAV_PASS" ]; then
+          echo "cloud sync disabled: CLOUD_WEBDAV_URL/CLOUD_WEBDAV_PASS not set"
+          exec sleep infinity
+        fi
+        export RCLONE_CONFIG_CLOUD_TYPE=webdav
+        export RCLONE_CONFIG_CLOUD_URL="$$CLOUD_WEBDAV_URL"
+        export RCLONE_CONFIG_CLOUD_VENDOR=owncloud
+        export RCLONE_CONFIG_CLOUD_USER="$$CLOUD_WEBDAV_USER"
+        export RCLONE_CONFIG_CLOUD_PASS="$$(rclone obscure "$$CLOUD_WEBDAV_PASS")"
+        echo "mirroring survey uploads to OpenCloud (Umfragen/LimeSurvey)"
+        while true; do
+          rclone copy /data/surveys cloud:Umfragen/LimeSurvey --min-age 15s --quiet || echo "rclone sync failed, retrying"
+          sleep 60
+        done
+    environment:
+      CLOUD_WEBDAV_URL: ${CLOUD_WEBDAV_URL:-}
+      CLOUD_WEBDAV_USER: ${CLOUD_WEBDAV_USER:-}
+      CLOUD_WEBDAV_PASS: ${CLOUD_WEBDAV_PASS:-}
+    volumes:
+      - limesurvey-uploads:/data:ro
+    networks:
+      - opensme-net
+    depends_on:
+      - limesurvey
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 96M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
 volumes:
   limesurvey-uploads:
