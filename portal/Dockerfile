@@ -5,12 +5,12 @@ WORKDIR /app
 
 FROM chef AS planner
 COPY . .
-# data dir for the runtime stage (team-notes persistence); ownership is
-# applied on COPY --chown there
-RUN mkdir -p /data/attachments
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+# data dir for the runtime stage (team-notes persistence); ownership is
+# applied on COPY --chown in the runtime stage
+RUN mkdir -p /data/attachments
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
