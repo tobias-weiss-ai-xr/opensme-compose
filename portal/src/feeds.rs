@@ -118,13 +118,15 @@ pub fn parse_columns(raw: &str) -> Vec<FeedColumn> {
 
 impl FeedFetcher {
     pub fn new(columns: Vec<FeedColumn>) -> Self {
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(FETCH_TIMEOUT)
             .user_agent(
                 "openSMEPortal/1.0 (+https://github.com/tobias-weiss-ai-xr/opensme-compose)",
-            )
-            .build()
-            .unwrap_or_default();
+            );
+        if let Some(proxy) = proxy_from_env() {
+            builder = builder.proxy(proxy);
+        }
+        let client = builder.build().unwrap_or_default();
         FeedFetcher {
             columns,
             cache: RwLock::new(HashMap::new()),
@@ -216,6 +218,34 @@ impl FeedFetcher {
             _ => return Vec::new(),
         };
         parse_feed(&bytes, &source)
+    }
+}
+
+/// Egress-restricted hosts (e.g. OpenVZ containers without working
+/// MASQUERADE on the virtualization layer) can still run a local HTTP
+/// CONNECT proxy reachable from the docker bridges. reqwest only honors
+/// `HTTPS_PROXY` with its opt-in `system-proxy` feature, which this build
+/// deliberately does not use — so read the conventional variables here and
+/// wire the proxy into the feed client only (internal clients unaffected).
+fn proxy_env_url() -> Option<String> {
+    let raw = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .ok()?;
+    normalize_proxy_candidate(&raw)
+}
+
+pub(crate) fn proxy_from_env() -> Option<reqwest::Proxy> {
+    proxy_env_url().and_then(|u| reqwest::Proxy::https(&u).ok())
+}
+
+/// Accept a non-empty candidate, trimmed of surrounding whitespace and a
+/// single trailing slash.
+fn normalize_proxy_candidate(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -396,6 +426,20 @@ mod tests {
 
         assert!(parse_feed(b"<not xml at all", "example.com").is_empty());
         assert!(parse_feed(b"", "example.com").is_empty());
+    }
+
+    #[test]
+    fn normalize_proxy_candidate_trims_and_rejects_empty() {
+        assert_eq!(
+            normalize_proxy_candidate(" http://172.19.0.1:8888/ "),
+            Some("http://172.19.0.1:8888".to_string())
+        );
+        assert_eq!(normalize_proxy_candidate(""), None);
+        assert_eq!(normalize_proxy_candidate("   "), None);
+        assert_eq!(
+            normalize_proxy_candidate("http://p:1//"),
+            Some("http://p:1".to_string())
+        );
     }
 
     #[test]

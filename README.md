@@ -579,6 +579,7 @@ Environment variables for local development:
 | `BPM_URL` | *(empty — card hidden)* | Workflow (Operaton) card — set to `https://bpm.<domain>` with `--profile camunda` |
 | `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` | *(empty — cards hidden)* | Invoice / Archive / Chat / Notes cards — set to the service's domain with the matching profile |
 | `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON banner array (`info`/`warn`) |
+| `PORTAL_HTTPS_PROXY` | *(empty — direct egress)* | HTTP CONNECT proxy for the portal's outbound feed fetches — only for egress-restricted hosts (e.g. OpenVZ without working MASQUERADE): point at a local proxy reachable from the docker bridges |
 | `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | AI assistant (OpenAI-compatible `/v1/chat/completions`) — `AI_API_URL=http://ai:8080` with `--profile ai` |
 | `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400) |
 | `INTERCOM_ALLOW_HTTP` | `false` | Dev mode: allow http:// attachment URLs — NEVER enable in production (SSRF risk) |
