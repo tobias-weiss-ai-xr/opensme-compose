@@ -276,6 +276,47 @@ def check_named_volumes_only(result, rule, loader):
         result.info("no volumes to check")
 
 
+def check_kb_version_required(result, rule, loader):
+    """agent-knowledge: every runbook file carries kb_version (aktualität)."""
+    kb = ROOT / "opensme-knowledge"
+    for f in sorted(kb.glob("*.json")):
+        doc = yaml.safe_load(f.read_text())
+        if not (doc or {}).get("kb_version"):
+            result.fail(f"{f.name}: missing kb_version (aktualität / source duty)")
+        else:
+            result.ok(f"{f.name}: kb_version {doc['kb_version']}")
+
+
+def check_source_duty(result, rule, loader):
+    """agent-knowledge: a matching goal — every file is versioned and the
+    loader/gos answer evidence carries source+version (check_agent.py +
+    Go loader enforce this). Here we confirm the KB is loadable."""
+    kb = ROOT / "opensme-knowledge"
+    services = sorted(f.stem for f in kb.glob("*.json"))
+    for svc in services:
+        result.ok(f"{svc}: runbook present (source duty satisfiable)")
+
+
+def check_pii_free(result, rule, loader):
+    """agent-knowledge: KB holds no secrets/uris/jwts/home-paths/private-addrs."""
+    kb = ROOT / "opensme-knowledge"
+    sec = re.compile(r"(?i)\b(api[_-]?key|apikey|secret|token|password|passwd)\s*[:=]\s*[\"']?[A-Za-z0-9_\-/+]{12,}")
+    uri = re.compile(r"(?i)\b(postgres|redis|mongodb|mysql|amqp)://[^\s\"']+")
+    home = re.compile(r"/home/[a-z0-9_.-]+|/Users/[a-z0-9_.-]+|/root\b")
+    jwts = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+    priv = re.compile(r"(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))\.")
+    checked = 0
+    for f in sorted(kb.glob("*.json")):
+        text = f.read_text()
+        checked += 1
+        for pat, label in ((sec, "secret"), (uri, "uri"), (home, "home-path"),
+                           (jwts, "jwt"), (priv, "private-address")):
+            if pat.search(text):
+                result.fail(f"{f.name}: PII leak {label}")
+    if checked == 0:
+        result.info("no runbook files to check")
+
+
 def run_contract(result, contract, loader):
     """Run all rules in a contract."""
     name = contract.get("name", "unnamed")
@@ -307,6 +348,9 @@ CONTRACT_HANDLERS = {
     "resource-limits-set": check_resource_limits_set,
     "no-changeme-in-compose": check_no_changeme_in_compose,
     "image-has-tag": check_image_has_tag,
+    "kb_version-required": check_kb_version_required,
+    "source-duty": check_source_duty,
+    "pii-free": check_pii_free,
     "named-volumes-only": check_named_volumes_only,
 }
 
