@@ -870,7 +870,11 @@ fn intercom_store_from_env() -> intercom::IntercomStore {
             let path = PathBuf::from(path.trim());
             let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
             let attachments = dir.join("attachments");
-            let _ = std::fs::create_dir_all(&attachments);
+            if let Err(e) = std::fs::create_dir_all(&attachments) {
+                // Usually a volume ownership problem (portal runs as uid 1000);
+                // notes still work, picked-file uploads will 400 until fixed.
+                tracing::warn!(%e, dir = %attachments.display(), "cannot create intercom attachments dir — file picker uploads will fail");
+            }
             intercom::IntercomStore::open(Some(path), Some(attachments))
         }
         _ => intercom::IntercomStore::default(),

@@ -5,6 +5,9 @@ WORKDIR /app
 
 FROM chef AS planner
 COPY . .
+# data dir for the runtime stage (team-notes persistence); ownership is
+# applied on COPY --chown there
+RUN mkdir -p /data/attachments
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -19,6 +22,10 @@ FROM gcr.io/distroless/cc-debian12 AS runtime
 COPY --from=busybox:1.36-musl /bin/busybox /busybox
 ENV PATH=/busybin:$PATH
 COPY --from=builder /app/target/release/opensme-portal /opensme-portal
+# Pre-create the team-notes data dir owned by the runtime user: named
+# volumes seed their content (incl. ownership) from the image on first
+# mount, so /data stays writable without a root entrypoint.
+COPY --from=builder --chown=1000:1000 /data /data
 USER 1000:1000
 EXPOSE 8080
 CMD ["/opensme-portal"]
