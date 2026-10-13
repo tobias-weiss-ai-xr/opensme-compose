@@ -51,7 +51,7 @@ func main() {
 	hl := healer.New(cfg.AllowHeal, nil)
 	var llm *api.LLM
 	if cfg.LLM.Backend != "none" {
-		llm = api.NewLLM(cfg.LLM.Backend, cfg.LLM.URL, cfg.LLM.Key, cfg.LLM.Model)
+		llm = api.NewLLM(cfg.LLM.Backend, cfg.LLM.URL, cfg.LLM.Key, cfg.LLM.Model, cfg.LLM.MaxRequests)
 	}
 	srv, err := api.New(cfg, kb, chk, hl, llm)
 	if err != nil {

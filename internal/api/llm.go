@@ -22,6 +22,12 @@ import (
 // ErrDisabled is returned by every call while the backend is "none".
 var ErrDisabled = errors.New("llm analysis disabled (DEV_AGENT_LLM_BACKEND=none)")
 
+// ErrBudgetExceeded is returned when the per-run outbound-call budget
+// (DEV_AGENT_LLM_MAX_REQUESTS, 0 = unlimited) is exhausted. The server pauses
+// the rest of the reconcile cycle and records an auditable "budget" evidence
+// entry instead of dialing out further.
+var ErrBudgetExceeded = errors.New("llm analysis budget exceeded (DEV_AGENT_LLM_MAX_REQUESTS)")
+
 // llmCacheMax is the maximum number of cached analyses. Entries are evicted
 // by LRU when the cache exceeds this size.
 const llmCacheMax = 50
@@ -32,28 +38,44 @@ type llmCacheEntry struct {
 	at       time.Time
 }
 
-// LLM is an opt-in analysis backend.
+// LLM is an opt-in analysis backend. MaxRequests caps outbound calls per
+// run (0 = unlimited); cache hits never consume the budget.
 type LLM struct {
-	Backend string
-	URL     string
-	Key     string
-	Model   string
-	client  *http.Client
-	cache   map[string]llmCacheEntry
-	cacheMu sync.Mutex
+	Backend     string
+	URL         string
+	Key         string
+	Model       string
+	MaxRequests int
+	client      *http.Client
+	cache       map[string]llmCacheEntry
+	cacheMu     sync.Mutex
+	budgetMu    sync.Mutex
+	requests    int
 }
 
 // NewLLM returns nil when the backend is "none" (nothing dials out).
-func NewLLM(backend, url, key, model string) *LLM {
+func NewLLM(backend, url, key, model string, maxRequests int) *LLM {
 	if backend == "" || backend == "none" {
 		return nil
 	}
 	return &LLM{Backend: backend, URL: url, Key: key, Model: model,
-		client: &http.Client{Timeout: 180 * time.Second}, cache: map[string]llmCacheEntry{}}
+		MaxRequests: maxRequests,
+		client:      &http.Client{Timeout: 180 * time.Second}, cache: map[string]llmCacheEntry{}}
 }
 
 // Enabled reports whether outbound analysis is configured.
 func (l *LLM) Enabled() bool { return l != nil }
+
+// Exceeded reports whether the per-run outbound budget is exhausted. It never
+// dials out and is safe to call concurrently.
+func (l *LLM) Exceeded() bool {
+	if l == nil || l.MaxRequests == 0 {
+		return false
+	}
+	l.budgetMu.Lock()
+	defer l.budgetMu.Unlock()
+	return l.requests >= l.MaxRequests
+}
 
 // findingContext renders one finding into a compact context blob. It runs
 // through the server anonymizer BEFORE any byte leaves the host.
@@ -112,6 +134,17 @@ func (l *LLM) Analyze(ctx context.Context, s *Server, f checker.Finding) (string
 		return entry.analysis, nil
 	}
 	l.cacheMu.Unlock()
+	// Budget gate — reserve one outbound call before dialing (agent-guardrails
+	// spec). Cache hits above never consume the budget.
+	if l.MaxRequests > 0 {
+		l.budgetMu.Lock()
+		if l.requests >= l.MaxRequests {
+			l.budgetMu.Unlock()
+			return "", ErrBudgetExceeded
+		}
+		l.requests++
+		l.budgetMu.Unlock()
+	}
 	// Include KB matches in the prompt so the LLM can build on the runbook.
 	var matches []knowledge.Match
 	for _, sym := range f.Symptoms {

@@ -25,12 +25,14 @@ type Config struct {
 }
 
 // LLMConfig selects the (optional) analysis backend. Backend "none" disables
-// all outbound analysis requests.
+// all outbound analysis requests. MaxRequests caps outbound LLM calls per
+// run; 0 = unlimited.
 type LLMConfig struct {
-	Backend string // none|ollama|saia|tud|openai
-	URL     string
-	Key     string
-	Model   string
+	Backend     string // none|ollama|saia|tud|openai
+	URL         string
+	Key         string
+	Model       string
+	MaxRequests int
 }
 
 // FromEnv builds a Config from the environment, applying spec defaults.
@@ -94,14 +96,21 @@ func FromEnv() (*Config, error) {
 		c.LLM.URL = envOr("DEV_AGENT_LLM_URL", llmURLDefault(backend))
 		c.LLM.Key = envOr("DEV_AGENT_LLM_KEY", llmKeyDefault(backend))
 		c.LLM.Model = envOr("DEV_AGENT_LLM_MODEL", llmModelDefault(backend))
+		if v := os.Getenv("DEV_AGENT_LLM_MAX_REQUESTS"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("DEV_AGENT_LLM_MAX_REQUESTS: %w", err)
+			}
+			c.LLM.MaxRequests = n
+		}
 	}
 	return c, nil
 }
 
 // String renders the effective configuration WITHOUT secrets.
 func (c *Config) String() string {
-	return fmt.Sprintf("interval=%s watch=%s state-dir=%s allow-heal=%t api=%s history-max=%d llm-backend=%s",
-		c.Interval, strings.Join(c.Watch, ","), c.StateDir, c.AllowHeal, c.APIAddr, c.HistoryMax, c.LLM.Backend)
+	return fmt.Sprintf("interval=%s watch=%s state-dir=%s allow-heal=%t api=%s history-max=%d llm-backend=%s llm-max-requests=%d",
+		c.Interval, strings.Join(c.Watch, ","), c.StateDir, c.AllowHeal, c.APIAddr, c.HistoryMax, c.LLM.Backend, c.LLM.MaxRequests)
 }
 
 func splitList(v string) []string {

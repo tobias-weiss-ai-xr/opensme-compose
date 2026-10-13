@@ -132,8 +132,11 @@ Contract-Zeile.*
 1. ✅ `contracts/agents.yml` + Layer-0-Erweiterung (5 Agenten unter
    Guardrails: dev-agent, dev-maintenance-bot, predictive-agent, taskfleet,
    portal-assistant — Sabotage-geprüft).
-2. `agent-guardrails`-Spec + Kill-Switch/Budget-Umsetzung im dev-agent
-   (Budget-Envs in den compose-Wiring heben, Go-Seite erzwingen).
+2. ✅ `agent-guardrails`-Spec + Budget-Enforcement im dev-agent
+   (Go): `DEV_AGENT_LLM_MAX_REQUESTS` per-run Outbound-Cap, Cache-Hits
+   budgetfrei, Pause + evidence kind `budget` + Metrik bei Exhaust,
+   Consent-Defaults off; Contract/Compose/.env verdrahtet, Layer-0 prüft
+   Budget-Env.
 3. `agent_saga.py` (AS1 zuerst — der Pfad existiert heute schon fast).
 4. `agent-knowledge`/`agent-assistant` (RAG-Vertrag, Quellenpflicht).
 5. AS2/AS3/AS5 dort, wo die Profile (ticketing/camunda/paperless) eh laufen.

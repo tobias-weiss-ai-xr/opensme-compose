@@ -170,13 +170,13 @@ func TestAnonymize(t *testing.T) {
 }
 
 func TestLLMDisabledByDefault(t *testing.T) {
-	if NewLLM("none", "", "", "") != nil {
+	if NewLLM("none", "", "", "", 0) != nil {
 		t.Error("backend none must produce nil LLM (no dial-out)")
 	}
-	if NewLLM("", "", "", "") != nil {
+	if NewLLM("", "", "", "", 0) != nil {
 		t.Error("empty backend must produce nil LLM")
 	}
-	l := NewLLM("ollama", "http://x", "", "m")
+	l := NewLLM("ollama", "http://x", "", "m", 0)
 	if !l.Enabled() {
 		t.Error("configured backend must be enabled")
 	}

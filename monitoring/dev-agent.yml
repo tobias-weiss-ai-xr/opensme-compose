@@ -134,6 +134,10 @@ services:
       DEV_AGENT_LLM_BACKEND: ${DEV_MAINTENANCE_BOT_LLM_BACKEND:-none}
       DEV_AGENT_LLM_URL: ${DEV_MAINTENANCE_BOT_LLM_URL:-}
       DEV_AGENT_LLM_MODEL: ${DEV_MAINTENANCE_BOT_LLM_MODEL:-}
+      # Budget: max outbound LLM calls per run (0 = unlimited). The agent
+      # pauses the reconcile cycle and records a "budget" evidence entry
+      # when exhausted (agent-guardrails spec).
+      DEV_AGENT_LLM_MAX_REQUESTS: ${DEV_AGENT_LLM_MAX_REQUESTS:-0}
       TZ: ${TZ:-Europe/Berlin}
     networks:
       - opensme-net

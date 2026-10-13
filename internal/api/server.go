@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,11 +23,11 @@ import (
 	"opensme-dev-agent/internal/knowledge"
 )
 
-// EvidenceEntry is one auditable record: either an anonymizer strip
-// operation or a heal action. Raw values NEVER enter this log.
+// EvidenceEntry is one auditable record: an anonymizer strip operation, a
+// heal action, or a budget truncation. Raw values NEVER enter this log.
 type EvidenceEntry struct {
 	Time  time.Time `json:"time"`
-	Kind  string    `json:"kind"` // "strip" | "heal"
+	Kind  string    `json:"kind"` // "strip" | "heal" | "budget"
 	What  string    `json:"what"`
 	Where string    `json:"where"`
 	Why   string    `json:"why"`
@@ -60,11 +61,12 @@ type Server struct {
 	checked    bool
 
 	// Counters for /metrics (Prometheus format)
-	reconciles int
-	healCount  int
-	llmCalls   int
-	llmErrors  int
-	llmLatency time.Duration
+	reconciles           int
+	healCount            int
+	llmCalls             int
+	llmErrors            int
+	llmLatency           time.Duration
+	llmBudgetTruncations int
 }
 
 // New wires the server. It loads persisted history/evidence from the state
@@ -109,13 +111,19 @@ func (s *Server) Reconcile(ctx context.Context) error {
 	s.reconciles++
 	s.mu.Unlock()
 
+	budgetPaused := false
 	for _, f := range findings {
+		if budgetPaused {
+			break
+		}
 		for _, sym := range f.Symptoms {
 			for _, m := range s.kb.MatchSymptom(sym) {
 				s.addMatch(f.Service, m)
 			}
 		}
-		// LLM analysis: opt-in only, anonymized only.
+		// LLM analysis: opt-in only, anonymized only. Budget pauses the
+		// cycle (agent-guardrails): once DEV_AGENT_LLM_MAX_REQUESTS is spent,
+		// no further dial-out and one auditable "budget" evidence entry.
 		if s.llm != nil && s.llm.Enabled() {
 			start := time.Now()
 			analysis, err := s.llm.Analyze(ctx, s, f)
@@ -126,6 +134,16 @@ func (s *Server) Reconcile(ctx context.Context) error {
 				s.llmErrors++
 			}
 			s.mu.Unlock()
+			if errors.Is(err, ErrBudgetExceeded) {
+				s.mu.Lock()
+				s.llmBudgetTruncations++
+				s.mu.Unlock()
+				s.addEvidence(EvidenceEntry{Time: time.Now().UTC(), Kind: "budget",
+					What:  "llm budget exhausted",
+					Where: f.Container, Why: "no further outbound LLM calls this run"})
+				budgetPaused = true
+				break
+			}
 			if err != nil {
 				slog.Warn("llm analysis failed", "container", f.Container, "err", err)
 				// The error text can embed the backend URL/host/IP — run it
@@ -242,6 +260,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(&b, "# HELP dev_agent_llm_errors_total Total LLM analysis errors\n")
 	fmt.Fprintf(&b, "# TYPE dev_agent_llm_errors_total counter\n")
 	fmt.Fprintf(&b, "dev_agent_llm_errors_total %d\n", s.llmErrors)
+	fmt.Fprintf(&b, "# HELP dev_agent_llm_budget_truncations_total Times the LLM budget stopped the cycle\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_llm_budget_truncations_total counter\n")
+	fmt.Fprintf(&b, "dev_agent_llm_budget_truncations_total %d\n", s.llmBudgetTruncations)
 	fmt.Fprintf(&b, "# HELP dev_agent_llm_latency_seconds_last Last LLM call latency in seconds\n")
 	fmt.Fprintf(&b, "# TYPE dev_agent_llm_latency_seconds_last gauge\n")
 	fmt.Fprintf(&b, "dev_agent_llm_latency_seconds_last %.4f\n", s.llmLatency.Seconds())

@@ -43,12 +43,16 @@ agents:
     kill_switch_env: null          # one-shot by design (restart: "no")
     privacy:
       strip: [secrets, private_ips, internal_hostnames, user_paths]
+    budgets:
+      max_requests_env: DEV_AGENT_LLM_MAX_REQUESTS   # 0 = unlimited
     compensation:
       on_missing_consent: dry-run-receipt
+      on_budget_exceeded: pause-cycle + budget evidence entry
       audit: persisted-evidence-log
     invariants:
       - docker socket read-only
       - llm backend off by default (DEV_MAINTENANCE_BOT_LLM_BACKEND=none)
+      - llm budget default unlimited (0) but wired; operator sets a cap
       - one-shot (restart "no")
 
   - name: predictive-agent

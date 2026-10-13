@@ -48,7 +48,7 @@ func llmServer(t *testing.T) *Server {
 	}
 	chk := checker.New(cfg.Watch, secretRunner{})
 	s, err := New(cfg, kb, chk, healer.New(false, nil),
-		NewLLM("ollama", "http://127.0.0.1:1", "", "m"))
+		NewLLM("ollama", "http://127.0.0.1:1", "", "m", 0))
 	if err != nil {
 		t.Fatal(err)
 	}

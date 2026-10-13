@@ -106,6 +106,45 @@ func TestHistoryMax(t *testing.T) {
 	}
 }
 
+func TestLLMBudgetEnv(t *testing.T) {
+	// Default: 0 = unlimited (no behavior change when unset).
+	setenv(t, map[string]string{"DEV_AGENT_LLM_BACKEND": "ollama"})
+	c, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LLM.MaxRequests != 0 {
+		t.Errorf("default MaxRequests = %d, want 0 (unlimited)", c.LLM.MaxRequests)
+	}
+	// Explicit limit is parsed.
+	setenv(t, map[string]string{
+		"DEV_AGENT_LLM_BACKEND":      "ollama",
+		"DEV_AGENT_LLM_MAX_REQUESTS": "5",
+	})
+	c, err = FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LLM.MaxRequests != 5 {
+		t.Errorf("MaxRequests = %d, want 5", c.LLM.MaxRequests)
+	}
+	// Negative / malformed values must error.
+	setenv(t, map[string]string{
+		"DEV_AGENT_LLM_BACKEND":      "ollama",
+		"DEV_AGENT_LLM_MAX_REQUESTS": "-3",
+	})
+	if _, err := FromEnv(); err == nil {
+		t.Error("negative max-requests must error")
+	}
+	setenv(t, map[string]string{
+		"DEV_AGENT_LLM_BACKEND":      "ollama",
+		"DEV_AGENT_LLM_MAX_REQUESTS": "many",
+	})
+	if _, err := FromEnv(); err == nil {
+		t.Error("malformed max-requests must error")
+	}
+}
+
 func TestStringOmitsSecrets(t *testing.T) {
 	setenv(t, map[string]string{
 		"DEV_AGENT_LLM_BACKEND": "openai",

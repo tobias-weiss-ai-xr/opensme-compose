@@ -178,6 +178,10 @@ def check_agents_contract() -> list[str]:
                 wired = kill in json.dumps(cenv)
             if not wired:
                 errors.append(f"{name}: kill_switch_env {kill} not wired in compose environment")
+
+        budget = (a.get("budgets") or {}).get("max_requests_env")
+        if budget and budget not in env_str:
+            errors.append(f"{name}: budgets.max_requests_env {budget} not wired in compose environment")
     return errors
 
 
