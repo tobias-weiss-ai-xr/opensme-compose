@@ -52,7 +52,25 @@ pub struct IntercomConfig {
 
 impl IntercomConfig {
     pub fn from_env(opensme_domain: &str) -> Self {
-        let default_hosts = format!("cloud.{}", opensme_domain);
+        // The cloud host is wherever OPENCLOUD_URL points (it differs per
+        // deployment); also keep the classic cloud.<opensme-domain> name.
+        let mut hosts = vec![format!("cloud.{}", opensme_domain)];
+        if let Ok(oc) = std::env::var("OPENCLOUD_URL") {
+            let host = oc
+                .trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("");
+            if !host.is_empty() {
+                let host = host.to_string();
+                if !hosts.contains(&host) {
+                    hosts.push(host);
+                }
+            }
+        }
+        let default_hosts = hosts.join(",");
         let raw =
             std::env::var("INTERCOM_ATTACHMENT_HOSTS").unwrap_or_else(|_| default_hosts.clone());
         let allowed_hosts = raw

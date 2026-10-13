@@ -362,6 +362,7 @@
   var plList = plCard.querySelector("#pl-list");
   var plQuestion = plCard.querySelector(".pl-question");
   var plOptions = plCard.querySelector(".pl-options");
+  var plUrl = plCard.querySelector(".pl-url");
   var plFile = plCard.querySelector("#pl-file");
   var plFileName = plCard.querySelector(".ic-file-name");
   var plCreate = plCard.querySelector(".pl-create");
@@ -395,6 +396,7 @@
   function resetForm() {
     plQuestion.value = "";
     plOptions.value = "";
+    plUrl.value = "";
     plFile.value = "";
     plFileName.textContent = "";
     plOut.hidden = true;
@@ -489,10 +491,17 @@
     plOut.hidden = false;
     var file = plFile.files && plFile.files[0];
     var done = function () { resetForm(); refresh(); };
+    var extraUrl = (plUrl.value || "").trim();
+    if (extraUrl) {
+      extraUrl = "&attachment_url=" + encodeURIComponent(extraUrl);
+    } else {
+      extraUrl = "";
+    }
     if (file) {
       var url =
         "/api/polls/upload?question=" + encodeURIComponent(question) +
         "&options=" + encodeURIComponent(JSON.stringify(options)) +
+        extraUrl +
         "&filename=" + encodeURIComponent(file.name);
       fetch(url, {
         method: "POST",
@@ -506,7 +515,11 @@
       fetch("/api/polls", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question, options: options })
+        body: JSON.stringify({
+          question: question,
+          options: options,
+          attachment_url: extraUrl ? (plUrl.value || "").trim() : ""
+        })
       })
         .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
         .then(done)

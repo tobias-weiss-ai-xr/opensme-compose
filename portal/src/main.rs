@@ -257,6 +257,7 @@ fn build_landing_page(config: &AppConfig) -> String {
                     <div class="pl-box">
                         <input class="pl-question" maxlength="300" placeholder="Frage…" aria-label="Frage">
                         <textarea class="pl-options" rows="3" placeholder="Antwortoptionen — eine pro Zeile (min. 2)" aria-label="Antwortoptionen"></textarea>
+                        <input class="ic-url pl-url" type="url" placeholder="Anhang aus der Cloud — geteilten Link einfügen (https://cloud…/s/…)" aria-label="Umfrage-Anhang-URL">
                         <div class="ic-actions">
                             <label class="ic-file-label" for="pl-file">📎 Datei…</label>
                             <input class="ic-file" id="pl-file" type="file" aria-label="Umfrage-Anhang" hidden>
@@ -1066,6 +1067,9 @@ fn polls_store_from_env() -> Option<Arc<polls::PollStore>> {
 struct PollPost {
     question: String,
     options: Vec<String>,
+    /// Cloud share link (https://cloud…/s/…) — metadata snapshot only.
+    #[serde(default)]
+    attachment_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1080,6 +1084,9 @@ struct PollUploadQuery {
     options: String,
     #[serde(default)]
     filename: Option<String>,
+    /// Cloud share link — alternative to a picked-file upload body.
+    #[serde(default)]
+    attachment_url: Option<String>,
 }
 
 async fn handle_polls_list(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
@@ -1106,7 +1113,13 @@ async fn handle_polls_create(
         Ok(pair) => pair,
         Err(e) => return bad(&e).into_response(),
     };
-    let poll = store.create(question, options, None);
+    let attachment =
+        match resolve_cloud_attachment(&config, post.attachment_url.as_deref().unwrap_or("")).await
+        {
+            Ok(a) => a,
+            Err(e) => return bad(&e).into_response(),
+        };
+    let poll = store.create(question, options, attachment);
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "poll": poll })),
@@ -1140,7 +1153,17 @@ async fn handle_polls_upload(
         Ok(pair) => pair,
         Err(e) => return bad(&e).into_response(),
     };
-    let attachment = if bytes.is_empty() {
+    let attachment = if let Some(url) = q
+        .attachment_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match resolve_cloud_attachment(&config, url).await {
+            Ok(a) => a,
+            Err(e) => return bad(&e).into_response(),
+        }
+    } else if bytes.is_empty() {
         None
     } else {
         let filename = q
@@ -1236,6 +1259,53 @@ async fn handle_polls_file(
     }
 }
 
+/// Resolve an "attachment from the cloud" URL into a metadata snapshot:
+/// SSRF/allowlist guards + HEAD + Content-Disposition/Length/Type. The
+/// file itself stays in the cloud — the portal never mediates bodies.
+async fn resolve_cloud_attachment(
+    config: &AppConfig,
+    raw: &str,
+) -> Result<Option<intercom::Attachment>, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let url = intercom::validate_attachment_url(raw, &config.intercom)?;
+    let head = config
+        .intercom_client
+        .head(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await;
+    let head = match head {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            return Err(format!(
+                "attachment source answered HTTP {}",
+                r.status().as_u16()
+            ))
+        }
+        Err(_) => return Err("attachment source unreachable".to_string()),
+    };
+    let hdr = |name: &axum::http::HeaderName| {
+        head.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    };
+    let size = head
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok());
+    Ok(Some(intercom::parse_attachment_metadata(
+        &url,
+        hdr(&axum::http::header::CONTENT_TYPE).as_deref(),
+        size,
+        hdr(&axum::http::header::CONTENT_DISPOSITION).as_deref(),
+    )))
+}
+
 async fn handle_intercom_post(
     State(config): State<Arc<AppConfig>>,
     Json(post): Json<IntercomPost>,
@@ -1255,50 +1325,12 @@ async fn handle_intercom_post(
         Err(e) => return bad(&e).into_response(),
     };
 
-    let attachment = match post.attachment_url.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some(raw) => {
-            let url = match intercom::validate_attachment_url(raw, &config.intercom) {
-                Ok(u) => u,
-                Err(e) => return bad(&e).into_response(),
-            };
-            // Snapshot the metadata at send time — the file stays in the cloud.
-            let head = config
-                .intercom_client
-                .head(&url)
-                .timeout(Duration::from_secs(10))
-                .send()
-                .await;
-            let head = match head {
-                Ok(r) if r.status().is_success() => r,
-                Ok(r) => {
-                    return bad(&format!(
-                        "attachment source answered HTTP {}",
-                        r.status().as_u16()
-                    ))
-                    .into_response()
-                }
-                Err(_) => return bad("attachment source unreachable").into_response(),
-            };
-            let hdr = |name: &axum::http::HeaderName| {
-                head.headers()
-                    .get(name)
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
-            };
-            let size = head
-                .headers()
-                .get(CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse().ok());
-            Some(intercom::parse_attachment_metadata(
-                &url,
-                hdr(&CONTENT_TYPE).as_deref(),
-                size,
-                hdr(&CONTENT_DISPOSITION).as_deref(),
-            ))
-        }
-    };
+    let attachment =
+        match resolve_cloud_attachment(&config, post.attachment_url.as_deref().unwrap_or("")).await
+        {
+            Ok(a) => a,
+            Err(e) => return bad(&e).into_response(),
+        };
 
     let msg = config.intercom_store.push(text, attachment);
     metrics::global().inc_intercom_message();
