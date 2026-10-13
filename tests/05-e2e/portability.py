@@ -183,25 +183,35 @@ def main() -> int:
             # before every attempt instead of failing on a single 404
             att = None
             for attempt in range(6):
-                if not ensure_portal_routed(session, new_portal):
-                    # Diagnose the routing state instead of guessing:
-                    # container up? which routers does traefik actually have?
+                routed = ensure_portal_routed(session, new_portal)
+                print(f"  [diag] attempt {attempt}: routed={routed}", flush=True)
+                if not routed:
                     import subprocess as _sp
                     state = _sp.run(
-                        ["docker", "ps", "--filter", "name=opensme-portal",
+                        ["docker", "ps", "-a", "--filter", "name=opensme-portal",
                          "--format", "{{.Names}} {{.Status}}"],
                         capture_output=True, text=True, timeout=30)
-                    print(f"  [diag] ensure-fail attempt {attempt}: "
-                          f"portal={state.stdout.strip() or 'NOT RUNNING'}")
+                    print(f"  [diag]   portal={state.stdout.strip() or 'NOT RUNNING'}",
+                          flush=True)
                     continue
-                att = session.post(new_portal + "/api/intercom",
-                                   json={"text": "Domain-Migration klappt",
-                                         "attachment_url":
-                                             f"http://cloud.{NEW_DOMAIN}/Angebot_2026.pdf"},
-                                   timeout=30)
+                try:
+                    att = session.post(new_portal + "/api/intercom",
+                                       json={"text": "Domain-Migration klappt",
+                                             "attachment_url":
+                                                 f"http://cloud.{NEW_DOMAIN}/Angebot_2026.pdf"},
+                                       timeout=30)
+                    print(f"  [diag]   POST -> HTTP {att.status_code} "
+                          f"{att.text[:100]!r}", flush=True)
+                except requests.RequestException as exc:
+                    print(f"  [diag]   POST raised: {exc!r}", flush=True)
+                    att = None
+                    time.sleep(5)
+                    continue
                 if att.status_code != 404:
                     break
                 time.sleep(5)
+            print(f"  [diag] loop done: att={'None' if att is None else att.status_code}",
+                  flush=True)
             v3 = att is not None and att.status_code == 201
             (result.ok if v3 else result.fail)(
                 "derived allowlist follows the new domain (cloud.<domain> accepted)"
