@@ -403,7 +403,7 @@ for u in users:
     status, body = req("POST", "/_synapse/admin/v1/register", payload)
     if status == 200:
         print("  \u2713 " + un + (" (admin)" if admin == "true" else ""))
-    elif body.get("errcode") == "M_USER_EXISTS":
+    elif body.get("errcode") in ("M_USER_EXISTS", "M_USER_IN_USE"):
         print("  - " + un + " (exists)")
     else:
         print("  ! " + un + " failed: " + str(body.get("errcode", status)))
