@@ -36,7 +36,9 @@ SID="$(psql -tAc "SELECT surveyls_survey_id FROM lime_surveys_languagesettings W
 if [ -n "$SID" ]; then
   echo "✓ example survey already exists (sid=$SID) — nothing to do"
 else
-  SID="$(psql -tAc "SELECT nextval(pg_get_serial_sequence('lime_surveys','sid'))" | tr -d '[:space:]')"
+  # LimeSurvey has no sid sequence (sids are generated app-side) — use
+  # max+1 with a 6-digit floor, deterministic and collision-free
+  SID="$(psql -tAc "SELECT GREATEST(100000, COALESCE((SELECT max(sid) FROM lime_surveys),99999)+1)" | tr -d '[:space:]')"
 
   # ── Survey (active, all-in-one, german) + language settings ──
   psql -1 -v ON_ERROR_STOP=1 <<SQL
