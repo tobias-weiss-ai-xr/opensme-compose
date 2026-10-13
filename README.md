@@ -448,12 +448,18 @@ openSME-compose/
 │   └── sogo.yml                # Overlay: SOGo groupware (webmail/calendar)
 ├── services/                   # Optional service overlays
 │   ├── invoice-ninja.yml       # Overlay: Invoice Ninja (--profile invoice)
+│   ├── invoice-ninja/          # Invoice Ninja nginx sidecar config
 │   ├── paperless.yml           # Overlay: Paperless-ngx + Gotenberg + Tika
 │   ├── cryptpad.yml            # Overlay: CryptPad (--profile collab)
 │   ├── synapse.yml             # Overlay: Synapse Matrix chat (--profile chat)
 │   ├── element.yml             # Overlay: Element-Web (--profile element)
-│   ├── notes.yml               # Overlay: Notes/Impress (--profile notes)
-│   ├── synapse-setup.sh        # Synapse homeserver.yaml generator
+│   ├── notes.yml               # Overlay: Notes/Impress + Y-Provider (--profile notes)
+│   ├── camunda.yml             # Overlay: Operaton BPMN engine (--profile camunda)
+│   ├── ticketing.yml           # Overlay: Nosdesk helpdesk (--profile ticketing)
+│   ├── cms.yml                 # Overlay: crap-cms website (--profile cms)
+│   ├── store.yml               # Overlay: RaisFast e-commerce (--profile store)
+│   ├── ai.yml                  # Overlay: llama.cpp AI backend (--profile ai)
+│   ├── synapse-setup.sh        # Synapse homeserver.yaml generator (POSIX-sh)
 │   └── cryptpad-config/        # CryptPad configuration
 ├── monitoring/
 │   ├── dev-agent.yml           # Overlay: Reactive container health (LLM analysis)
@@ -491,9 +497,13 @@ openSME-compose/
 │   ├── demo-live.sh           # Deploy to server with Let's Encrypt
 │   ├── backup.sh              # Backup PostgreSQL + Traefik + volumes
 │   ├── restore.sh             # Restore from backup
-│   ├── zitadel-client.sh      # Idempotent OIDC client registration for OpenCloud
+│   ├── zitadel-client.sh      # Idempotent Zitadel OIDC provisioning (--app opencloud|notes|synapse)
+│   ├── verify-backup.sh       # Verify a backup set: structure + AES-encrypted archives
+│   ├── compliance.py          # Runs the static suite, emits timestamped compliance reports
 │   ├── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
 │   └── provision-demo-users.sh # Provision 12 demo users in Zitadel (12 person SME)
+├── contracts/                  # Integration contracts: tiles, interop, ports, security, health
+├── specs/                      # Per-service compose contracts (checked by test layer 1)
 ├── postgres-init/
 │   ├── 00-create-databases.sql # Auto-creates 7 databases on first start
 │   └── 01-create-users.sh      # Per-service database users
@@ -524,7 +534,9 @@ openSME-compose/
 │       ├── perf-boot/spec.md
 │       ├── perf-budgets/spec.md
 │       ├── perf-ops/spec.md
-│       └── perf-tuning/spec.md
+│       ├── perf-tuning/spec.md
+│       ├── portal-catalog/spec.md
+│       └── sme-interoperability/spec.md
 ├── tests/                       # Automated test pyramid (layers 0-6)
 │   ├── 00-static/              # Layer 0: stack-free contract checks + secrets
 │   ├── 01-specs/               # Layer 1: spec compliance (schema + image pins)
@@ -1013,6 +1025,8 @@ make restore-from BACKUP=<ts>  # Restore from backup
 | `scripts/backup.sh` | Backup PostgreSQL + Traefik + volumes (`--volumes`, `--dry-run`, `--no-stop`, `--services`) |
 | `scripts/restore.sh` | Restore from backup (`--list`, `--dry-run`, `--pg-only`, `--volumes-only`) |
 | `scripts/mailcow.sh` | Drive the mailcow mail backend (pinned submodule; requires `MAIL_BACKEND=mailcow` — strict XOR with Stalwart) |
+| `scripts/zitadel-client.sh` | Idempotent Zitadel OIDC app provisioning (`--app opencloud\|notes\|synapse`) — registers the client with the correct redirect URIs and persists the minted id/secret to `.env` |
+| `scripts/verify-backup.sh` | Verify a backup set: artifact presence, `gzip -t`/`tar -tzf`, AES-encrypted archives decrypt cleanly |
 | `bootstrap/bpmn-deploy.sh` | Deploy sample BPMN processes to the Operaton engine |
 
 ## Backup &amp; Restore
@@ -1127,9 +1141,11 @@ Zitadel has a built-in project/app management UI at
 2. Navigate to **Projects** → **opensme** → **Applications**
 3. Create a new application with redirect URI
    `https://cloud.your-domain` (no trailing slash)
-4. Copy the client ID and secret into `.env` as `OC_OIDC_CLIENT_ID` / `OC_OIDC_CLIENT_SECRET`
-   (scripts/zitadel-client.sh does this automatically; legacy `OC_OIDC_SECRET`
-   is only kept as an alias for older `.env` files)
+4. Copy the client ID and secret into `.env` as `OC_OIDC_CLIENT_ID` / `OC_OIDC_CLIENT_SECRET`.
+   `scripts/zitadel-client.sh` automates this end-to-end and is generalized per app —
+   `--app opencloud|notes|synapse` registers (idempotently) the matching Zitadel app with
+   the correct redirect URIs and persists the Zitadel-minted credentials into `.env`
+   (legacy `OC_OIDC_SECRET` is only kept as an alias for older `.env` files).
 
 </details>
 
@@ -1263,6 +1279,8 @@ Built with:
 - [Architecture (ARC-42)](docs/ARC42.md) — architecture documentation
 - [Performance &amp; efficiency](docs/PERFORMANCE.md) — per-tier tuning, budgets, benchmark protocol
 - [Perf baselines](docs/perf/baselines.md) — measured resource numbers per tier
+- [E2E journeys](docs/E2E-JOURNEYS.md) — the user journeys the e2e suite proves
+- [Compliance](docs/COMPLIANCE.md) — compliance posture &amp; evidence
 - [Roadmap](docs/ROADMAP.md) — current scope, in-flight work, backlog
 - [Validation](docs/VALIDATION.md) — test layers, CI gates, release checklist
 - [Test suite](tests/README.md) — the layered test pyramid, layer by layer
