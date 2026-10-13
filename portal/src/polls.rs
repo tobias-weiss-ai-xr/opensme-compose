@@ -402,10 +402,6 @@ mod tests {
         d
     }
 
-    fn store_with(dir: &std::path::Path, file: &str) -> PollStore {
-        PollStore::open(Some(dir.join(file)), None, None)
-    }
-
     // ── validation ─────────────────────────────────────────────────────
 
     #[test]
@@ -516,7 +512,7 @@ mod tests {
             Some(9),
             Some("attachment; filename=\"beschluss.pdf\""),
         );
-        let p = store.create("Abstimmung".into(), opts(&["ja", "nein"]), Some(att));
+        store.create("Abstimmung".into(), opts(&["ja", "nein"]), Some(att));
         assert_eq!(
             store.list()[0].attachment.as_ref().unwrap().name,
             "beschluss.pdf"

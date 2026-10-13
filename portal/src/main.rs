@@ -1310,7 +1310,6 @@ async fn handle_intercom_post(
     State(config): State<Arc<AppConfig>>,
     Json(post): Json<IntercomPost>,
 ) -> impl IntoResponse {
-    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
     use axum::response::IntoResponse;
 
     let bad = |msg: &str| {
