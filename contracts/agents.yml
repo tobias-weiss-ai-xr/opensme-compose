@@ -1,0 +1,99 @@
+name: agent-guardrails
+description: >
+  Machine-checkable contract for every agent in the stack (docs/AGENTIC-AI.md
+  §5): which tools an agent may use, what it may write (write_mode), which
+  env flags gate consent / features / kill switches, what is stripped from
+  outbound payloads, and how failures are compensated. "No agent without a
+  contract line." Enforced by tests/00-static/check_agent.py (Layer 0).
+severity: error
+schema: 1
+
+# write_mode:
+#   none     — read-only by construction (observer/analyst)
+#   draft    — produces proposals a human must commit
+#   consent  — acts only after an explicit opt-in env flag
+#   approved — acts autonomously, but every change is gated by CI (tests)
+# checks: static contract ↔ compose wiring validation (Layer 0)
+
+agents:
+  - name: dev-agent
+    compose_service: dev-agent
+    compose_file: monitoring/dev-agent.yml
+    role: reactive observer — container health, LLM root-cause analysis
+    write_mode: none
+    tools: [docker-readonly, llm-optional, http-internal]
+    consent_env: null
+    kill_switch_env: null
+    privacy:
+      strip: [secrets, private_ips, internal_hostnames, user_paths]
+    budgets:
+      max_analyses_per_cycle_env: MAX_PODS_PER_CYCLE
+    invariants:
+      - docker socket read-only
+      - llm backend explicit opt-in (LLM_BACKEND)
+
+  - name: dev-maintenance-bot
+    compose_service: dev-maintenance-bot
+    compose_file: monitoring/dev-agent.yml
+    role: runbook-driven remediation with explicit consent
+    write_mode: consent
+    tools: [docker-readonly, runbook-kb, http-internal]
+    consent_env: DEV_AGENT_ALLOW_HEAL
+    consent_default: "false"
+    kill_switch_env: null          # one-shot by design (restart: "no")
+    privacy:
+      strip: [secrets, private_ips, internal_hostnames, user_paths]
+    compensation:
+      on_missing_consent: dry-run-receipt
+      audit: persisted-evidence-log
+    invariants:
+      - docker socket read-only
+      - llm backend off by default (DEV_MAINTENANCE_BOT_LLM_BACKEND=none)
+      - one-shot (restart "no")
+
+  - name: predictive-agent
+    compose_service: predictive-agent
+    compose_file: monitoring/predictive-agent.yml
+    role: predictive risk scoring (Kalman/Markov/Bayes) — never acts
+    write_mode: none
+    tools: [docker-readonly, llm-optional, http-internal]
+    consent_env: null
+    kill_switch_env: PREDICTION_ENABLED
+    privacy:
+      strip: [secrets, private_ips, internal_hostnames, user_paths]
+    invariants:
+      - docker socket read-only
+      - predictions are advisory output only
+
+  - name: taskfleet
+    compose_service: taskfleet
+    compose_file: monitoring/taskfleet.yml
+    role: parallel LLM development workers in isolated git worktrees
+    write_mode: approved
+    tools: [git-worktrees, docker-socket, llm, repo-rw]
+    consent_env: null
+    approval: ci-gates             # merge only after the full test pyramid
+    kill_switch_env: null          # one-shot on demand (compose run --rm)
+    privacy:
+      strip: [secrets]             # repo-local; scans via scan_secrets gate
+    compensation:
+      on_failure: worktree-discarded
+      audit: taskfleet-state-history
+    invariants:
+      - never touches the live stack
+      - merge gated by Layer 0..6 test pyramid
+
+  - name: portal-assistant
+    compose_service: ai
+    compose_file: services/ai.yml
+    consumer_service: portal        # mounts the card only when AI_API_URL set
+    role: local chat assistant (llama.cpp) — read-only answers
+    write_mode: none
+    tools: [llm-local]
+    consent_env: null
+    kill_switch_env: AI_API_URL     # empty/unset = card + route hidden
+    privacy:
+      strip: [secrets]
+    invariants:
+      - degrade invisible (Epic D): absent backend, absent card
+      - no user data persisted by the portal beyond the session

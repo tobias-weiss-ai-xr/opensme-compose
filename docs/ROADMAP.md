@@ -33,7 +33,9 @@ Status and direction of the openSME Compose distribution.
 ## Backlog / ideas
 
 - **Agentic AI integration** — blueprint with sagas AS1–AS6, epics AD–AH,
-  specs and `contracts/agents.yml`: see `docs/AGENTIC-AI.md`.
+  specs: see `docs/AGENTIC-AI.md`. `contracts/agents.yml` (guardrails,
+  write modes, consent, privacy) is enforced by Layer-0 since the first
+  step landed.
 - Digest-pinned image manifests for reproducible deploys (operator opt-in).
 - Backup rotation to off-site object storage (rclone).
 - Helm-free upgrades tooling: `docker compose pull` + rolling `up -d` with

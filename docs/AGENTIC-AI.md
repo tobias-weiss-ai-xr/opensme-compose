@@ -109,12 +109,13 @@ Existierend: `dev-agent`, `dev-agent-compose`, `dev-agent-extensions`,
 
 ## 5. Contract — `contracts/agents.yml`
 
-Neu, analog `contracts/tiles.yml`: je Agent ein Eintrag
+Vorhanden, analog `contracts/tiles.yml`: je Agent ein Eintrag
 `name, compose_service, tools[], write_mode(none|draft|consent|approved),
-budgets{tokens,requests}, privacy{strip[]}, consent_env, kill_switch_env,
-compensation{on_failure}`. Statischer Check (`check_agents.py` Erweiterung)
-validiert: Contract ↔ compose (env, Mounts read-only, keine Ports) ↔
-Specs. *Kein Agent ohne Contract-Zeile.*
+consent_env, kill_switch_env, privacy{strip[]}, compensation{on_failure},
+invariants[]`. Statischer Check (`check_agent.py`) validiert: Contract ↔
+compose (env-Flags verdrahtet, consent default false, Mounts read-only,
+keine Ports, one-shot für Consent-Writer) ↔ Specs. *Kein Agent ohne
+Contract-Zeile.*
 
 ## 6. Tests (Pyramide je Epic)
 
@@ -128,8 +129,11 @@ Specs. *Kein Agent ohne Contract-Zeile.*
 
 ## 7. Reihenfolge
 
-1. `contracts/agents.yml` + Layer-0-Erweiterung (billig, hart, sofort).
-2. `agent-guardrails`-Spec + Kill-Switch/Budget-Umsetzung im dev-agent.
+1. ✅ `contracts/agents.yml` + Layer-0-Erweiterung (5 Agenten unter
+   Guardrails: dev-agent, dev-maintenance-bot, predictive-agent, taskfleet,
+   portal-assistant — Sabotage-geprüft).
+2. `agent-guardrails`-Spec + Kill-Switch/Budget-Umsetzung im dev-agent
+   (Budget-Envs in den compose-Wiring heben, Go-Seite erzwingen).
 3. `agent_saga.py` (AS1 zuerst — der Pfad existiert heute schon fast).
 4. `agent-knowledge`/`agent-assistant` (RAG-Vertrag, Quellenpflicht).
 5. AS2/AS3/AS5 dort, wo die Profile (ticketing/camunda/paperless) eh laufen.
