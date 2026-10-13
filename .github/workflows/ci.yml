@@ -249,7 +249,7 @@ jobs:
         # Isolated: builds the bot image if absent, drives its private REST
         # API via docker exec against self-created opensme-saga-* containers.
         run: python3 tests/05-e2e/agent_saga.py
-      - name: Run agent draft saga (AS2/AS3/AS5 write gate: draft → approve → commit)
+      - name: "Run agent draft saga (AS2/AS3/AS5 write gate: draft -> approve -> commit)"
         # Isolated: proves the generic agent write gate (drafts inert until a
         # human approves; audit at each stage) against its own bot container.
         run: python3 tests/05-e2e/agent_draft_saga.py
