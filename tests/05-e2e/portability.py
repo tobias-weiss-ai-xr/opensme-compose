@@ -212,6 +212,19 @@ def main() -> int:
                 time.sleep(5)
             print(f"  [diag] loop done: att={'None' if att is None else att.status_code}",
                   flush=True)
+            if att is None or att.status_code != 201:
+                import subprocess as _sp2
+                env_out = _sp2.run(
+                    ["docker", "inspect", "opensme-portal",
+                     "--format",
+                     "{{range .Config.Env}}{{println .}}{{end}}"],
+                    capture_output=True, text=True, timeout=30)
+                keep = [l for l in env_out.stdout.splitlines()
+                        if any(k in l for k in
+                               ("OPENSME_DOMAIN", "OPENCLOUD_URL",
+                                "INTERCOM_ATTACHMENT_HOSTS",
+                                "INTERCOM_ALLOW_HTTP", "PORTAL_DOMAIN"))]
+                print("  [diag] portal env: " + " | ".join(keep), flush=True)
             v3 = att is not None and att.status_code == 201
             (result.ok if v3 else result.fail)(
                 "derived allowlist follows the new domain (cloud.<domain> accepted)"
