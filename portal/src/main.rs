@@ -1393,10 +1393,16 @@ fn load_config() -> Arc<AppConfig> {
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
         polls: polls_store_from_env(),
-        intercom_client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .build()
-            .unwrap_or_default(),
+        intercom_client: {
+            let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+            // Egress-restricted hosts reach the cloud (attachment metadata
+            // HEAD, poll uploads) only through the egress proxy — same
+            // wiring as the feed client.
+            if let Some(proxy) = feeds::proxy_from_env() {
+                builder = builder.proxy(proxy);
+            }
+            builder.build().unwrap_or_default()
+        },
         feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(&load_env(
             "PORTAL_FEEDS",
             "",
