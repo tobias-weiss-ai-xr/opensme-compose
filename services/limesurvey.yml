@@ -64,7 +64,7 @@ services:
       ADMIN_PASSWORD: ${SURVEYS_ADMIN_PASSWORD:-}
       ADMIN_NAME: openSME Administrator
       ADMIN_EMAIL: hello@opensme.org
-      PUBLIC_URL: https://surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      PUBLIC_URL: https://${SURVEYS_DOMAIN:-surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}
       URL_FORMAT: path
       LISTEN_PORT: "8080"
       # sessions in DB so restarts/redeploys keep admin logins alive
@@ -86,7 +86,7 @@ services:
       start_period: 60s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.surveys.rule=Host(`surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.surveys.rule=Host(`${SURVEYS_DOMAIN:-surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}`)"
       - "traefik.http.routers.surveys.tls=true"
       - "traefik.http.routers.surveys.tls.certresolver=letsencrypt"
       - "traefik.http.routers.surveys.entrypoints=websecure"
