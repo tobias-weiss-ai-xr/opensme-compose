@@ -70,18 +70,18 @@ impl IntercomConfig {
                 }
             }
         }
-        let default_hosts = hosts.join(",");
-        let raw =
-            std::env::var("INTERCOM_ATTACHMENT_HOSTS").unwrap_or_else(|_| default_hosts.clone());
-        let allowed_hosts = raw
-            .split(',')
-            .map(|h| h.trim().to_lowercase())
-            .filter(|h| !h.is_empty())
-            .collect::<Vec<_>>();
-        let allowed_hosts = if allowed_hosts.is_empty() {
-            vec![default_hosts.to_lowercase()]
-        } else {
-            allowed_hosts
+        let env_hosts = std::env::var("INTERCOM_ATTACHMENT_HOSTS")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let allowed_hosts = match env_hosts {
+            Some(raw) => raw
+                .split(',')
+                .map(|h| h.trim().to_lowercase())
+                .filter(|h| !h.is_empty())
+                .collect::<Vec<_>>(),
+            // No env override: accept every derived default host.
+            None => hosts.iter().map(|h| h.to_lowercase()).collect(),
         };
         Self {
             allowed_hosts,
@@ -394,6 +394,31 @@ pub fn parse_attachment_metadata(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_hosts_cover_opencloud_url_host_even_with_empty_env() {
+        // Regression: with the composed default being a comma-joined
+        // string, an empty-but-set INTERCOM_ATTACHMENT_HOSTS produced a
+        // single allowlist entry containing a comma — nothing matched.
+        // SAFETY: single-threaded env access in this test binary section.
+        unsafe {
+            std::env::set_var("OPENCLOUD_URL", "http://cloud.opensme.local");
+            std::env::set_var("INTERCOM_ATTACHMENT_HOSTS", "");
+        }
+        let cfg = IntercomConfig::from_env("meine-firma.test");
+        assert!(cfg
+            .allowed_hosts
+            .contains(&"cloud.meine-firma.test".to_string()));
+        assert!(cfg
+            .allowed_hosts
+            .contains(&"cloud.opensme.local".to_string()));
+        let ok = validate_attachment_url("https://cloud.meine-firma.test/Angebot_2026.pdf", &cfg);
+        assert!(ok.is_ok());
+        unsafe {
+            std::env::remove_var("OPENCLOUD_URL");
+            std::env::remove_var("INTERCOM_ATTACHMENT_HOSTS");
+        }
+    }
+
     use super::*;
 
     fn cfg() -> IntercomConfig {
