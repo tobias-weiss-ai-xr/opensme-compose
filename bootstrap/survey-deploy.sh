@@ -28,7 +28,7 @@ if [ -z "${PG_USER:-}" ]; then
 fi
 
 psql() {
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$DB" "$@"
+  docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$DB" "$@"
 }
 
 # ── Idempotency: does the example survey already exist? ──
