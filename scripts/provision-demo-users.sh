@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
 #
-# scripts/provision-demo-users.sh — Provision 12 demo users in Zitadel
+# scripts/provision-demo-users.sh — Provision 12 demo users across components
 #
 # Part of the bootstrap process: creates users for an imaginary SME
 # company (OpenSME Muster GmbH) for demo and e2e testing purposes.
 #
-# Users are created with:
-#   - Realistic German names across 5 departments
-#   - Role-based group memberships
-#   - Predefined passwords (CHANGE IN PRODUCTION!)
-#   - Email addresses under @<domain>
+# Components (each with its OWN user store; OIDC-fed apps need no seeding):
+#   zitadel    IdP — machine-PAT admin API (the classic target)
+#   operaton   BPM engine — engine-rest identity + admin-webapp setup
+#   synapse    Matrix homeserver — shared-secret admin register API
+#   paperless  document vault — Django user model via manage.py shell
+#   stalwart   mail server — stalwart-cli accounts
+#   invoice    Invoice Ninja — NOT wired (users are company-bound; the
+#              demo ships a single admin seeded by its entrypoint)
+#
+# The same bootstrap/demo-users.json drives every component.
 #
 # Idempotent: running twice does NOT duplicate users.
 #
 # Usage:
-#   ./scripts/provision-demo-users.sh              # default: use docker exec to zitadel
-#   ./scripts/provision-demo-users.sh --host zitadel.opensme.local
-#   ./scripts/provision-demo-users.sh --wait      # wait for Zitadel ready
-#   ./scripts/provision-demo-users.sh --clean     # delete ALL demo users first
-#   ./scripts/provision-demo-users.sh --dry-run   # show JSON, exit
+#   ./scripts/provision-demo-users.sh                              # zitadel only (backwards compatible)
+#   ./scripts/provision-demo-users.sh --component operaton          # single component
+#   ./scripts/provision-demo-users.sh --component all               # every component, best effort
+#   ./scripts/provision-demo-users.sh --component synapse --dry-run # show plan
+#   ./scripts/provision-demo-users.sh --host ... --wait --clean ... # zitadel options (unchanged)
 #
-# Environment (overrides, highest precedence first):
-#   ZITADEL_HOST:       admin API host:port  (default: opensme-zitadel:8080 via docker)
-#   ZITADEL_EXTERNAL:   external host for IdP URLs (default: same as HOST)
-#   ZITADEL_singleSignOnDomain: SSO domain (default: opensme.local)
-#   ZITADEL_PAT:        machine PAT override (skips docker fetch)
-#   E2E_ZITADEL_PAT:    alternate PAT env var
+# Environment (component targets — auto-detected via docker when unset):
+#   OPERATON_URL      engine base, e.g. http://opensme-camunda:8080
+#   SYNAPSE_CONTAINER container name for the register API (default opensme-synapse)
+#   PAPERLESS_CONTAINER container name (default opensme-paperless)
+#   STALWART_CONTAINER  container name (default opensme-stalwart)
+#   ZITADEL_HOST / ZITADEL_EXTERNAL / ZITADEL_singleSignOnDomain / ZITADEL_PAT / E2E_ZITADEL_PAT
 #
 set -euo pipefail
 
@@ -42,6 +47,9 @@ CLEAN=false
 DRY_RUN=false
 VERBOSE=false
 IN_DOCKER=false
+COMPONENT="zitadel"
+
+ALL_COMPONENTS="zitadel operaton synapse paperless stalwart"
 
 # ── argument parsing ──────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -54,24 +62,28 @@ while [[ $# -gt 0 ]]; do
         --dry-run)    DRY_RUN=true; shift ;;
         --verbose|-v) VERBOSE=true; shift ;;
         --in-docker)  IN_DOCKER=true; shift ;;
+        --component)  COMPONENT="$2"; shift 2 ;;
         --help|-h)
             echo "Usage: $0 [options]"
             echo "Options:"
+            echo "  --component LIST   comma list: $ALL_COMPONENTS,all (default: zitadel)"
             echo "  --host HOST        Zitadel host:port (default: opensme-zitadel:8080 in docker)"
             echo "  --external HOST    External IdP hostname (default: same as --host)"
             echo "  --domain DOM       SSO domain (default: opensme.local)"
             echo "  --wait             Wait for Zitadel to be ready"
-            echo "  --clean            Delete all demo users first"
-            echo "  --dry-run          Show JSON config and exit"
+            echo "  --clean            Delete all demo users first (zitadel only)"
+            echo "  --dry-run          Show plan/config and exit"
             echo "  --verbose, -v      Verbose output"
             echo "  --in-docker        Running inside docker (adjusts curl Host header)"
             echo "  --help, -h         This help"
             echo ""
-            echo "Environment:"
-            echo "  ZITADEL_HOST        Override --host"
-            echo "  ZITADEL_EXTERNAL    Override --external"
-            echo "  ZITADEL_PAT         Machine PAT (skips docker fetch)"
-            echo "  E2E_ZITADEL_PAT     Alternate PAT env var"
+            echo "Components:"
+            echo "  zitadel    Zitadel IdP (machine PAT admin API)"
+            echo "  operaton   Operaton/Camunda engine identity + admin-webapp setup"
+            echo "  synapse    Matrix homeserver (shared-secret register API)"
+            echo "  paperless  Paperless-ngx users (Django manage.py)"
+            echo "  stalwart   Stalwart mail accounts (stalwart-cli)"
+            echo "  invoice    Invoice Ninja: not wired (company-bound users)"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -230,8 +242,289 @@ add_user_to_group() {
         "{\"userIds\": [\"$user_id\"]}" "$token" >/dev/null 2>&1
 }
 
-# ── main provisioning ────────────────────────────────────────────────
-main() {
+# ── shared config loading ─────────────────────────────────────────────
+load_config() {
+    if [[ ! -f "$USERS_JSON" ]]; then
+        err "Demo users config not found: $USERS_JSON"
+        return 1
+    fi
+    if ! jq empty "$USERS_JSON" 2>/dev/null; then
+        err "Invalid JSON in $USERS_JSON"
+        return 1
+    fi
+    COMPANY=$(jq -r '.company' "$USERS_JSON")
+}
+
+# Normalized email: local part from JSON, domain from --domain
+demo_email() {
+    local email="$1"
+    echo "${email%%@*}@${DOMAIN}"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# OPERATON (Camunda 7 compatible engine-rest identity + admin-webapp)
+# ══════════════════════════════════════════════════════════════════════
+OPERATON_URL="${OPERATON_URL:-}"
+OPERATON_CONTAINER="${OPERATON_CONTAINER:-opensme-camunda}"
+
+operaton_curl() {
+    # $1 http-code-fmt (0/1)  $2 method  $3 path  $4 data (optional)
+    local want_code="$1" method="$2" path="$3" data="${4:-}"
+    local args=(-s -X "$method" "http://localhost:8080$path")
+    [[ -n "$data" ]] && args+=(-H "Content-Type: application/json" -d "$data")
+    if [[ "$want_code" == "1" ]]; then
+        args+=(-o /dev/null -w '%{http_code}')
+    fi
+    if [[ -n "$OPERATON_URL" ]]; then
+        local url="${OPERATON_URL}${path}"
+        args[-1]="${url}"
+        curl "${args[@]}"
+    else
+        docker exec "$OPERATON_CONTAINER" curl "${args[@]}"
+    fi
+}
+
+main_operaton() {
+    load_config || return 1
+    info "[operaton] Provisioning engine users/groups for: $COMPANY"
+    $DRY_RUN && { info "[operaton] would create 12 users + department groups + admin-webapp setup (tweiss)"; return 0; }
+
+    local created=0 skipped=0
+    # Groups: slug from JSON name (opensme-* already slug-like)
+    while IFS= read -r gname; do
+        [[ -z "$gname" ]] && continue
+        local code
+        code=$(operaton_curl 1 GET "/engine-rest/group/$gname")
+        if [[ "$code" != "200" ]]; then
+            operaton_curl 1 POST "/engine-rest/group/create" \
+                "{\"id\":\"$gname\",\"name\":\"$gname\"}" >/dev/null
+            info "  ✓ group $gname"
+        else
+            $VERBOSE && info "  - group $gname exists"
+        fi
+    done < <(jq -r '.groups[].name' "$USERS_JSON")
+
+    # Users + memberships
+    while IFS= read -r user; do
+        local un fn ln em pw
+        un=$(echo "$user" | jq -r '.username')
+        fn=$(echo "$user" | jq -r '.firstName')
+        ln=$(echo "$user" | jq -r '.lastName')
+        em=$(demo_email "$(echo "$user" | jq -r '.email')")
+        pw=$(echo "$user" | jq -r '.password')
+        local code
+        code=$(operaton_curl 1 GET "/engine-rest/user/$un")
+        if [[ "$code" != "200" ]]; then
+            local payload
+            payload=$(jq -n --arg id "$un" --arg fn "$fn" --arg ln "$ln" --arg em "$em" --arg pw "$pw" \
+                '{profile:{id:$id,firstName:$fn,lastName:$ln,email:$em},credentials:{password:$pw}}')
+            code=$(operaton_curl 1 POST "/engine-rest/user/create" "$payload")
+            if [[ "$code" == "204" || "$code" == "200" ]]; then
+                info "  ✓ user $un"
+                created=$((created+1))
+            else
+                err "  user $un failed (HTTP $code)"; continue
+            fi
+        else
+            skipped=$((skipped+1)); $VERBOSE && info "  - user $un exists"
+        fi
+        # memberships: department group + opensme-all
+        while IFS= read -r gname; do
+            [[ -z "$gname" ]] && continue
+            operaton_curl 1 PUT "/engine-rest/group/$gname/members/$un" >/dev/null 2>&1 || true
+        done < <(jq -r --arg un "$un" '
+            .users[] | select(.username==$un)
+            | "opensme-all", "opensme-" + (.department | ascii_downcase)' "$USERS_JSON")
+    done < <(jq -c '.users[]' "$USERS_JSON")
+
+    # Admin webapp setup: first-run bootstrap (silently skips if an admin exists)
+    local admin_pw
+    admin_pw=$(jq -r '.users[] | select(.username=="tweiss") | .password' "$USERS_JSON")
+    local setup_code
+    setup_code=$(operaton_curl 1 POST "/camunda/admin/auth/setup" \
+        "{\"userId\":\"tweiss\",\"password\":\"$admin_pw\"}")
+    if [[ "$setup_code" == "204" || "$setup_code" == "200" ]]; then
+        info "  ✓ admin webapp: tweiss (setup)"
+    else
+        $VERBOSE && info "  - admin webapp already set up (HTTP $setup_code)"
+    fi
+    info "[operaton] done: $created created, $skipped skipped"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# SYNAPSE (Matrix homeserver — shared-secret register API)
+# ══════════════════════════════════════════════════════════════════════
+SYNAPSE_CONTAINER="${SYNAPSE_CONTAINER:-opensme-synapse}"
+
+main_synapse() {
+    load_config || return 1
+    info "[synapse] Registering Matrix users for: $COMPANY"
+    $DRY_RUN && { info "[synapse] would register 12 users via $SYNAPSE_CONTAINER shared-secret API (tweiss=admin)"; return 0; }
+
+    # The whole flow runs inside the synapse container: the registration
+    # secret never leaves it, python3+urllib are already in the image.
+    # Two stdin feeds: (1) user JSON to /tmp, (2) the python driver on stdin.
+    jq -c -s '.' "$USERS_JSON" | docker exec -i "$SYNAPSE_CONTAINER" sh -c 'cat > /tmp/demo-users.json' || {
+        err "[synapse] cannot reach container $SYNAPSE_CONTAINER"; return 1
+    }
+    local out rc
+    out=$(cat <<'PY' | docker exec -i "$SYNAPSE_CONTAINER" python3 - 2>&1
+import hashlib, hmac, json, urllib.request
+
+def req(method, path, payload=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    r = urllib.request.Request("http://127.0.0.1:8008" + path, data=data, method=method)
+    if data:
+        r.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(r) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+users = json.load(open("/tmp/demo-users.json"))["users"]
+secret = open("/data/registration_secret").read().strip().encode()
+for u in users:
+    un, pw = u["username"], u["password"]
+    admin = "true" if "admin" in u.get("roles", []) else "false"
+    status, nonce = req("GET", "/_synapse/admin/v1/register")
+    if status != 200:
+        print("  ! nonce failed (" + str(status) + ") — shared_secret registration disabled?")
+        break
+    mac = hmac.new(secret, digestmod=hashlib.sha256)
+    mac.update(nonce["nonce"].encode())
+    for field in (b"\x00user", un.encode(), b"\x00password", pw.encode(),
+                  b"\x00admin", admin.encode(), b"\x00user_type", b""):
+        mac.update(field)
+    payload = {"nonce": nonce["nonce"], "username": un, "password": pw,
+               "admin": admin == "true", "user_type": None, "mac": mac.hexdigest()}
+    status, body = req("POST", "/_synapse/admin/v1/register", payload)
+    if status == 200:
+        print("  \u2713 " + un + (" (admin)" if admin == "true" else ""))
+    elif body.get("errcode") == "M_USER_EXISTS":
+        print("  - " + un + " (exists)")
+    else:
+        print("  ! " + un + " failed: " + str(body.get("errcode", status)))
+PY
+) && rc=0 || rc=$?
+    docker exec "$SYNAPSE_CONTAINER" rm -f /tmp/demo-users.json >/dev/null 2>&1 || true
+    echo "$out" | grep -E '✓|exists|failed|nonce' | while IFS= read -r line; do info "  $line"; done
+    if [[ $rc -ne 0 ]]; then
+        err "[synapse] driver failed: $out"
+        return 1
+    fi
+    info "[synapse] done"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# PAPERLESS (Django users via manage.py shell)
+# ══════════════════════════════════════════════════════════════════════
+PAPERLESS_CONTAINER="${PAPERLESS_CONTAINER:-opensme-paperless}"
+
+main_paperless() {
+    load_config || return 1
+    info "[paperless] Creating users for: $COMPANY"
+    $DRY_RUN && { info "[paperless] would create 12 Django users via $PAPERLESS_CONTAINER manage.py"; return 0; }
+
+    # Both the driver and the user data travel base64-encoded inside one
+    # `shell -c`: manage.py shell -c has no second stdin stream, and embedding
+    # raw JSON in shell/python quoting is fragile.
+    local users_b64 driver driver_b64 out rc
+    users_b64=$(jq -c --arg dom "$DOMAIN" \
+        '[.users[] | {username, firstName, lastName, password, email: ((.email | split("@"))[0] + "@" + $dom)}]' \
+        "$USERS_JSON" | base64 -w0)
+    driver=$(cat <<PY
+import json, base64
+from django.contrib.auth import get_user_model
+users = json.loads(base64.b64decode("$users_b64").decode())
+U = get_user_model()
+for u in users:
+    user, created = U.objects.get_or_create(username=u["username"], defaults={
+        "first_name": u["firstName"], "last_name": u["lastName"], "email": u["email"],
+    })
+    if created:
+        user.set_password(u["password"])
+        user.save()
+        print("OKCREATED " + u["username"])
+    else:
+        print("OKEXISTS " + u["username"])
+PY
+)
+    driver_b64=$(printf '%s' "$driver" | base64 -w0)
+    out=$(docker exec "$PAPERLESS_CONTAINER" python3 /usr/src/paperless/src/manage.py shell \
+        -c "exec(base64.b64decode('$driver_b64').decode())" 2>&1) && rc=0 || rc=$?
+    echo "$out" | grep -E '^OK' | sed 's/^OKCREATED /  \xe2\x9c\x93 /; s/^OKEXISTS /  - /; s/$/ (exists)/' | while IFS= read -r line; do info "$line"; done
+    if [[ $rc -ne 0 ]]; then
+        err "[paperless] manage.py shell failed: $out"
+        return 1
+    fi
+    info "[paperless] done"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# STALWART (mail accounts via stalwart-cli in the container)
+# ══════════════════════════════════════════════════════════════════════
+STALWART_CONTAINER="${STALWART_CONTAINER:-opensme-stalwart}"
+
+main_stalwart() {
+    load_config || return 1
+    info "[stalwart] Creating mail accounts for: $COMPANY"
+    $DRY_RUN && { info "[stalwart] would create 12 accounts via $STALWART_CONTAINER stalwart-cli"; return 0; }
+
+    local admin_pw url
+    admin_pw=$(docker exec "$STALWART_CONTAINER" printenv STALWART_ADMIN_PASSWORD 2>/dev/null || true)
+    if [[ -z "$admin_pw" ]]; then
+        err "[stalwart] STALWART_ADMIN_PASSWORD not found in container env"
+        return 1
+    fi
+    url="http://localhost:8080"
+    local cli="stalwart-cli -u $url -a admin:$admin_pw"
+
+    local created=0 skipped=0
+    while IFS= read -r user; do
+        local un pw exists
+        un=$(echo "$user" | jq -r '.username')
+        pw=$(echo "$user" | jq -r '.password')
+        exists=$(docker exec "$STALWART_CONTAINER" $cli user list 2>/dev/null | grep -c "^$un@" || true)
+        if [[ "$exists" == "0" ]]; then
+            if docker exec "$STALWART_CONTAINER" $cli user create "$un@${DOMAIN}" "Demo user $un" >/dev/null 2>&1 \
+                && docker exec "$STALWART_CONTAINER" $cli user secret "$un@${DOMAIN}" "$pw" >/dev/null 2>&1; then
+                info "  ✓ $un@${DOMAIN}"
+                created=$((created+1))
+            else
+                err "  $un@${DOMAIN} failed"
+            fi
+        else
+            skipped=$((skipped+1)); $VERBOSE && info "  - $un@${DOMAIN} exists"
+        fi
+    done < <(jq -c '.users[]' "$USERS_JSON")
+    info "[stalwart] done: $created created, $skipped skipped"
+}
+
+# ── component dispatcher ──────────────────────────────────────────────
+run_components() {
+    local list
+    case "$COMPONENT" in
+        all) list="$ALL_COMPONENTS" ;;
+        *)   list="$(echo "$COMPONENT" | tr ',' ' ')" ;;
+    esac
+    local failures=0
+    for c in $list; do
+        case "$c" in
+            zitadel)   main_zitadel   || failures=$((failures+1)) ;;
+            operaton)  main_operaton  || failures=$((failures+1)) ;;
+            synapse)   main_synapse   || failures=$((failures+1)) ;;
+            paperless) main_paperless || failures=$((failures+1)) ;;
+            stalwart)  main_stalwart  || failures=$((failures+1)) ;;
+            invoice)   info "[invoice] not wired: Invoice Ninja users are company-bound; demo ships a single admin" ;;
+            *)         err "Unknown component: $c (known: $ALL_COMPONENTS)"; failures=$((failures+1)) ;;
+        esac
+        echo
+done
+    return $failures
+}
+
+main_zitadel() {
     wait_zitadel
     
     # Get PAT for admin operations
@@ -399,11 +692,11 @@ main() {
     
     info ""
     info "Total active demo users: $count / 12"
-    
+
     if [[ "$count" -lt 12 ]]; then
         err "Some users were not provisioned. Check logs above."
         return 1
     fi
 }
 
-main "$@"
+run_components
