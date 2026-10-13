@@ -391,11 +391,13 @@ for u in users:
     if status != 200:
         print("  ! nonce failed (" + str(status) + ") — shared_secret registration disabled?")
         break
-    mac = hmac.new(secret, digestmod=hashlib.sha256)
+    # Current synapse MAC scheme (rest/admin/users.py): SHA-1 over
+    # nonce \x00 username \x00 password \x00 "admin"|"notadmin".
+    mac = hmac.new(secret, digestmod=hashlib.sha1)
     mac.update(nonce["nonce"].encode())
-    mac.update(b"\x00user"); mac.update(un.encode())
-    mac.update(b"\x00password"); mac.update(pw.encode())
-    mac.update(b"\x00admin"); mac.update(admin.encode())
+    mac.update(b"\x00"); mac.update(un.encode())
+    mac.update(b"\x00"); mac.update(pw.encode())
+    mac.update(b"\x00"); mac.update(b"admin" if admin == "true" else b"notadmin")
     payload = {"nonce": nonce["nonce"], "username": un, "password": pw,
                "admin": admin == "true", "mac": mac.hexdigest()}
     status, body = req("POST", "/_synapse/admin/v1/register", payload)
