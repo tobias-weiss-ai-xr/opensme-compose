@@ -121,10 +121,7 @@ impl IntercomStore {
             }
             Err(_) => {
                 // Corrupt store: keep it for forensics, start fresh.
-                let _ = std::fs::rename(
-                    path,
-                    path.with_extension("json.corrupt"),
-                );
+                let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
             }
         }
     }
@@ -132,7 +129,9 @@ impl IntercomStore {
     /// Atomic write-through: serialize then rename over the target.
     fn persist(&self, messages: &[IntercomMessage]) {
         let Some(path) = &self.data_path else { return };
-        let Ok(json) = serde_json::to_vec(messages) else { return };
+        let Ok(json) = serde_json::to_vec(messages) else {
+            return;
+        };
         let tmp = path.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() {
             let _ = std::fs::rename(&tmp, path);
@@ -141,7 +140,11 @@ impl IntercomStore {
 
     /// Store an uploaded file. Returns the sanitized name and a random
     /// token; the file lives at attachments_dir/<token>_<name>.
-    pub fn save_attachment(&self, file_name: &str, bytes: &[u8]) -> Result<(String, String), String> {
+    pub fn save_attachment(
+        &self,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<(String, String), String> {
         let dir = self
             .attachments_dir
             .as_ref()
@@ -200,7 +203,15 @@ impl IntercomStore {
             messages.pop_front();
         }
         drop(messages);
-        self.persist(&self.messages.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect::<Vec<_>>());
+        self.persist(
+            &self
+                .messages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         msg
     }
 
@@ -362,7 +373,6 @@ pub fn parse_attachment_metadata(
 }
 
 // ── store impl lives above (persistence + attachments) ──
-
 
 #[cfg(test)]
 mod tests {
@@ -569,7 +579,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = IntercomStore::open(None, Some(dir.clone()));
 
-        let (token, name) = store.save_attachment("Bericht 2026.pdf", b"%PDF-1.4").unwrap();
+        let (token, name) = store
+            .save_attachment("Bericht 2026.pdf", b"%PDF-1.4")
+            .unwrap();
         assert!(name.ends_with(".pdf"));
         assert_eq!(token.len(), 32);
         let (bytes, ct) = store.read_attachment(&token, &name).unwrap();
@@ -617,7 +629,9 @@ mod tests {
         // name with traversal chars never matches the sanitized file
         assert!(store.read_attachment(&token, "../x.txt").is_none());
         // unknown token
-        assert!(store.read_attachment("deadbeefdeadbeefdeadbeefdeadbeef", &name).is_none());
+        assert!(store
+            .read_attachment("deadbeefdeadbeefdeadbeefdeadbeef", &name)
+            .is_none());
         // the real one works
         assert!(store.read_attachment(&token, &name).is_some());
         let _ = std::fs::remove_dir_all(&dir);

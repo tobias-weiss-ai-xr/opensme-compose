@@ -955,10 +955,7 @@ async fn handle_intercom_file(
         Some((bytes, ct)) => (
             [
                 (CONTENT_TYPE, ct),
-                (
-                    CONTENT_DISPOSITION,
-                    format!("inline; filename=\"{name}\""),
-                ),
+                (CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
             ],
             bytes,
         )
