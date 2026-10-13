@@ -364,7 +364,7 @@ main_synapse() {
     # The whole flow runs inside the synapse container: the registration
     # secret never leaves it, python3+urllib are already in the image.
     # Two stdin feeds: (1) user JSON to /tmp, (2) the python driver on stdin.
-    jq -c -s '.' "$USERS_JSON" | docker exec -i "$SYNAPSE_CONTAINER" sh -c 'cat > /tmp/demo-users.json' || {
+    jq -c '.' "$USERS_JSON" | docker exec -i "$SYNAPSE_CONTAINER" sh -c 'cat > /tmp/demo-users.json' || {
         err "[synapse] cannot reach container $SYNAPSE_CONTAINER"; return 1
     }
     local out rc
@@ -452,7 +452,7 @@ PY
 )
     driver_b64=$(printf '%s' "$driver" | base64 -w0)
     out=$(docker exec "$PAPERLESS_CONTAINER" python3 /usr/src/paperless/src/manage.py shell \
-        -c "exec(base64.b64decode('$driver_b64').decode())" 2>&1) && rc=0 || rc=$?
+        -c "import base64; exec(base64.b64decode('$driver_b64').decode())" 2>&1) && rc=0 || rc=$?
     echo "$out" | grep -E '^OK' | sed 's/^OKCREATED /  \xe2\x9c\x93 /; s/^OKEXISTS /  - /; s/$/ (exists)/' | while IFS= read -r line; do info "$line"; done
     if [[ $rc -ne 0 ]]; then
         err "[paperless] manage.py shell failed: $out"
