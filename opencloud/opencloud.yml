@@ -77,6 +77,11 @@ services:
       # NOTE: with basic auth, role assignment must be 'default' (oidc
       # driver needs claims that basic-auth requests don't carry).
       PROXY_ENABLE_BASIC_AUTH: ${OPENCLOUD_ENABLE_BASIC_AUTH:-false}
+      # Automated poll attachments create read-only public links; the
+      # OpenCloud default (password required) breaks the OCS share-create.
+      # Default stays 'true' (safe); set OPENCLOUD_PUBLIC_SHARE_PASSWORD=false
+      # only where the poll-workflow needs passwordless read-only links.
+      OC_SHARING_PUBLIC_SHARE_MUST_HAVE_PASSWORD: ${OPENCLOUD_PUBLIC_SHARE_PASSWORD:-true}
       # Local POSIX filesystem backend (no MinIO/S3 required).
       OC_STORAGE_USERS_DRIVER: ocis
       OC_ADD_RUN_SERVICES: notifications
