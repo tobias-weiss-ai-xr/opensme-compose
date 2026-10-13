@@ -137,6 +137,11 @@ Contract-Zeile.*
    budgetfrei, Pause + evidence kind `budget` + Metrik bei Exhaust,
    Consent-Defaults off; Contract/Compose/.env verdrahtet, Layer-0 prüft
    Budget-Env.
-3. `agent_saga.py` (AS1 zuerst — der Pfad existiert heute schon fast).
+3. ✅ `agent_saga.py` (AS1 E2E, `tests/05-e2e/agent_saga.py`, eigener
+   CI-Step): fährt serve-mode-Bot + Mock (fehlschlagender Healthcheck)
+   isoliert hoch, treibt die private API per docker exec — Finding
+   (krank→Diagnose), Dry-run ohne Consent, echter Restart mit Consent,
+   Evidence kind heal (audit), heals_total-Metrik. 11/11 Checks grün,
+   teardown räumt die opensme-saga-* Container ab.
 4. `agent-knowledge`/`agent-assistant` (RAG-Vertrag, Quellenpflicht).
 5. AS2/AS3/AS5 dort, wo die Profile (ticketing/camunda/paperless) eh laufen.

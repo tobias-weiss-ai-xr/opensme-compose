@@ -245,6 +245,10 @@ jobs:
         run: python3 tests/05-e2e/runtime_truth.py
       - name: Run local AI journey (mock backend, contract proof)
         run: python3 tests/05-e2e/ai_journey.py opensme.local
+      - name: Run agent saga AS1 (krank → diagnose → consent → heal → audit)
+        # Isolated: builds the bot image if absent, drives its private REST
+        # API via docker exec against self-created opensme-saga-* containers.
+        run: python3 tests/05-e2e/agent_saga.py
       - name: Run burst journey (concurrent load, zero 5xx)
         run: python3 tests/05-e2e/burst.py opensme.local
       - name: Run hygiene journey (no default creds, no open writes)
