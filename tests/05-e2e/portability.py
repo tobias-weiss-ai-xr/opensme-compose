@@ -97,8 +97,6 @@ def main() -> int:
 
     install_dns_fallback()
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    _src = open(__file__).read()
-    print(f"  [ver] diag={'yes' if '[diag]' in _src else 'NO'} retry6={'yes' if 'range(6)' in _src else 'NO'}", flush=True)
 
     result = Result("portability")
     result.header(f"openSME e2e portability journey — domain={args.domain}")
@@ -229,18 +227,6 @@ def main() -> int:
                                 "--format", "{{.Image}}"],
                                capture_output=True, text=True, timeout=30)
                 print(f"  [diag] portal image: {img.stdout.strip()[:20]}", flush=True)
-                for probe in ("http://cloud.meine-firma.test/x.pdf",
-                              "http://cloud.opensme.local/x.pdf",
-                              "https://cloud.meine-firma.test/x.pdf"):
-                    try:
-                        r2 = session.post(
-                            new_portal + "/api/intercom",
-                            json={"text": "probe", "attachment_url": probe},
-                            timeout=30)
-                        print(f"  [diag] probe {probe} -> {r2.status_code} "
-                              f"{r2.text[:90]!r}", flush=True)
-                    except requests.RequestException as exc:
-                        print(f"  [diag] probe {probe} raised {exc!r}", flush=True)
             v3 = att is not None and att.status_code == 201
             (result.ok if v3 else result.fail)(
                 "derived allowlist follows the new domain (cloud.<domain> accepted)"
