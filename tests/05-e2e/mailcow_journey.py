@@ -284,14 +284,23 @@ def main() -> int:
         )
 
     # P6: SOGo webmail answers
-    try:
-        sogo = session.get(f"https://{mail_host}/SOGo/", timeout=T)
-        (result.ok if sogo.status_code in (200, 302) else result.fail)(
-            "SOGo webmail answers on /SOGo" if sogo.status_code in (200, 302)
-            else f"SOGo broken: HTTP {sogo.status_code}"
-        )
-    except requests.RequestException as e:
-        result.fail(f"SOGo unreachable: {e.__class__.__name__}")
+    # SOGo is a slow starter — on a cold CI runner the mailcow nginx can 502
+    # for the first minute while SOGo initializes (this flaked three pushes
+    # in a row before a bounded retry was added). Probe with patience.
+    sogo_code = None
+    for attempt in range(6):
+        try:
+            sogo = session.get(f"https://{mail_host}/SOGo/", timeout=T)
+            sogo_code = sogo.status_code
+            if sogo_code in (200, 302):
+                break
+        except requests.RequestException as e:
+            sogo_code = f"{e.__class__.__name__}"
+        time.sleep(10)
+    (result.ok if sogo_code in (200, 302) else result.fail)(
+        "SOGo webmail answers on /SOGo" if sogo_code in (200, 302)
+        else f"SOGo broken after retries: HTTP {sogo_code}"
+    )
 
     # P7: the REST API is not exposed at the edge
     try:

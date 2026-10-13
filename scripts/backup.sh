@@ -29,7 +29,7 @@
 #   traefik-data, casdoor-data, zitadel-machinekey,
 #   cryptpad-data, cryptpad-blob, synapse-data, notes-data,
 #   seaweedfs-data, paperless-data, paperless-media, paperless-export,
-#   invoiceninja-public, invoiceninja-storage
+#   invoiceninja-db (MariaDB), invoiceninja-public, invoiceninja-storage
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -66,7 +66,7 @@ KNOWN_VOLUMES=(
   traefik-data casdoor-data zitadel-machinekey
   cryptpad-data cryptpad-blob synapse-data notes-data
   seaweedfs-data paperless-data paperless-media paperless-export
-  invoiceninja-public invoiceninja-storage
+  invoiceninja-db invoiceninja-public invoiceninja-storage
   nosdesk-uploads cms-data store-data
   # ai-models deliberately excluded: re-downloadable model cache
 )

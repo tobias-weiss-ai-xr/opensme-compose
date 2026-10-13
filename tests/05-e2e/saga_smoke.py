@@ -146,6 +146,11 @@ def main() -> bool:
         # resource collection, which is always token-walled
         "invoice-api": [s["url"] + "/api/v1/invoices" for s in services if s.get("id") == "invoice"],
         "archive-api": [s["url"] for s in services if s.get("id") == "archive"],
+        # impress notes exposes its Django API on the same origin since the
+        # notesapi edge router (Host && PathPrefix(/api)) — unauthenticated
+        # reads are rejected with 400 (no data, no redirect target), which
+        # counts as walled alongside 401/403
+        "notes-api": [s["url"] + "/api/v1.0/documents/" for s in services if s.get("id") == "notes"],
     }
     for name, urls in flow_urls.items():
         if not urls:
@@ -153,12 +158,14 @@ def main() -> bool:
             continue
         base = urls[0].rstrip("/")
         api = base if "invoice" in name else base + "/api/documents/"
+        if "notes" in name:
+            api = urls[0]
         try:
             r = session.get(api, allow_redirects=False, timeout=T)
         except requests.RequestException as e:
             result.fail(f"{name} endpoint unreachable ({e.__class__.__name__})")
             continue
-        if r.status_code in (401, 403):
+        if r.status_code in (400, 401, 403):
             result.ok(f"{name} API behind auth wall ({r.status_code})")
         elif r.status_code in (301, 302, 303, 307, 308):
             result.ok(f"{name} API redirects to login ({r.status_code})")

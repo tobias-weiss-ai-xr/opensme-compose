@@ -67,7 +67,7 @@ services:
       - "traefik.http.routers.matrix.entrypoints=websecure"
       - "traefik.http.services.matrix.loadbalancer.server.port=8008"
     healthcheck:
-      test: ["CMD", "curl", "-fS", "http://localhost:8008/_matrix/federation/v1/version"]
+      test: ["CMD", "curl", "-fS", "http://127.0.0.1:8008/_matrix/federation/v1/version"]
       interval: 30s
       timeout: 10s
       retries: 5
