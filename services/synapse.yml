@@ -43,6 +43,9 @@ services:
       # by scripts/zitadel-client.sh --app synapse
       SYNAPSE_OIDC_CLIENT_ID: ${SYNAPSE_OIDC_CLIENT_ID:-}
       SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET:-CHANGEME_synapse_oidc}
+      # issuer for the oidc_providers block — must be in the container env,
+      # the setup script's fallback default is the wrong (non-live) domain
+      ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
     volumes:
       - synapse-data:/data
       - ./services/synapse-setup.sh:/entrypoint-setup.sh:ro

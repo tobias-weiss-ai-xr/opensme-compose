@@ -94,8 +94,11 @@ oidc_providers:
     client_id: "${SYNAPSE_OIDC_CLIENT_ID}"
     client_secret: "${SYNAPSE_OIDC_CLIENT_SECRET}"
     scopes: ["openid", "profile", "email"]
+    # no explicit user_mapping_provider.module — the default Jinja mapping
+    # provider consumes localpart/display_name templates (the legacy module
+    # path synapse.handlers.oidc_handler.OidcAuthenticator no longer exists
+    # and crashes synapse at import time)
     user_mapping_provider:
-      module: "synapse.handlers.oidc_handler.OidcAuthenticator"
       config:
         localpart_template: "{{ user.preferred_username }}"
         display_name_template: "{{ user.name }}"
