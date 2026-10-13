@@ -49,9 +49,16 @@ surfaces:
   share_links:
     portal_env: INTERCOM_ATTACHMENT_HOSTS
     default_from: OPENCLOUD_DOMAIN
+    # Declared capability: picked-file uploads (intercom board, polls)
+    # store raw bodies in the portal-local attachments dir and serve
+    # them back — the only accepted raw-body exception to "navigate,
+    # never mediate". Cloud attachments still travel by URL only.
+    picked_file_routes:
+      - /api/intercom/files
+      - /api/files
     rule: >
-      Intercom attachments must match the configured cloud host
-      (https://<cloud>/s/… shape). The portal validates hostnames
+      Intercom and poll attachments must match the configured cloud
+      host (https://<cloud>/s/… shape). The portal validates hostnames
       but never proxies or caches file content.
 
   # ── Processes: REST-only engine access ──

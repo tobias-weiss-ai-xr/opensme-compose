@@ -89,14 +89,26 @@ def main():
     intercom_src = (ROOT / "portal" / "src" / "intercom.rs").read_text()
     if shares["portal_env"] not in intercom_src:
         failures.append("intercom.rs no longer honors INTERCOM_ATTACHMENT_HOSTS")
-    # No file-content route: portal routes are navigation/API only. The AI
-    # proxy (same-origin LLM endpoint) is a declared capability; a share
-    # or attachment serving route would be mediation drift.
+    # No undeclared file-content routes: portal routes are navigation/API
+    # only. Declared exceptions live in contracts/interop.yml
+    # (share_links.picked_file_routes — the picked-file local store).
     main_src = (ROOT / "portal" / "src" / "main.rs").read_text()
-    routes = re.findall(r'\.route\("([^"]+)"', main_src)
-    fileish = [r for r in routes if re.search(r"/s/|attachment|file|share", r)]
+    routes = re.findall(r'\.route\(\s*"([^"]+)"', main_src, re.DOTALL)
+    declared = [r.rstrip("/") for r in shares.get("picked_file_routes", [])]
+
+    def is_declared(route: str) -> bool:
+        return any(route == d or route.startswith(d + "/") for d in declared)
+
+    fileish = [
+        r
+        for r in routes
+        if re.search(r"/s/|attachment|file|share", r) and not is_declared(r.rstrip("/"))
+    ]
     if fileish:
-        failures.append(f"portal serves file-content routes (must link, not mediate): {fileish}")
+        failures.append(
+            f"portal serves undeclared file-content routes (must link, "
+            f"not mediate; declare in contracts/interop.yml): {fileish}"
+        )
 
     # ── 5. Processes: REST-only + BPMN bootstrap ───────────────────────
     proc = surfaces["processes"]
