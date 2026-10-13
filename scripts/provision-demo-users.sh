@@ -464,40 +464,54 @@ PY
 }
 
 # ══════════════════════════════════════════════════════════════════════
-# STALWART (mail accounts via stalwart-cli in the container)
+# STALWART (mail accounts via the webadmin REST API)
 # ══════════════════════════════════════════════════════════════════════
 STALWART_CONTAINER="${STALWART_CONTAINER:-opensme-stalwart}"
+STALWART_MAIL_DOMAIN="${STALWART_MAIL_DOMAIN:-$DOMAIN}"
 
 main_stalwart() {
     load_config || return 1
-    info "[stalwart] Creating mail accounts for: $COMPANY"
-    $DRY_RUN && { info "[stalwart] would create 12 accounts via $STALWART_CONTAINER stalwart-cli"; return 0; }
+    info "[stalwart] Creating mail accounts for: $COMPANY (@$STALWART_MAIL_DOMAIN)"
+    $DRY_RUN && { info "[stalwart] would create 12 accounts + domain principal via $STALWART_CONTAINER REST API"; return 0; }
 
-    local admin_pw url
+    local admin_pw ip api
     admin_pw=$(docker exec "$STALWART_CONTAINER" printenv STALWART_ADMIN_PASSWORD 2>/dev/null || true)
     if [[ -z "$admin_pw" ]]; then
         err "[stalwart] STALWART_ADMIN_PASSWORD not found in container env"
         return 1
     fi
-    url="http://localhost:8080"
-    local cli="stalwart-cli -u $url -a admin:$admin_pw"
+    ip=$(docker inspect "$STALWART_CONTAINER" 2>/dev/null | jq -r '.[0].NetworkSettings.Networks[]?.IPAddress' | head -1)
+    if [[ -z "$ip" || "$ip" == "null" ]]; then
+        err "[stalwart] cannot determine container IP of $STALWART_CONTAINER"
+        return 1
+    fi
+    api="http://$ip:8080"
+    local call=(curl -sf -u "admin:$admin_pw")
+
+    # Domain principal must exist before accounts can reference it in emails.
+    if "${call[@]}" -X POST -H 'Content-Type: application/json' \
+            -d "{\"type\":\"domain\",\"name\":\"$STALWART_MAIL_DOMAIN\"}" "$api/api/principal" 2>/dev/null | grep -q fieldAlreadyExists; then
+        $VERBOSE && info "  - domain $STALWART_MAIL_DOMAIN exists"
+    else
+        info "  ✓ domain $STALWART_MAIL_DOMAIN"
+    fi
 
     local created=0 skipped=0
     while IFS= read -r user; do
-        local un pw exists
+        local un pw
         un=$(echo "$user" | jq -r '.username')
         pw=$(echo "$user" | jq -r '.password')
-        exists=$(docker exec "$STALWART_CONTAINER" $cli user list 2>/dev/null | grep -c "^$un@" || true)
-        if [[ "$exists" == "0" ]]; then
-            if docker exec "$STALWART_CONTAINER" $cli user create "$un@${DOMAIN}" "Demo user $un" >/dev/null 2>&1 \
-                && docker exec "$STALWART_CONTAINER" $cli user secret "$un@${DOMAIN}" "$pw" >/dev/null 2>&1; then
-                info "  ✓ $un@${DOMAIN}"
+        if "${call[@]}" "$api/api/principal/$un" 2>/dev/null | grep -q '"error"'; then
+            if "${call[@]}" -X POST -H 'Content-Type: application/json' \
+                    -d "{\"type\":\"individual\",\"name\":\"$un\",\"emails\":[\"$un@$STALWART_MAIL_DOMAIN\"],\"secrets\":[\"$pw\"]}" \
+                    "$api/api/principal" 2>/dev/null | grep -q '"data"'; then
+                info "  ✓ $un@$STALWART_MAIL_DOMAIN"
                 created=$((created+1))
             else
-                err "  $un@${DOMAIN} failed"
+                err "  $un@$STALWART_MAIL_DOMAIN failed"
             fi
         else
-            skipped=$((skipped+1)); $VERBOSE && info "  - $un@${DOMAIN} exists"
+            skipped=$((skipped+1)); $VERBOSE && info "  - $un@$STALWART_MAIL_DOMAIN exists"
         fi
     done < <(jq -c '.users[]' "$USERS_JSON")
     info "[stalwart] done: $created created, $skipped skipped"
