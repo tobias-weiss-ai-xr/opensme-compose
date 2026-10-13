@@ -313,7 +313,8 @@ main_operaton() {
         em=$(demo_email "$(echo "$user" | jq -r '.email')")
         pw=$(echo "$user" | jq -r '.password')
         local code
-        code=$(operaton_curl 1 GET "/engine-rest/user/$un")
+        # engine-rest has no GET /user/{id}; the profile subresource exists.
+        code=$(operaton_curl 1 GET "/engine-rest/user/$un/profile")
         if [[ "$code" != "200" ]]; then
             local payload
             payload=$(jq -n --arg id "$un" --arg fn "$fn" --arg ln "$ln" --arg em "$em" --arg pw "$pw" \
@@ -322,6 +323,9 @@ main_operaton() {
             if [[ "$code" == "204" || "$code" == "200" ]]; then
                 info "  ✓ user $un"
                 created=$((created+1))
+            elif [[ "$code" == "400" ]]; then
+                # "The user already exists" (race / check-endpoint variance)
+                skipped=$((skipped+1)); $VERBOSE && info "  - user $un exists (400)"
             else
                 err "  user $un failed (HTTP $code)"; continue
             fi
