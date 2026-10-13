@@ -336,6 +336,12 @@ services:
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
       INTERCOM_DATA_PATH: ${INTERCOM_DATA_PATH:-/data/intercom.json}
+      POLLS_ENABLED: ${POLLS_ENABLED:-}
+      POLLS_DATA_PATH: ${POLLS_DATA_PATH:-/data/polls.json}
+      CLOUD_WEBDAV_URL: ${CLOUD_WEBDAV_URL:-}
+      CLOUD_WEBDAV_USER: ${CLOUD_WEBDAV_USER:-}
+      CLOUD_WEBDAV_PASS: ${CLOUD_WEBDAV_PASS:-}
+      CLOUD_SHARE_URL: ${CLOUD_SHARE_URL:-}
       OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       MAIL_URL: ${MAIL_URL:-}
       IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}

@@ -228,7 +228,7 @@ impl IntercomStore {
 
 /// Filesystem-safe attachment name: keep letters/digits/dot/dash/underscore,
 /// collapse everything else to '_', cap length, never empty, never dotfile.
-fn sanitize_name(raw: &str) -> String {
+pub(crate) fn sanitize_name(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
         .take(120)
@@ -249,7 +249,7 @@ fn sanitize_name(raw: &str) -> String {
 }
 
 /// 16 hex chars from the OS hasher's random keys — no extra crate.
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
     h.write_u64(0);
     let a = h.finish();
@@ -259,7 +259,7 @@ fn random_token() -> String {
 }
 
 /// Minimal content-type mapping for serving picked files inline.
-fn mime_for(name: &str) -> String {
+pub(crate) fn mime_for(name: &str) -> String {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
         "png" => "image/png",

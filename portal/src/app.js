@@ -352,3 +352,167 @@
   loadFeeds();
   setInterval(loadFeeds, 10 * 60 * 1000);
 })();
+
+// ── Polls (Umfragen) — optional card, present only when POLLS_ENABLED ──
+(function () {
+  "use strict";
+  var plCard = document.querySelector("#polls-card");
+  if (!plCard) return;
+
+  var plList = plCard.querySelector("#pl-list");
+  var plQuestion = plCard.querySelector(".pl-question");
+  var plOptions = plCard.querySelector(".pl-options");
+  var plFile = plCard.querySelector("#pl-file");
+  var plFileName = plCard.querySelector(".ic-file-name");
+  var plCreate = plCard.querySelector(".pl-create");
+  var plOut = plCard.querySelector(".pl-out");
+  var VOTED_KEY = "opensme-poll-voted";
+
+  function votedSet() {
+    try {
+      return JSON.parse(localStorage.getItem(VOTED_KEY) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function markVoted(id) {
+    var v = votedSet();
+    v[id] = true;
+    try {
+      localStorage.setItem(VOTED_KEY, JSON.stringify(v));
+    } catch (e) {}
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function fail(msg) {
+    plOut.textContent = msg;
+    plOut.hidden = false;
+  }
+  function resetForm() {
+    plQuestion.value = "";
+    plOptions.value = "";
+    plFile.value = "";
+    plFileName.textContent = "";
+    plOut.hidden = true;
+  }
+
+  function renderPolls(polls) {
+    plList.textContent = "";
+    if (!polls || !polls.length) {
+      plList.appendChild(el("li", "ic-empty", "Noch keine Umfragen — leg die erste an."));
+      return;
+    }
+    var voted = votedSet();
+    polls.forEach(function (p) {
+      var li = el("li", "poll");
+      li.appendChild(el("div", "poll-q", p.question));
+      if (p.attachment && p.attachment.url) {
+        var a = document.createElement("a");
+        a.className = "poll-att";
+        a.href = p.attachment.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = "\uD83D\uDCCE " + (p.attachment.name || "Anhang");
+        li.appendChild(a);
+      }
+      var opts = el("div", "poll-opts");
+      var total = (p.votes || []).reduce(function (acc, v) { return acc + v; }, 0);
+      var isVoted = p.closed || voted[p.id];
+      (p.options || []).forEach(function (opt, i) {
+        var row = el("div", "poll-opt");
+        var count = (p.votes && p.votes[i]) || 0;
+        var pct = total ? Math.round((count / total) * 100) : 0;
+        var fill = el("span", "poll-fill");
+        fill.style.width = pct + "%";
+        row.appendChild(fill);
+        row.appendChild(el("span", "poll-label", opt));
+        row.appendChild(el("span", "poll-count", total ? count + " · " + pct + "%" : String(count)));
+        if (!isVoted) {
+          var btn = el("button", "poll-vote", "Wählen");
+          btn.type = "button";
+          btn.setAttribute("aria-label", "Für „" + opt + "“ stimmen");
+          btn.addEventListener("click", function () {
+            fetch("/api/polls/" + p.id + "/vote", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ option: i })
+            })
+              .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                markVoted(p.id);
+                refresh();
+              })
+              .catch(function (err) { fail("Nicht gewählt: " + err.message); });
+          });
+          row.appendChild(btn);
+        } else {
+          row.classList.add("voted");
+        }
+        opts.appendChild(row);
+      });
+      li.appendChild(opts);
+      plList.appendChild(li);
+    });
+  }
+
+  function refresh() {
+    fetch("/api/polls")
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { renderPolls(d.polls); })
+      .catch(function () {
+        plList.textContent = "";
+        plList.appendChild(el("li", "ic-empty", "Umfragen nicht erreichbar."));
+      });
+  }
+
+  plFile.addEventListener("change", function () {
+    var f = plFile.files && plFile.files[0];
+    if (!f) return;
+    plFileName.textContent = f.name + " (" + Math.round(f.size / 1024) + " KB)";
+  });
+
+  plCreate.addEventListener("click", function () {
+    var question = (plQuestion.value || "").trim();
+    var options = (plOptions.value || "")
+      .split("\n")
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    if (!question || options.length < 2) {
+      fail("Bitte Frage und mindestens 2 Optionen angeben.");
+      return;
+    }
+    plOut.textContent = "…";
+    plOut.hidden = false;
+    var file = plFile.files && plFile.files[0];
+    var done = function () { resetForm(); refresh(); };
+    if (file) {
+      var url =
+        "/api/polls/upload?question=" + encodeURIComponent(question) +
+        "&options=" + encodeURIComponent(JSON.stringify(options)) +
+        "&filename=" + encodeURIComponent(file.name);
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file
+      })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
+        .then(done)
+        .catch(function (err) { fail("Anlegen fehlgeschlagen: " + err.message); });
+    } else {
+      fetch("/api/polls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: question, options: options })
+      })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
+        .then(done)
+        .catch(function (err) { fail("Anlegen fehlgeschlagen: " + err.message); });
+    }
+  });
+
+  refresh();
+})();

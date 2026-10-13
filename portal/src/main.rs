@@ -19,6 +19,7 @@ mod feeds;
 mod intercom;
 mod logout;
 mod metrics;
+mod polls;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -41,6 +42,7 @@ struct AppConfig {
     intercom: intercom::IntercomConfig,
     intercom_store: Arc<intercom::IntercomStore>,
     intercom_client: reqwest::Client,
+    polls: Option<Arc<polls::PollStore>>,
     feed_fetcher: Arc<feeds::FeedFetcher>,
 }
 
@@ -244,6 +246,30 @@ fn build_landing_page(config: &AppConfig) -> String {
     };
 
     let ic_rendered = render_intercom(&config.intercom_store.list());
+    let polls_card = match &config.polls {
+        Some(_) => r#"<div class="card func-card polls" id="polls-card">
+                <span class="func-icon" aria-hidden="true">📊</span>
+                <h3>Umfragen</h3>
+                <p class="product">Team-Abstimmungen — optional mit Dokument aus der Cloud</p>
+                <ul class="pl-list" id="pl-list" aria-live="polite"><li class="ic-empty">Lade Umfragen…</li></ul>
+                <details class="pl-new">
+                    <summary>Neue Umfrage anlegen</summary>
+                    <div class="pl-box">
+                        <input class="pl-question" maxlength="300" placeholder="Frage…" aria-label="Frage">
+                        <textarea class="pl-options" rows="3" placeholder="Antwortoptionen — eine pro Zeile (min. 2)" aria-label="Antwortoptionen"></textarea>
+                        <div class="ic-actions">
+                            <label class="ic-file-label" for="pl-file">📎 Datei…</label>
+                            <input class="ic-file" id="pl-file" type="file" aria-label="Umfrage-Anhang" hidden>
+                            <span class="ic-file-name" aria-live="polite"></span>
+                            <button class="ic-send pl-create" type="button">Anlegen</button>
+                        </div>
+                        <p class="ic-out pl-out" hidden></p>
+                    </div>
+                </details>
+            </div>"#
+        .to_string(),
+        None => String::new(),
+    };
     let intercom_card = format!(
         r#"<div class="card func-card intercom" id="intercom-card">
                 <span class="func-icon" aria-hidden="true">💬</span>
@@ -427,6 +453,35 @@ fn build_landing_page(config: &AppConfig) -> String {
         .ic-file-name {{ color: var(--text-dim); font-size: 0.85rem; }}
         .ic-out {{ color: var(--text-dim); font-size: 0.88rem; }}
 
+        /* Polls (Umfragen) — optional card */
+        .pl-list {{ list-style: none; padding: 0; margin: 0.5rem 0; text-align: left; display: flex; flex-direction: column; gap: 0.9rem; }}
+        .poll-q {{ font-weight: 600; font-size: 0.95rem; margin-bottom: 0.4rem; }}
+        .poll-att {{ display: inline-block; font-size: 0.85rem; margin-bottom: 0.4rem; }}
+        .poll-opts {{ display: flex; flex-direction: column; gap: 0.35rem; }}
+        .poll-opt {{
+            position: relative; overflow: hidden; display: flex; align-items: center;
+            justify-content: space-between; gap: 0.5rem;
+            border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+            font-size: 13px; background: #fff;
+        }}
+        .poll-fill {{ position: absolute; inset: 0; background: var(--accent-light); width: 0; }}
+        .poll-opt > * {{ position: relative; }}
+        .poll-label {{ flex: 1; text-align: left; word-break: break-word; }}
+        .poll-count {{ color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }}
+        .poll-vote {{
+            border: none; background: none; font: inherit; font-weight: 600;
+            color: var(--accent); cursor: pointer; white-space: nowrap; padding: 0;
+        }}
+        .poll-vote:hover {{ text-decoration: underline; }}
+        .pl-new {{ margin-top: 0.6rem; text-align: left; }}
+        .pl-new summary {{ cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 600; }}
+        .pl-box {{ display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }}
+        .pl-question, .pl-options {{
+            border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+            font-size: 14px; width: 100%; background: #fff; font-family: inherit;
+            box-sizing: border-box; resize: vertical;
+        }}
+
         /* Quick-switch palette (Ctrl+K) */
         #palette {{
             position: fixed; inset: 0; background: rgba(0, 30, 60, 0.45);
@@ -492,6 +547,7 @@ fn build_landing_page(config: &AppConfig) -> String {
                 {cards}
                 {ai_card}
                 {intercom_card}
+                {polls_card}
             </div>
         </section>
         <section aria-label="Aktuelles" id="aktuelles">
@@ -841,6 +897,15 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         router = router.route("/api/ai/chat", post(handle_ai_chat));
     }
 
+    if config.polls.is_some() {
+        router = router
+            .route("/api/polls", get(handle_polls_list))
+            .route("/api/polls", post(handle_polls_create))
+            .route("/api/polls/upload", post(handle_polls_upload))
+            .route("/api/polls/:id/vote", post(handle_polls_vote))
+            .route("/api/files/:token/:name", get(handle_polls_file));
+    }
+
     router
         .route("/metrics", get(handle_metrics))
         .layer(middleware::from_fn(security_headers))
@@ -956,6 +1021,209 @@ async fn handle_intercom_file(
 ) -> impl IntoResponse {
     use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
     match config.intercom_store.read_attachment(&token, &name) {
+        Some((bytes, ct)) => (
+            [
+                (CONTENT_TYPE, ct),
+                (CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+// ── Polls (Umfragen) — optional feature behind POLLS_ENABLED=1 ────────
+
+fn polls_store_from_env() -> Option<Arc<polls::PollStore>> {
+    let enabled = std::env::var("POLLS_ENABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let path = std::env::var("POLLS_DATA_PATH")
+        .ok()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/data/polls.json"));
+    let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let attachments = dir.join("attachments");
+    if let Err(e) = std::fs::create_dir_all(&attachments) {
+        tracing::warn!(%e, dir = %attachments.display(), "cannot create polls attachments dir — local uploads will fail");
+    }
+    let cloud = polls::CloudUploadConfig::from_env();
+    tracing::info!(cloud = cloud.is_some(), "polls feature enabled");
+    Some(Arc::new(polls::PollStore::open(
+        Some(path),
+        Some(attachments),
+        cloud,
+    )))
+}
+
+#[derive(Deserialize)]
+struct PollPost {
+    question: String,
+    options: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PollVotePost {
+    option: usize,
+}
+
+#[derive(Deserialize)]
+struct PollUploadQuery {
+    question: String,
+    /// JSON-encoded array of option strings (client uses encodeURIComponent).
+    options: String,
+    #[serde(default)]
+    filename: Option<String>,
+}
+
+async fn handle_polls_list(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
+    match &config.polls {
+        Some(store) => Json(serde_json::json!({ "polls": store.list() })).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn handle_polls_create(
+    State(config): State<Arc<AppConfig>>,
+    Json(post): Json<PollPost>,
+) -> impl IntoResponse {
+    let Some(store) = &config.polls else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let bad = |msg: &str| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+    };
+    let (question, options) = match polls::validate_poll(&post.question, &post.options) {
+        Ok(pair) => pair,
+        Err(e) => return bad(&e).into_response(),
+    };
+    let poll = store.create(question, options, None);
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "poll": poll })),
+    )
+        .into_response()
+}
+
+/// Create a poll carrying a picked-file attachment (raw body upload).
+/// With CLOUD_WEBDAV_* configured the file goes to the cloud (WebDAV PUT
+/// + public share link); otherwise it falls back to the local dir.
+async fn handle_polls_upload(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<PollUploadQuery>,
+    headers: axum::http::HeaderMap,
+    bytes: axum::body::Bytes,
+) -> impl IntoResponse {
+    let Some(store) = &config.polls else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let bad = |msg: &str| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+    };
+    let options: Vec<String> = match serde_json::from_str(&q.options) {
+        Ok(v) => v,
+        Err(_) => return bad("options must be a JSON array string").into_response(),
+    };
+    let (question, options) = match polls::validate_poll(&q.question, &options) {
+        Ok(pair) => pair,
+        Err(e) => return bad(&e).into_response(),
+    };
+    let attachment = if bytes.is_empty() {
+        None
+    } else {
+        let filename = q
+            .filename
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("upload.bin")
+            .to_string();
+        match &store.cloud {
+            Some(cloud) => {
+                let key = intercom::random_token();
+                match polls::upload_to_cloud(
+                    cloud,
+                    &config.intercom_client,
+                    &key,
+                    &filename,
+                    &bytes,
+                )
+                .await
+                {
+                    Ok(a) => Some(a),
+                    Err(e) => return bad(&e).into_response(),
+                }
+            }
+            None => {
+                let content_type = headers
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("application/octet-stream")
+                    .split(';')
+                    .next()
+                    .unwrap_or("application/octet-stream")
+                    .trim()
+                    .to_string();
+                match store.save_attachment_local(&filename, &bytes) {
+                    Ok((token, name)) => Some(intercom::Attachment {
+                        url: format!("/api/files/{token}/{name}"),
+                        name,
+                        size: Some(bytes.len() as u64),
+                        content_type,
+                    }),
+                    Err(e) => return bad(&e).into_response(),
+                }
+            }
+        }
+    };
+    let poll = store.create(question, options, attachment);
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "poll": poll })),
+    )
+        .into_response()
+}
+
+async fn handle_polls_vote(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Path(id): axum::extract::Path<u64>,
+    Json(post): Json<PollVotePost>,
+) -> impl IntoResponse {
+    let Some(store) = &config.polls else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match store.vote(id, post.option) {
+        Ok(poll) => Json(serde_json::json!({ "poll": poll })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e})),
+        )
+            .into_response(),
+    }
+}
+
+/// Serve a local-fallback poll attachment (same guards as intercom).
+async fn handle_polls_file(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Path((token, name)): axum::extract::Path<(String, String)>,
+) -> impl IntoResponse {
+    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    let Some(store) = &config.polls else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match store.read_attachment_local(&token, &name) {
         Some((bytes, ct)) => (
             [
                 (CONTENT_TYPE, ct),
@@ -1124,6 +1392,7 @@ fn load_config() -> Arc<AppConfig> {
             "opensme.graphwiz.ai",
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
+        polls: polls_store_from_env(),
         intercom_client: reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -1146,6 +1415,7 @@ async fn main() {
         opensme_domain = %config.opensme_domain,
         ai_enabled = config.ai.is_some(),
         announcements = config.announcements.len(),
+        polls_enabled = config.polls.is_some(),
         feed_columns = config.feed_fetcher.columns().len(),
         "starting opensme-portal"
     );
@@ -1204,6 +1474,7 @@ mod tests {
                 allow_http: false,
             },
             intercom_store: Arc::new(intercom::IntercomStore::default()),
+            polls: None,
             intercom_client: reqwest::Client::new(),
             feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(""))),
         }
