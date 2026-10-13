@@ -70,6 +70,11 @@ services:
       # fallback for older .env files / overlay consumers.
       OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:-${OC_OIDC_SECRET:-CHANGEME_oidc_client}}
       PROXY_ROLE_ASSIGNMENT_DRIVER: oidc
+      # Opt-in machine auth for automation (poll-attachment upload +
+      # automated public-share creation). Validates basic-auth credentials
+      # against the IDM — works alongside the Zitadel IdP. Off by default;
+      # set OPENCLOUD_ENABLE_BASIC_AUTH=true when CLOUD_WEBDAV_* is used.
+      PROXY_ENABLE_BASIC_AUTH: ${OPENCLOUD_ENABLE_BASIC_AUTH:-false}
       # Local POSIX filesystem backend (no MinIO/S3 required).
       OC_STORAGE_USERS_DRIVER: ocis
       OC_ADD_RUN_SERVICES: notifications
