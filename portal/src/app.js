@@ -170,8 +170,21 @@
     var icList = icCard.querySelector("#ic-list");
     var icText = icCard.querySelector(".ic-text");
     var icUrl = icCard.querySelector(".ic-url");
+    var icFile = icCard.querySelector(".ic-file");
+    var icFileLabel = icCard.querySelector(".ic-file-label");
+    var icFileName = icCard.querySelector(".ic-file-name");
     var icSend = icCard.querySelector(".ic-send");
     var icOut = icCard.querySelector(".ic-out");
+
+    icFile.addEventListener("change", function () {
+      var f = icFile.files && icFile.files[0];
+      if (f) {
+        icFileName.textContent = f.name + " (" + humanSize(f.size) + ")";
+        icUrl.value = ""; // either a cloud link or a picked file
+      } else {
+        icFileName.textContent = "";
+      }
+    });
 
     function humanSize(bytes) {
       if (bytes == null) return "";
@@ -216,16 +229,32 @@
         icOut.hidden = false;
         return;
       }
-      var payload = { text: text };
-      var att = (icUrl.value || "").trim();
-      if (att) payload.attachment_url = att;
+      var file = icFile.files && icFile.files[0];
+      var url;
+      var opts;
+      if (file) {
+        // Picked file: raw-body upload posts the note directly.
+        url = "/api/intercom/upload?text=" + encodeURIComponent(text) +
+              "&filename=" + encodeURIComponent(file.name);
+        opts = {
+          method: "POST",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        };
+      } else {
+        var payload = { text: text };
+        var att = (icUrl.value || "").trim();
+        if (att) payload.attachment_url = att;
+        url = "/api/intercom";
+        opts = {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        };
+      }
       icOut.textContent = "…";
       icOut.hidden = false;
-      fetch("/api/intercom", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
+      fetch(url, opts)
         .then(function (r) {
           if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || ("HTTP " + r.status)); });
           return r.json();
@@ -233,6 +262,8 @@
         .then(function (d) {
           icText.value = "";
           icUrl.value = "";
+          icFile.value = "";
+          icFileName.textContent = "";
           icOut.hidden = true;
           refresh();
         })

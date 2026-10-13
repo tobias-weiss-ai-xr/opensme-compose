@@ -8,6 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -252,7 +253,12 @@ fn build_landing_page(config: &AppConfig) -> String {
                 <div class="ic-box">
                     <textarea class="ic-text" rows="2" placeholder="Kurze Notiz für das Team…" aria-label="Nachricht" maxlength="2000"></textarea>
                     <input class="ic-url" type="url" placeholder="Anhang aus der Cloud — geteilten Link einfügen (https://cloud…/s/…)" aria-label="Anhang-URL">
-                    <button class="ic-send" type="button">Senden</button>
+                    <div class="ic-actions">
+                        <label class="ic-file-label" for="ic-file">📎 Datei…</label>
+                        <input class="ic-file" id="ic-file" type="file" aria-label="Datei anhängen" hidden>
+                        <span class="ic-file-name" aria-live="polite"></span>
+                        <button class="ic-send" type="button">Senden</button>
+                    </div>
                     <p class="ic-out" hidden></p>
                 </div>
             </div>"#
@@ -412,6 +418,13 @@ fn build_landing_page(config: &AppConfig) -> String {
             font-size: 13px; font-weight: 600; cursor: pointer;
         }}
         .ic-send:hover {{ background: var(--accent-hover); }}
+        .ic-actions {{ display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }}
+        .ic-file-label {{
+            background: var(--accent-light); color: var(--accent); border-radius: 999px;
+            padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+        }}
+        .ic-file-label:hover {{ background: #d7e7f8; }}
+        .ic-file-name {{ color: var(--text-dim); font-size: 0.85rem; }}
         .ic-out {{ color: var(--text-dim); font-size: 0.88rem; }}
 
         /* Quick-switch palette (Ctrl+K) */
@@ -816,6 +829,11 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/feeds", get(handle_feeds))
         .route("/api/intercom", get(handle_intercom_list))
         .route("/api/intercom", post(handle_intercom_post))
+        .route("/api/intercom/upload", post(handle_intercom_upload))
+        .route(
+            "/api/intercom/files/:token/:name",
+            get(handle_intercom_file),
+        )
         .route("/api/logout", post(logout::handle_logout))
         .route("/logged-out", get(logout::handle_logged_out));
 
@@ -842,6 +860,111 @@ struct IntercomPost {
 
 async fn handle_intercom_list(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
     Json(serde_json::json!({ "messages": config.intercom_store.list() }))
+}
+
+/// Team-notes persistence layout: INTERCOM_DATA_PATH holds the JSON store,
+/// picked-file uploads live in "attachments/" next to it.
+fn intercom_store_from_env() -> intercom::IntercomStore {
+    match std::env::var("INTERCOM_DATA_PATH") {
+        Ok(path) if !path.trim().is_empty() => {
+            let path = PathBuf::from(path.trim());
+            let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let attachments = dir.join("attachments");
+            let _ = std::fs::create_dir_all(&attachments);
+            intercom::IntercomStore::open(Some(path), Some(attachments))
+        }
+        _ => intercom::IntercomStore::default(),
+    }
+}
+
+#[derive(Deserialize)]
+struct IntercomUploadQuery {
+    text: String,
+    #[serde(default)]
+    filename: Option<String>,
+}
+
+/// File-picker upload: raw body (no multipart feature), metadata in the
+/// query. Posts the note directly with the stored attachment.
+async fn handle_intercom_upload(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<IntercomUploadQuery>,
+    headers: axum::http::HeaderMap,
+    bytes: axum::body::Bytes,
+) -> impl IntoResponse {
+    let bad = |msg: &str| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": msg })),
+        )
+    };
+    let text = match intercom::validate_text(&q.text) {
+        Ok(t) => t,
+        Err(e) => return bad(&e).into_response(),
+    };
+    let filename = q
+        .filename
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            headers
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|ct| ct.rsplit('/').next())
+                .map(|ext| format!("upload.{ext}"))
+        })
+        .unwrap_or_else(|| "upload.bin".into());
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim()
+        .to_string();
+    let (token, name) = match config.intercom_store.save_attachment(&filename, &bytes) {
+        Ok(pair) => pair,
+        Err(e) => return bad(&e).into_response(),
+    };
+    let attachment = intercom::Attachment {
+        url: format!("/api/intercom/files/{token}/{name}"),
+        name,
+        size: Some(bytes.len() as u64),
+        content_type,
+    };
+    let msg = config.intercom_store.push(text, Some(attachment));
+    metrics::global().inc_intercom_message();
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "message": msg })),
+    )
+        .into_response()
+}
+
+/// Serve a picked-file attachment. Body from disk, content-type from the
+/// stored snapshot; never trusts the request path beyond token+name.
+async fn handle_intercom_file(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Path((token, name)): axum::extract::Path<(String, String)>,
+) -> impl IntoResponse {
+    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    match config.intercom_store.read_attachment(&token, &name) {
+        Some((bytes, ct)) => (
+            [
+                (CONTENT_TYPE, ct),
+                (
+                    CONTENT_DISPOSITION,
+                    format!("inline; filename=\"{name}\""),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn handle_intercom_post(
@@ -999,7 +1122,7 @@ fn load_config() -> Arc<AppConfig> {
             "OPENSME_DOMAIN",
             "opensme.graphwiz.ai",
         )),
-        intercom_store: Arc::new(intercom::IntercomStore::default()),
+        intercom_store: Arc::new(intercom_store_from_env()),
         intercom_client: reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -1028,7 +1151,11 @@ async fn main() {
 
     let app = build_router(config);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let port: u16 = std::env::var("PORTAL_PORT")
+        .ok()
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or(8080);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap_or_else(|e| {

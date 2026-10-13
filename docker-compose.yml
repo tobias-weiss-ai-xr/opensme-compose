@@ -330,9 +330,12 @@ services:
       dockerfile: Dockerfile
     container_name: opensme-portal
     restart: unless-stopped
+    volumes:
+      - portal-data:/data
     environment:
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      INTERCOM_DATA_PATH: ${INTERCOM_DATA_PATH:-/data/intercom.json}
       OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       MAIL_URL: ${MAIL_URL:-}
       IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
@@ -389,3 +392,4 @@ volumes:
   traefik-data:
   postgres-data:
   redis-data:
+  portal-data:

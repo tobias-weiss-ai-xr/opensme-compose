@@ -1,22 +1,27 @@
-//! Portal intercom — internal short messages with cloud attachments.
+//! Portal intercom — internal short messages with attachments.
 //!
 //! Epics T/U (docs/E2E-JOURNEYS.md): users post short notes; a note may
-//! reference one attachment FROM the cloud service by URL. The portal
-//! snapshots the attachment's METADATA at send time (HEAD request) and
-//! never proxies file bodies.
+//! reference one attachment either (a) FROM the cloud service by URL —
+//! the portal snapshots the attachment's METADATA at send time (HEAD
+//! request) and never proxies file bodies — or (b) uploaded directly
+//! from the workstation via the file picker (small files, stored next to
+//! the note store; conversational ephemera, not business data).
 //!
-//! Store is in-memory by design (v1): conversational ephemera, capped
-//! FIFO, lost on restart. This module owns validation, URL policy and
-//! metadata parsing; HTTP wiring lives in main.rs.
+//! Store: capped FIFO. When INTERCOM_DATA_PATH is set the store persists
+//! write-through to that JSON file (atomic tmp+rename) and reloads on
+//! start; without it the store stays in-memory (dev/test default).
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::hash::{BuildHasher, Hasher};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 pub const MAX_TEXT: usize = 2000;
 pub const MAX_URL: usize = 2048;
 pub const MAX_MESSAGES: usize = 50;
+pub const MAX_UPLOAD: u64 = 5 * 1024 * 1024;
 
 /// Attachment reference snapshot taken when the message was sent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,7 +33,7 @@ pub struct Attachment {
     pub content_type: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IntercomMessage {
     pub id: u64,
     pub text: String,
@@ -72,6 +77,10 @@ impl IntercomConfig {
 pub struct IntercomStore {
     messages: Mutex<VecDeque<IntercomMessage>>,
     next_id: AtomicU64,
+    /// JSON persistence file; None = in-memory only.
+    data_path: Option<PathBuf>,
+    /// Directory for picked-file uploads; None = uploads disabled.
+    attachments_dir: Option<PathBuf>,
 }
 
 impl Default for IntercomStore {
@@ -79,8 +88,180 @@ impl Default for IntercomStore {
         Self {
             messages: Mutex::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
+            data_path: None,
+            attachments_dir: None,
         }
     }
+}
+
+impl IntercomStore {
+    /// Build a store that persists to `data_path` and stores picked-file
+    /// uploads under `attachments_dir`. Loads existing messages (missing
+    /// file = fresh store; corrupt file = rename aside, start fresh).
+    pub fn open(data_path: Option<PathBuf>, attachments_dir: Option<PathBuf>) -> Self {
+        let store = Self {
+            messages: Mutex::new(VecDeque::new()),
+            next_id: AtomicU64::new(1),
+            data_path,
+            attachments_dir,
+        };
+        store.load();
+        store
+    }
+
+    fn load(&self) {
+        let Some(path) = &self.data_path else { return };
+        let Ok(raw) = std::fs::read(path) else { return };
+        match serde_json::from_slice::<Vec<IntercomMessage>>(&raw) {
+            Ok(msgs) => {
+                let mut messages = self.messages.lock().unwrap_or_else(|e| e.into_inner());
+                let next = msgs.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                self.next_id.store(next, Ordering::Relaxed);
+                *messages = msgs.into_iter().rev().collect();
+            }
+            Err(_) => {
+                // Corrupt store: keep it for forensics, start fresh.
+                let _ = std::fs::rename(
+                    path,
+                    path.with_extension("json.corrupt"),
+                );
+            }
+        }
+    }
+
+    /// Atomic write-through: serialize then rename over the target.
+    fn persist(&self, messages: &[IntercomMessage]) {
+        let Some(path) = &self.data_path else { return };
+        let Ok(json) = serde_json::to_vec(messages) else { return };
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, path);
+        }
+    }
+
+    /// Store an uploaded file. Returns the sanitized name and a random
+    /// token; the file lives at attachments_dir/<token>_<name>.
+    pub fn save_attachment(&self, file_name: &str, bytes: &[u8]) -> Result<(String, String), String> {
+        let dir = self
+            .attachments_dir
+            .as_ref()
+            .ok_or_else(|| "attachment uploads are disabled".to_string())?;
+        if bytes.is_empty() {
+            return Err("attachment is empty".into());
+        }
+        if bytes.len() as u64 > MAX_UPLOAD {
+            return Err(format!("attachment exceeds {} bytes", MAX_UPLOAD));
+        }
+        let name = sanitize_name(file_name);
+        let token = random_token();
+        let target = dir.join(format!("{}_{}", token, name));
+        std::fs::write(&target, bytes).map_err(|e| format!("cannot store attachment: {}", e))?;
+        Ok((token, name))
+    }
+
+    /// Read an attachment by token+name. Refuses anything but the exact
+    /// <hex-token>_<sanitized-name> layout — no traversal, no globs.
+    pub fn read_attachment(&self, token: &str, name: &str) -> Option<(Vec<u8>, String)> {
+        let dir = self.attachments_dir.as_ref()?;
+        if token.is_empty() || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let safe = sanitize_name(name);
+        if safe != name {
+            return None;
+        }
+        let path = dir.join(format!("{}_{}", token, safe));
+        std::fs::read(&path).ok().map(|bytes| {
+            let ct = mime_for(&safe);
+            (bytes, ct)
+        })
+    }
+
+    fn push_internal(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        // Unix seconds — enough for ordering; no extra time crate needed.
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default();
+        IntercomMessage {
+            id,
+            text,
+            attachment,
+            created_at,
+        }
+    }
+
+    pub fn push(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
+        let msg = self.push_internal(text, attachment);
+        let mut messages = self.messages.lock().unwrap_or_else(|e| e.into_inner());
+        messages.push_back(msg.clone());
+        while messages.len() > MAX_MESSAGES {
+            messages.pop_front();
+        }
+        drop(messages);
+        self.persist(&self.messages.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect::<Vec<_>>());
+        msg
+    }
+
+    pub fn list(&self) -> Vec<IntercomMessage> {
+        self.messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .rev()
+            .cloned()
+            .collect()
+    }
+}
+
+/// Filesystem-safe attachment name: keep letters/digits/dot/dash/underscore,
+/// collapse everything else to '_', cap length, never empty, never dotfile.
+fn sanitize_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .take(120)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches('.').trim_end_matches('_').to_string();
+    if cleaned.is_empty() || cleaned == "_" {
+        "file".into()
+    } else {
+        cleaned
+    }
+}
+
+/// 16 hex chars from the OS hasher's random keys — no extra crate.
+fn random_token() -> String {
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(0);
+    let a = h.finish();
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(0);
+    format!("{:016x}{:016x}", a, h.finish())
+}
+
+/// Minimal content-type mapping for serving picked files inline.
+fn mime_for(name: &str) -> String {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 // ── Validation ────────────────────────────────────────────────────────────
@@ -180,40 +361,8 @@ pub fn parse_attachment_metadata(
     }
 }
 
-// ── Store ────────────────────────────────────────────────────────────────
+// ── store impl lives above (persistence + attachments) ──
 
-impl IntercomStore {
-    pub fn push(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        // Unix seconds — enough for ordering; no extra time crate needed.
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
-            .unwrap_or_default();
-        let msg = IntercomMessage {
-            id,
-            text,
-            attachment,
-            created_at,
-        };
-        let mut messages = self.messages.lock().unwrap_or_else(|e| e.into_inner());
-        messages.push_back(msg);
-        while messages.len() > MAX_MESSAGES {
-            messages.pop_front();
-        }
-        messages.back().expect("just pushed").clone()
-    }
-
-    pub fn list(&self) -> Vec<IntercomMessage> {
-        self.messages
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .rev()
-            .cloned()
-            .collect()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -356,5 +505,121 @@ mod tests {
         let m = store.push("see attached".into(), Some(att.clone()));
         assert_eq!(store.list()[0].attachment.as_ref().unwrap().name, "a.pdf");
         assert_eq!(m.id, 1);
+    }
+
+    // ── persistence ─────────────────────────────────────────────────
+
+    #[test]
+    fn store_survives_reopen_from_disk() {
+        let dir = std::env::temp_dir().join(format!("ic-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+        let _ = std::fs::remove_file(&path);
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        store.push("persistent".into(), None);
+        drop(store);
+
+        let store2 = IntercomStore::open(Some(path.clone()), None);
+        let listed = store2.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].text, "persistent");
+        // id counter continues after reload
+        assert_eq!(store2.push("second".into(), None).id, listed[0].id + 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn store_fifo_cap_survives_reload() {
+        let dir = std::env::temp_dir().join(format!("ic-test-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+        let _ = std::fs::remove_file(&path);
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        for i in 0..(MAX_MESSAGES + 5) {
+            store.push(format!("m{i}"), None);
+        }
+        drop(store);
+        let store2 = IntercomStore::open(Some(path), None);
+        let listed = store2.list();
+        assert_eq!(listed.len(), MAX_MESSAGES);
+        assert!(!listed.iter().any(|m| m.text == "m0"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn store_corrupt_file_renamed_aside() {
+        let dir = std::env::temp_dir().join(format!("ic-test-corrupt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+        std::fs::write(&path, b"{not json").unwrap();
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        assert!(store.list().is_empty());
+        assert!(path.with_extension("json.corrupt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── picked-file attachments ─────────────────────────────────────
+
+    #[test]
+    fn upload_roundtrip_and_mime() {
+        let dir = std::env::temp_dir().join(format!("ic-test-up-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = IntercomStore::open(None, Some(dir.clone()));
+
+        let (token, name) = store.save_attachment("Bericht 2026.pdf", b"%PDF-1.4").unwrap();
+        assert!(name.ends_with(".pdf"));
+        assert_eq!(token.len(), 32);
+        let (bytes, ct) = store.read_attachment(&token, &name).unwrap();
+        assert_eq!(bytes, b"%PDF-1.4");
+        assert_eq!(ct, "application/pdf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upload_rejects_oversize_and_empty() {
+        let dir = std::env::temp_dir().join(format!("ic-test-size-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = IntercomStore::open(None, Some(dir));
+        assert!(store.save_attachment("a.txt", b"").is_err());
+        let big = vec![0u8; (MAX_UPLOAD + 1) as usize];
+        assert!(store.save_attachment("big.bin", &big).is_err());
+    }
+
+    #[test]
+    fn upload_disabled_without_dir() {
+        let store = IntercomStore::default();
+        assert!(store.save_attachment("a.txt", b"x").is_err());
+    }
+
+    #[test]
+    fn sanitize_never_allows_traversal_or_weird_names() {
+        let out = sanitize_name("../../etc/passwd");
+        assert!(!out.contains('/'), "no path separators: {out}");
+        // join() is safe as long as there are no separators and no leading dot
+        assert!(!out.starts_with('.'), "no leading dot: {out}");
+        assert_eq!(sanitize_name(""), "file");
+        assert_eq!(sanitize_name("..."), "file");
+        assert_eq!(sanitize_name("a b/c.txt"), "a_b_c.txt");
+    }
+
+    #[test]
+    fn read_attachment_refuses_non_matching_layout() {
+        let dir = std::env::temp_dir().join(format!("ic-test-trav-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = IntercomStore::open(None, Some(dir.clone()));
+        let (token, name) = store.save_attachment("a.txt", b"hi").unwrap();
+
+        // wrong token charset
+        assert!(store.read_attachment("../..", &name).is_none());
+        // name with traversal chars never matches the sanitized file
+        assert!(store.read_attachment(&token, "../x.txt").is_none());
+        // unknown token
+        assert!(store.read_attachment("deadbeefdeadbeefdeadbeefdeadbeef", &name).is_none());
+        // the real one works
+        assert!(store.read_attachment(&token, &name).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
