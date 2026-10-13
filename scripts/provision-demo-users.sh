@@ -393,11 +393,11 @@ for u in users:
         break
     mac = hmac.new(secret, digestmod=hashlib.sha256)
     mac.update(nonce["nonce"].encode())
-    for field in (b"\x00user", un.encode(), b"\x00password", pw.encode(),
-                  b"\x00admin", admin.encode(), b"\x00user_type", b""):
-        mac.update(field)
+    mac.update(b"\x00user"); mac.update(un.encode())
+    mac.update(b"\x00password"); mac.update(pw.encode())
+    mac.update(b"\x00admin"); mac.update(admin.encode())
     payload = {"nonce": nonce["nonce"], "username": un, "password": pw,
-               "admin": admin == "true", "user_type": None, "mac": mac.hexdigest()}
+               "admin": admin == "true", "mac": mac.hexdigest()}
     status, body = req("POST", "/_synapse/admin/v1/register", payload)
     if status == 200:
         print("  \u2713 " + un + (" (admin)" if admin == "true" else ""))
