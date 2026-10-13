@@ -431,8 +431,8 @@ mod tests {
     #[test]
     fn normalize_proxy_candidate_trims_and_rejects_empty() {
         assert_eq!(
-            normalize_proxy_candidate(" http://172.19.0.1:8888/ "),
-            Some("http://172.19.0.1:8888".to_string())
+            normalize_proxy_candidate(" http://gateway.internal:8888/ "),
+            Some("http://gateway.internal:8888".to_string())
         );
         assert_eq!(normalize_proxy_candidate(""), None);
         assert_eq!(normalize_proxy_candidate("   "), None);
