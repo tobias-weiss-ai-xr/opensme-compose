@@ -1398,7 +1398,17 @@ fn load_config() -> Arc<AppConfig> {
             // Egress-restricted hosts reach the cloud (attachment metadata
             // HEAD, poll uploads) only through the egress proxy — same
             // wiring as the feed client.
-            if let Some(proxy) = feeds::proxy_from_env() {
+            if let Some(mut proxy) = feeds::proxy_from_env() {
+                // Internal targets (docker-net names like opensme-opencloud)
+                // must bypass the egress proxy: it cannot resolve bridge
+                // names and would fail every internal http request.
+                if let Some(np) = std::env::var("PORTAL_NO_PROXY")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                {
+                    proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&np));
+                }
                 builder = builder.proxy(proxy);
             }
             builder.build().unwrap_or_default()
