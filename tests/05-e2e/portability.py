@@ -180,8 +180,17 @@ def main() -> int:
             # transiently drop the portal router in CI) — re-assert routing
             # before every attempt instead of failing on a single 404
             att = None
-            for _ in range(6):
+            for attempt in range(6):
                 if not ensure_portal_routed(session, new_portal):
+                    # Diagnose the routing state instead of guessing:
+                    # container up? which routers does traefik actually have?
+                    import subprocess as _sp
+                    state = _sp.run(
+                        ["docker", "ps", "--filter", "name=opensme-portal",
+                         "--format", "{{.Names}} {{.Status}}"],
+                        capture_output=True, text=True, timeout=30)
+                    print(f"  [diag] ensure-fail attempt {attempt}: "
+                          f"portal={state.stdout.strip() or 'NOT RUNNING'}")
                     continue
                 att = session.post(new_portal + "/api/intercom",
                                    json={"text": "Domain-Migration klappt",
