@@ -76,6 +76,8 @@ def run_bot(allow_heal: bool, extra_env: dict | None = None):
     env = dict(extra_env or {})
     env.update({
         "DEV_AGENT_WATCH": "opensme",
+        "DEV_AGENT_INTERVAL": "2s",   # re-reconcile fast so a just-unhealthy
+                                        # mock is found promptly (CI timing)
         "DEV_AGENT_ALLOW_HEAL": "true" if allow_heal else "false",
         "DEV_AGENT_HISTORY_MAX": "50",
         "DEV_AGENT_API_ADDR": "0.0.0.0:8082",
@@ -168,7 +170,7 @@ def main() -> int:
                 return False, None
             return "opensme-saga-mock" in r.stdout, r.stdout
 
-        ok, status = wait_until("unhealthy finding", 60, mock_seen)
+        ok, status = wait_until("unhealthy finding", 90, mock_seen)
         (result.ok if ok else result.fail)(
             "A1 watched mock surfaced as a Finding (krank → Diagnose)"
             if ok else f"A1 mock not surfaced: {status[:200] if status else 'no status'}")
