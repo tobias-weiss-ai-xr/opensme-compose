@@ -42,11 +42,10 @@ else
 
   # ── Survey (active, all-in-one, german) + language settings ──
   psql -1 -v ON_ERROR_STOP=1 <<SQL
-BEGIN;
 INSERT INTO lime_surveys (sid, owner_id, admin, adminemail, active, format,
-  language, additional_languages, datecreated)
+  language, additional_languages, datecreated, lastmodified)
 VALUES ($SID, 1, 'openSME Administrator', 'hello@opensme.org', 'Y', 'A',
-  'de', '', now());
+  'de', '', now(), now());
 
 INSERT INTO lime_surveys_languagesettings (surveyls_survey_id, surveyls_language,
   surveyls_title, surveyls_description, surveyls_welcometext, surveyls_endtext,
@@ -89,7 +88,6 @@ INSERT INTO lime_question_l10ns (id, qid, question, help, script, language)
 VALUES (nextval('lime_question_l10ns_id_seq'),
   (SELECT qid FROM lime_questions WHERE sid = $SID AND title = 'upload'),
   'Bitte lade eine Datei hoch (z. B. Foto oder PDF)', NULL, NULL, 'de');
-COMMIT;
 SQL
 
   # ── Activation: response table, mirroring LimeSurvey's own schema ──
