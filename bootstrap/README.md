@@ -81,6 +81,30 @@ curl -X POST "https://bpm.<domain>/engine-rest/task/<task-id>/complete" \
 | | `approved` | Boolean | Set by the lead (short path) |
 | | `hrApproved` | Boolean | Set by HR (long path) |
 
+## demo user provisioning
+
+`../scripts/provision-demo-users.sh` seeds the same 12-person SME company
+(`demo-users.json`) into every component with its own user store:
+
+| Component | Store | Mechanism |
+|-----------|-------|-----------|
+| Zitadel | IdP | machine-PAT admin API (default, `--component zitadel`) |
+| Operaton | BPM engine identity | engine-rest via docker-exec curl (`--component operaton`) |
+| Synapse | Matrix homeserver | shared-secret register API, MAC computed inside the container (`--component synapse`) |
+| Paperless | document vault | Django `manage.py shell` (`--component paperless`) |
+| Stalwart | mail | webadmin REST API (`--component stalwart`) |
+| Invoice Ninja | billing | intentionally unwired — users are company-bound; the demo ships a single admin |
+
+```bash
+./scripts/provision-demo-users.sh --component operaton,synapse   # subsets
+./scripts/provision-demo-users.sh --component all                # everything, best effort
+```
+
+All components are idempotent — re-runs report `exists` instead of
+duplicating. Container targets auto-detect via `opensme-*` container
+names; override with `OPERATON_URL`, `SYNAPSE_CONTAINER`,
+`PAPERLESS_CONTAINER`, `STALWART_CONTAINER`, `STALWART_MAIL_DOMAIN`.
+
 ## Adding more seed data
 
 - **BPMN processes** — drop a `.bpmn` file in `bpmn/` and re-run

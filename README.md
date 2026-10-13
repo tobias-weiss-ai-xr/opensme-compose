@@ -501,7 +501,7 @@ openSME-compose/
 │   ├── verify-backup.sh       # Verify a backup set: structure + AES-encrypted archives
 │   ├── compliance.py          # Runs the static suite, emits timestamped compliance reports
 │   ├── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
-│   └── provision-demo-users.sh # Provision 12 demo users in Zitadel (12 person SME)
+│   └── provision-demo-users.sh # Provision 12 demo users across Zitadel, Operaton, Synapse, Paperless, Stalwart (--component, idempotent)
 ├── contracts/                  # Integration contracts: tiles, interop, ports, security, health
 ├── specs/                      # Per-service compose contracts (checked by test layer 1)
 ├── postgres-init/
