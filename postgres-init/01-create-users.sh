@@ -9,7 +9,7 @@ set -e
 #
 # Databases (created by 00-create-databases.sql):
 #   zitadel, sogo, casdoor_db, synapse_db, paperless_db,
-#   invoiceninja_db, notes_db
+#   invoiceninja_db, notes_db, limesurvey_db
 # ═══════════════════════════════════════════════════════════════
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
@@ -63,6 +63,17 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     GRANT ALL PRIVILEGES ON DATABASE notes_db TO notes_user;
     ALTER DATABASE notes_db OWNER TO notes_user;
 
+    -- ── LimeSurvey (surveys) — runs its own schema migrations on
+    -- first boot, so it needs database ownership (PG15+ public schema)
+    DO \$\$
+    BEGIN
+      CREATE USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-changeme}';
+    EXCEPTION WHEN duplicate_object THEN
+      ALTER USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-changeme}';
+    END \$\$;
+    GRANT ALL PRIVILEGES ON DATABASE limesurvey_db TO limesurvey_user;
+    ALTER DATABASE limesurvey_db OWNER TO limesurvey_user;
+
     -- ── Nosdesk (ticketing/helpdesk) ──
     DO \$\$
     BEGIN
@@ -93,4 +104,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     GRANT nosdesk_admin TO nosdesk_user;
 EOSQL
 
-echo "✅ Per-service database users created (casdoor, synapse, paperless, invoiceninja, notes, nosdesk)"
+echo "✅ Per-service database users created (casdoor, synapse, paperless, invoiceninja, notes, nosdesk, limesurvey)"

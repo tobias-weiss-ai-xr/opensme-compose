@@ -18,6 +18,7 @@
 #   support     Support        ticketing         help.*
 #   website     Website        cms               www.*
 #   shop        Shop           store             shop.*
+#   surveys     Surveys        limesurvey        surveys.*
 
 name: portal-function-catalog
 description: >
@@ -115,10 +116,9 @@ catalog:
     tile: Surveys
     url_env: SURVEYS_URL
     domain_env: null
-    # External, group-managed Grist instance (outside the compose chain):
-    # no service/router requirement — the portal only navigates, it never
-    # proxies the survey tool. Set SURVEYS_URL to enable the tile.
-    external: true
+    host_prefix: surveys
+    service: limesurvey
+    router: surveys
 
 excluded:
   # Infrastructure surfaces — no end-user journey starts here.

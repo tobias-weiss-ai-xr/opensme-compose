@@ -1,0 +1,104 @@
+# ── Global defaults ──────────────────────────────────
+# Inherited by every service in this file via: <<: *service-defaults
+x-service-defaults: &service-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+  init: true
+  security_opt:
+    - no-new-privileges:true
+
+# ═══════════════════════════════════════════════════════════════
+# openSME — Surveys (LimeSurvey Community Edition)
+# ═══════════════════════════════════════════════════════════════
+# Full-featured online survey tool: question types, branching logic,
+# multilingual surveys, tokens/invitations, export (CSV/SPSS/R).
+#
+# Upstream:  https://github.com/LimeSurvey/LimeSurvey (GPL-3.0, active)
+# Image:     martialblog/limesurvey (community-maintained, checksum-
+#            pinned builds, versioned tags — see MAINTENANCE below)
+# Backend:   the suite PostgreSQL (database limesurvey_db)
+#
+# Include via: COMPOSE_FILE=docker-compose.yml:services/limesurvey.yml
+# Or via profile: docker compose --profile surveys up -d
+#
+# Requires: PostgreSQL (core). Set in .env before first start:
+#   SURVEYS_URL          public URL, e.g. https://surveys.<OPENSME_DOMAIN>
+#   SURVEYS_DB_PASSWORD  database password
+#   SURVEYS_ADMIN_PASSWORD  initial admin password
+#
+# MAINTENANCE / UPGRADES
+#   - The image tag is pinned via LIMESURVEY_TAG (default 6-apache).
+#     Upgrading = bump the tag in .env, then:
+#       docker compose -f docker-compose.yml -f services/limesurvey.yml \
+#         up -d limesurvey
+#     LimeSurvey runs its schema migrations on first request; survey
+#     data lives in limesurvey_db (pg_dumpall in scripts/backup.sh)
+#     and files in the limesurvey-uploads volume (tarred by backup.sh).
+#   - Release notes: https://github.com/LimeSurvey/LimeSurvey/releases
+#   - Image tags: https://hub.docker.com/r/martialblog/limesurvey/tags
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  limesurvey:
+    <<: *service-defaults
+    # Community image, checksum-pinned builds, tracks stable releases.
+    # Pin minor via LIMESURVEY_TAG in .env (e.g. 6.17-apache) to hold a
+    # known-good release across redeploys.
+    image: martialblog/limesurvey:${LIMESURVEY_TAG:-6-apache}
+    container_name: opensme-limesurvey
+    restart: unless-stopped
+    profiles: ["surveys"]
+    environment:
+      DB_TYPE: pgsql
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: limesurvey_db
+      DB_USERNAME: limesurvey_user
+      DB_PASSWORD: ${SURVEYS_DB_PASSWORD:-CHANGEME_surveys}
+      # initial admin — only effective on FIRST start; afterwards manage
+      # users inside the LimeSurvey admin UI
+      ADMIN_USER: ${SURVEYS_ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${SURVEYS_ADMIN_PASSWORD:-}
+      ADMIN_NAME: openSME Administrator
+      ADMIN_EMAIL: hello@opensme.org
+      PUBLIC_URL: https://surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      URL_FORMAT: path
+      LISTEN_PORT: "8080"
+      # sessions in DB so restarts/redeploys keep admin logins alive
+      TABLE_SESSION: "true"
+    volumes:
+      - limesurvey-uploads:/var/www/html/upload
+    networks:
+      - opensme-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # curl ships in the image (used by its own Dockerfile); the root
+      # path redirects to index.php — curl -f only fails on >=400
+      test: ["CMD", "curl", "-f", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.surveys.rule=Host(`surveys.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.surveys.tls=true"
+      - "traefik.http.routers.surveys.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.surveys.entrypoints=websecure"
+      - "traefik.http.services.surveys.loadbalancer.server.port=8080"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+        reservations:
+          cpus: "0.1"
+          memory: 96M
+
+volumes:
+  limesurvey-uploads:

@@ -679,14 +679,12 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
         });
     }
 
-    // Surveys (Grist) — external, group-managed instance. The URL points
-    // outside the compose chain (SURVEYS_URL); the portal only navigates,
-    // it never proxies the survey tool.
+    // Surveys (LimeSurvey CE) — only if explicitly configured (not empty)
     if !config.surveys_url.is_empty() {
         services.push(Service {
             id: "surveys".into(),
             name: "Surveys".into(),
-            description: "Surveys and forms — Grist".into(),
+            description: "Online surveys — LimeSurvey".into(),
             url: config.surveys_url.clone(),
         });
     }

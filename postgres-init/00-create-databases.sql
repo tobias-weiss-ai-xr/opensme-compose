@@ -29,6 +29,9 @@ CREATE DATABASE paperless_db;
 -- ── Invoice Ninja (invoicing, --profile invoice) ──
 CREATE DATABASE invoiceninja_db;
 
+-- ── LimeSurvey (surveys, --profile surveys) ──
+CREATE DATABASE limesurvey_db;
+
 -- ── Notes/Impress (collaborative notes, --profile notes) ──
 CREATE DATABASE notes_db;
 
