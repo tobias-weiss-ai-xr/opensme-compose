@@ -132,6 +132,15 @@ def main():
 
     # ── 2. Catalog entries resolve to routed services ─────────────────
     for entry in catalog:
+        # External tiles point at a service outside the compose chain
+        # (e.g. group-managed Grist) — there is nothing to route-check.
+        if entry.get("external"):
+            if "service" in entry or "router" in entry:
+                failures.append(
+                    f"tile '{entry['id']}': external tiles must not "
+                    "declare a compose service/router"
+                )
+            continue
         svc = entry["service"]
         router = entry["router"]
         info = routed.get(svc)
@@ -160,7 +169,7 @@ def main():
                 )
 
     # ── 3. Completeness: routed ⊆ catalog ∪ excluded ──────────────────
-    catalog_services = {e["service"] for e in catalog}
+    catalog_services = {e["service"] for e in catalog if not e.get("external")}
     unknown = sorted(set(routed) - catalog_services - excluded)
     if unknown:
         failures.append(

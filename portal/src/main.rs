@@ -34,6 +34,7 @@ struct AppConfig {
     paperless_url: String,
     chat_url: String,
     notes_url: String,
+    surveys_url: String,
     portal_domain: String,
     opensme_domain: String,
     announcements: Arc<Vec<Announcement>>,
@@ -189,6 +190,7 @@ fn service_icon(id: &str) -> &'static str {
         "archive" => "🗄",
         "chat" => "🗨",
         "notes" => "📋",
+        "surveys" => "🗳",
         _ => "🧩",
     }
 }
@@ -674,6 +676,18 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
             name: "Notes".into(),
             description: "Shared notes — links and snippets for the team".into(),
             url: config.notes_url.clone(),
+        });
+    }
+
+    // Surveys (Grist) — external, group-managed instance. The URL points
+    // outside the compose chain (SURVEYS_URL); the portal only navigates,
+    // it never proxies the survey tool.
+    if !config.surveys_url.is_empty() {
+        services.push(Service {
+            id: "surveys".into(),
+            name: "Surveys".into(),
+            description: "Surveys and forms — Grist".into(),
+            url: config.surveys_url.clone(),
         });
     }
 
@@ -1409,6 +1423,7 @@ fn load_config() -> Arc<AppConfig> {
         paperless_url: load_env("PAPERLESS_URL", ""),
         chat_url: load_env("CHAT_URL", ""),
         notes_url: load_env("NOTES_URL", ""),
+        surveys_url: load_env("SURVEYS_URL", ""),
         announcements,
         ai,
         // One shared client: connection pooling, 30s default timeout.
@@ -1511,6 +1526,7 @@ mod tests {
             paperless_url: String::new(),
             chat_url: String::new(),
             notes_url: String::new(),
+            surveys_url: String::new(),
             portal_domain: "portal.example".into(),
             opensme_domain: "example".into(),
             announcements: Arc::new(parse_announcements(announcements)),
@@ -1651,10 +1667,11 @@ mod tests {
             paperless_url: "https://docs.example".into(),
             chat_url: "https://chat.example".into(),
             notes_url: "https://notes.example".into(),
+            surveys_url: "https://grist.example".into(),
             ..cfg_with("", None, "")
         };
         let services = get_services(&c);
-        assert_eq!(services.len(), 10, "all ten catalog cards configured");
+        assert_eq!(services.len(), 11, "all eleven catalog cards configured");
 
         let ids: Vec<&str> = services.iter().map(|s| s.id.as_str()).collect();
         assert!(
@@ -1674,6 +1691,7 @@ mod tests {
         assert!(ids.contains(&"archive"));
         assert!(ids.contains(&"chat"));
         assert!(ids.contains(&"notes"));
+        assert!(ids.contains(&"surveys"));
         assert!(!ids.contains(&"identity"));
         assert!(!ids.contains(&"collabora"));
     }

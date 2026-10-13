@@ -111,6 +111,15 @@ catalog:
     service: store
     router: store
 
+  - id: surveys
+    tile: Surveys
+    url_env: SURVEYS_URL
+    domain_env: null
+    # External, group-managed Grist instance (outside the compose chain):
+    # no service/router requirement — the portal only navigates, it never
+    # proxies the survey tool. Set SURVEYS_URL to enable the tile.
+    external: true
+
 excluded:
   # Infrastructure surfaces — no end-user journey starts here.
   - id: portal       # the catalog itself
