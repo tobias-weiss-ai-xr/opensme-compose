@@ -38,6 +38,10 @@ services:
       POSTGRES_DB: synapse_db
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+      # Zitadel OIDC — a real (non-CHANGEME) client id is the opt-in switch
+      # for the oidc_providers block in synapse-setup.sh; the pair is minted
+      # by scripts/zitadel-client.sh --app synapse
+      SYNAPSE_OIDC_CLIENT_ID: ${SYNAPSE_OIDC_CLIENT_ID:-}
       SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET:-CHANGEME_synapse_oidc}
     volumes:
       - synapse-data:/data
