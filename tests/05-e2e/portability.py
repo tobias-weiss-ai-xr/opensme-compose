@@ -180,7 +180,7 @@ def main() -> int:
             # transiently drop the portal router in CI) — re-assert routing
             # before every attempt instead of failing on a single 404
             att = None
-            for _ in range(3):
+            for _ in range(6):
                 if not ensure_portal_routed(session, new_portal):
                     continue
                 att = session.post(new_portal + "/api/intercom",
@@ -190,7 +190,7 @@ def main() -> int:
                                    timeout=30)
                 if att.status_code != 404:
                     break
-                time.sleep(3)
+                time.sleep(5)
             v3 = att is not None and att.status_code == 201
             (result.ok if v3 else result.fail)(
                 "derived allowlist follows the new domain (cloud.<domain> accepted)"
