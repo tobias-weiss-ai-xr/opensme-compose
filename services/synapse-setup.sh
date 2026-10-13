@@ -79,8 +79,13 @@ SYNAPSE_EOF
 # persists SYNAPSE_OIDC_CLIENT_ID/SECRET); presence of a real (non-
 # placeholder) client id is the opt-in switch. Without it synapse keeps its
 # native login form — demo and CI are unaffected.
-if [[ -n "${SYNAPSE_OIDC_CLIENT_ID:-}" && "${SYNAPSE_OIDC_CLIENT_ID}" != CHANGEME_* ]]; then
-  cat >> "$CONFIG_FILE" <<SYNAPSE_OIDC_EOF
+# NOTE: POSIX-safe (case, not [[) — this script runs under /bin/sh in the
+# synapse container, where [[ is 'not found' and silently skips the block.
+case "${SYNAPSE_OIDC_CLIENT_ID:-}" in
+  ""|CHANGEME_*)
+    : ;;  # not configured — native login form
+  *)
+    cat >> "$CONFIG_FILE" <<SYNAPSE_OIDC_EOF
 
 oidc_providers:
   - idp_id: "zitadel"
@@ -95,7 +100,8 @@ oidc_providers:
         localpart_template: "{{ user.preferred_username }}"
         display_name_template: "{{ user.name }}"
 SYNAPSE_OIDC_EOF
-fi
+    ;;
+esac
 
 # Generate log config
 cat > "${DATA_DIR}/log.config" <<LOG_EOF
