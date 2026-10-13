@@ -27,10 +27,22 @@ import (
 // heal action, or a budget truncation. Raw values NEVER enter this log.
 type EvidenceEntry struct {
 	Time  time.Time `json:"time"`
-	Kind  string    `json:"kind"` // "strip" | "heal" | "budget"
+	Kind  string    `json:"kind"` // "strip" | "heal" | "budget" | "draft" | "commit"
 	What  string    `json:"what"`
 	Where string    `json:"where"`
 	Why   string    `json:"why"`
+}
+
+// Draft is an inert agent-generated draft (classification, reply, tags, ...).
+// It only becomes effective once a human approves it (agent-saga: AS2/AS3/AS5
+// draft → human-approval → commit; a draft is never committed on its own).
+// Raw text may enter the draft body; it never enters the evidence log.
+type Draft struct {
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	Text     string `json:"text"`
+	Where    string `json:"where"`
+	Approved bool   `json:"approved"`
 }
 
 // StripRecord describes one anonymizer replacement (no raw values).
@@ -67,12 +79,16 @@ type Server struct {
 	llmErrors            int
 	llmLatency           time.Duration
 	llmBudgetTruncations int
+
+	// draft gate (agent-saga): drafts are inert until human approval.
+	drafts   map[string]*Draft
+	draftSeq int
 }
 
 // New wires the server. It loads persisted history/evidence from the state
 // dir if present.
 func New(cfg *config.Config, kb *knowledge.Store, chk *checker.Checker, hl *healer.Healer, llm *LLM) (*Server, error) {
-	s := &Server{cfg: cfg, kb: kb, chk: chk, heal: hl, llm: llm, start: time.Now().UTC(), matches: map[string][]knowledge.Match{}}
+	s := &Server{cfg: cfg, kb: kb, chk: chk, heal: hl, llm: llm, start: time.Now().UTC(), matches: map[string][]knowledge.Match{}, drafts: map[string]*Draft{}}
 	s.load()
 	return s, nil
 }
@@ -86,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/history", s.handleHistory)
 	mux.HandleFunc("/evidence", s.handleEvidence)
 	mux.HandleFunc("/heal", s.handleHeal)
+	mux.HandleFunc("/draft", s.handleDraft)
+	mux.HandleFunc("/draft/{id}/approve", s.handleDraftApprove)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/knowledge", s.handleKnowledge)
 	return mux
@@ -321,6 +339,72 @@ func (s *Server) handleHeal(w http.ResponseWriter, r *http.Request) {
 	_ = s.Save()
 	slog.Info("heal executed", "action", rc.Action, "target", rc.Target, "executed", rc.Executed)
 	writeJSON(w, http.StatusOK, rc)
+}
+
+// draftRequest is the POST /draft body (agent-generated draft content).
+type draftRequest struct {
+	Kind  string `json:"kind"`
+	Text  string `json:"text"`
+	Where string `json:"where"`
+}
+
+func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+	var req draftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if req.Text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text required"})
+		return
+	}
+	s.mu.Lock()
+	s.draftSeq++
+	d := &Draft{ID: fmt.Sprintf("d%d", s.draftSeq), Kind: req.Kind, Text: req.Text,
+		Where: req.Where, Approved: false}
+	s.drafts[d.ID] = d
+	s.evidence = append(s.evidence, EvidenceEntry{
+		Time: time.Now().UTC(), Kind: "draft",
+		What:  "created kind=" + req.Kind,
+		Where: req.Where, Why: "agent draft (inert until human approval)",
+	})
+	s.trimLocked()
+	s.mu.Unlock()
+	_ = s.Save()
+	slog.Info("draft created (inert)", "id", d.ID, "kind", req.Kind, "where", req.Where)
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) handleDraftApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+	id := r.PathValue("id")
+	s.mu.Lock()
+	d, ok := s.drafts[id]
+	if !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown draft " + id})
+		return
+	}
+	if !d.Approved {
+		d.Approved = true
+		s.evidence = append(s.evidence, EvidenceEntry{
+			Time: time.Now().UTC(), Kind: "commit",
+			What:  "approved kind=" + d.Kind,
+			Where: d.ID, Why: "human-approval commit (agent-saga)",
+		})
+		s.trimLocked()
+	}
+	s.mu.Unlock()
+	_ = s.Save()
+	slog.Info("draft approved (commit)", "id", d.ID)
+	writeJSON(w, http.StatusOK, d)
 }
 
 // ListenAndServe starts the private API; blocks until ctx is done.

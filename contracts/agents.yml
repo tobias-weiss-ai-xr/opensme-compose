@@ -54,6 +54,7 @@ agents:
       - llm backend off by default (DEV_MAINTENANCE_BOT_LLM_BACKEND=none)
       - llm budget default unlimited (0) but wired; operator sets a cap
       - one-shot (restart "no")
+      - agent draft gate: /draft is inert until human /draft/{id}/approve (write_mode consent)
 
   - name: predictive-agent
     compose_service: predictive-agent

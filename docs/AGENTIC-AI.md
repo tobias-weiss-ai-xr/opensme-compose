@@ -99,11 +99,7 @@ Neue Epic-Linie (Fortsetzung von A–AC in `E2E-JOURNEYS.md`). Stories im
 
 Existierend: `dev-agent`, `dev-agent-compose`, `dev-agent-extensions`,
 `dev-agent-knowledge`, `dev-agent-privacy`, `agent-guardrails`,
-`agent-knowledge`, `agent-assistant`. Noch offen:
-
-| Capability | Inhalt (Requirements-Kern) |
-|------------|---------------------------|
-| `agent-saga` | Write-Aktionen: idempotent, kompensierbar, auditiert; Compensation-Bindung je Aktion |
+`agent-knowledge`, `agent-assistant`, `agent-saga`.
 
 ## 5. Contract — `contracts/agents.yml`
 
@@ -147,4 +143,11 @@ Contract-Zeile.*
    im `/status`-JSON + PrintStatus sichtbar), Layer-0 erzwingt beides +
    PII-Freiheit + `contracts/knowledge.yml`-Regeln; 2 neue OpenSpec-Specs
    (`agent-knowledge`, `agent-assistant`). 16/16 Specs valid.
-5. AS2/AS3/AS5 dort, wo die Profile (ticketing/camunda/paperless) eh laufen.
+5. ✅ Generisches Draft→Approval→Commit-Gate für AS2/AS3/AS5:
+   `agent-saga`-Capability + `contracts`-Semantik, am dev-agent real
+   (`/draft` legt inerten Draft an, `approved:false`; `/draft/{id}/approve`
+   commitet mit `kind:"commit"`-Audit; jede Stufe evidencegeloggt).
+   `agent_draft_saga.py` beweist es e2e (B1–B6, 7/7 grün): Draft bleibt
+   inert bis Approval, Verwerfen ist Normalfall. Fachliche Anbindung an die
+   drei Empfänger (Nosdesk/Camunda/Paperless) bleibt je System ein
+   eigener Turn — das Gate selbst ist bewiesen.
