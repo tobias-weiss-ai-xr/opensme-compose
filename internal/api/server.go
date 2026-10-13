@@ -394,7 +394,8 @@ func (s *Server) PrintStatus() string {
 	}
 	for svc, ms := range s.matches {
 		for _, m := range ms {
-			fmt.Fprintf(&b, "  KB[%s] %s → %s\n", svc, strings.Join(m.Runbook.Symptoms, "|"), firstLine(m.Runbook.Diagnosis))
+			// source duty: show where the answer came from (agent-knowledge)
+			fmt.Fprintf(&b, "  KB[%s@%s] %s → %s (source %s)\n", svc, m.KBVersion, strings.Join(m.Runbook.Symptoms, "|"), firstLine(m.Runbook.Diagnosis), m.Source)
 		}
 	}
 	return b.String()

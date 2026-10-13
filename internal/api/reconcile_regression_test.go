@@ -36,7 +36,7 @@ func (secretRunner) Run(_ context.Context, args ...string) (string, error) {
 func llmServer(t *testing.T) *Server {
 	t.Helper()
 	kb, err := knowledge.Load(fstest.MapFS{"kb/app.json": &fstest.MapFile{Data: []byte(`{
-		"schema": 1, "service": "app",
+		"schema": 1, "service": "app", "kb_version": "2026.10",
 		"runbooks": [{"symptoms": ["restarting"], "diagnosis": "port collision", "remediation": ["check bind"]}]
 	}`)}}, "kb")
 	if err != nil {

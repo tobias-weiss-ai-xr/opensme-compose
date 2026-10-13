@@ -98,14 +98,12 @@ Neue Epic-Linie (Fortsetzung von A–AC in `E2E-JOURNEYS.md`). Stories im
 ## 4. Specs (OpenSpec-Capabilities)
 
 Existierend: `dev-agent`, `dev-agent-compose`, `dev-agent-extensions`,
-`dev-agent-knowledge`, `dev-agent-privacy`. Neu vorgeschlagen:
+`dev-agent-knowledge`, `dev-agent-privacy`, `agent-guardrails`,
+`agent-knowledge`, `agent-assistant`. Noch offen:
 
 | Capability | Inhalt (Requirements-Kern) |
 |------------|---------------------------|
-| `agent-guardrails` | Allowlist/Budget/Kill-Switch/Consent als Pflicht je Agent; Defaults safe |
 | `agent-saga` | Write-Aktionen: idempotent, kompensierbar, auditiert; Compensation-Bindung je Aktion |
-| `agent-knowledge` | Quellenpflicht, PII-Freiheit, Aktualität (KB-Version im Antwort-Beleg) |
-| `agent-assistant` | Portal-AI-Vertrag: degradiert unsichtbar, keine Nutzdaten im Prompt ohne Opt-in |
 
 ## 5. Contract — `contracts/agents.yml`
 
@@ -143,5 +141,10 @@ Contract-Zeile.*
    (krank→Diagnose), Dry-run ohne Consent, echter Restart mit Consent,
    Evidence kind heal (audit), heals_total-Metrik. 11/11 Checks grün,
    teardown räumt die opensme-saga-* Container ab.
-4. `agent-knowledge`/`agent-assistant` (RAG-Vertrag, Quellenpflicht).
+4. ✅ `agent-knowledge`/`agent-assistant` (RAG-Vertrag, Quellenpflicht):
+   jede KB-Datei trägt `kb_version` (Aktualität — Loader verweigert Start
+   sonst), `knowledge.Match` führt `source`+`kb_version` (source duty,
+   im `/status`-JSON + PrintStatus sichtbar), Layer-0 erzwingt beides +
+   PII-Freiheit + `contracts/knowledge.yml`-Regeln; 2 neue OpenSpec-Specs
+   (`agent-knowledge`, `agent-assistant`). 16/16 Specs valid.
 5. AS2/AS3/AS5 dort, wo die Profile (ticketing/camunda/paperless) eh laufen.

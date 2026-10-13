@@ -1,0 +1,23 @@
+# ═══════════════════════════════════════════════════════════════
+# contracts/knowledge.yml — RAG / knowledge-base contract
+# ═══════════════════════════════════════════════════════════════
+# Source duty for the embedded runbook KB (opensme-knowledge/*.json,
+# openspec `agent-knowledge`). Validated by tests/00-static/check_agent.py
+# (check_knowledge) at Layer 0 and enforced at runtime by the Go loader
+# (internal/knowledge): a versionless or leaking file refuses to start.
+
+name: agent-knowledge
+description: >
+  Every runbook file SHALL carry a kb_version (aktualität), every answer
+  the dev-agent produces SHALL expose its source file + version (source
+  duty), and the KB SHALL stay PII-free (no secrets, credential URIs,
+  JWTs, home paths, private addresses).
+severity: error
+
+rules:
+  - type: kb_version-required
+    detail: every opensme-knowledge/*.json must declare kb_version
+  - type: source-duty
+    detail: answer evidence (knowledge.Match) carries source + kb_version
+  - type: pii-free
+    detail: KB holds no secrets / credential URIs / JWTs / home paths / private addresses

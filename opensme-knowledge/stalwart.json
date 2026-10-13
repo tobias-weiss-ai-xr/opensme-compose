@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "stalwart",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["listener flapping", "accept loop restarts", "bind address already in use"],

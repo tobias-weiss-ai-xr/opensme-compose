@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "opencloud",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["startup race", "data race warning", "opencloud exits at boot"],

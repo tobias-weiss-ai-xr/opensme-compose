@@ -32,7 +32,7 @@ func budgetServer(t *testing.T, maxRequests int) (*Server, *atomic.Int64) {
 	srv := ollamaCounter(t, &calls)
 	t.Cleanup(srv.Close)
 	kb, err := knowledge.Load(fstest.MapFS{"kb/app.json": &fstest.MapFile{Data: []byte(`{
-		"schema": 1, "service": "app",
+		"schema": 1, "service": "app", "kb_version": "2026.10",
 		"runbooks": [{"symptoms": ["restarting"], "diagnosis": "port collision", "remediation": ["check bind"]}]
 	}`)}}, "kb")
 	if err != nil {

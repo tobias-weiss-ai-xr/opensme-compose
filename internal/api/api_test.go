@@ -28,7 +28,7 @@ func (emptyRunner) Run(ctx context.Context, args ...string) (string, error) {
 func testKBFS() fstest.MapFS {
 	return fstest.MapFS{
 		"kb/stalwart.json": &fstest.MapFile{Data: []byte(`{
-			"schema": 1, "service": "stalwart",
+			"schema": 1, "service": "stalwart", "kb_version": "2026.10",
 			"runbooks": [{"symptoms": ["restarting"], "diagnosis": "port collision", "remediation": ["check bind error"]}]
 		}`)},
 	}
@@ -272,6 +272,14 @@ func TestKnowledgeEndpoint(t *testing.T) {
 	}
 	if len(matches) == 0 {
 		t.Errorf("symptom 'restarting' should match")
+	}
+	// source duty: the answer evidence must carry provenance
+	m := matches[0]
+	if m.Source != "stalwart.json" {
+		t.Errorf("source duty: Match.Source = %q, want stalwart.json", m.Source)
+	}
+	if m.KBVersion != "2026.10" {
+		t.Errorf("source duty: Match.KBVersion = %q, want 2026.10", m.KBVersion)
 	}
 }
 

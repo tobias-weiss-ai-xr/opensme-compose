@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "paperless",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["gotenberg timeout", "document conversion failed", "consume loop stalled"],

@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "sogo",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["no auth sources", "register a contact/user source without id", "sogo cannot authenticate"],

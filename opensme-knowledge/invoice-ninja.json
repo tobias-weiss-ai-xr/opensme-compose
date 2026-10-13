@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "invoice-ninja",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["502 whoops invoice ninja", "invoice ninja blank page", "php-fpm segfault"],

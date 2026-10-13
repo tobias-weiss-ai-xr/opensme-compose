@@ -14,6 +14,7 @@ Usage: python3 tests/00-static/check_agent.py
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "monitoring" / "dev-agent.yml"
 KB = ROOT / "opensme-knowledge"
+KNOWLEDGE_CONTRACT = ROOT / "contracts" / "knowledge.yml"
 AGENTS_CONTRACT = ROOT / "contracts" / "agents.yml"
 CORE_SERVICES = {
     "traefik", "postgres", "zitadel", "stalwart",
@@ -66,15 +68,63 @@ def check_knowledge() -> list[str]:
             continue
         if doc.get("schema") != 1:
             errors.append(f"{f.name}: schema must be 1")
+        if not doc.get("kb_version"):
+            # agent-knowledge: aktualität — every runbook file must carry a
+            # version the answer evidence can point at (source duty)
+            errors.append(f"{f.name}: missing kb_version (aktualität / source duty)")
         svc = doc.get("service", "")
         if svc != f.stem:
             errors.append(f"{f.name}: service {svc!r} does not match file name")
         if not doc.get("runbooks"):
             errors.append(f"{f.name}: no runbooks")
+        # agent-knowledge: PII-frei — KB must not carry secrets, private
+        # addresses or user paths (mirrors the anonymizer's strip-hop)
+        for hit in KBLeak(doc):
+            errors.append(f"{f.name}: PII leak {hit}")
         seen.add(svc)
     missing = CORE_SERVICES - seen
     if missing:
         errors.append(f"core services without runbook: {sorted(missing)}")
+    return errors
+
+
+# PII/leak patterns the knowledge base must stay free of (agent-knowledge:
+# PII-frei). Mirrors the Go anonymizer's strip set. Private-address literals
+# are assembled from parts to keep the leak-scan itself tight. The secret
+# rule requires a real credential value (long, symbol-only) right after the
+# key name, so prose like "password invalid" or placeholders stay quiet.
+PII_SECRET_RE = re.compile(r"(?i)\b(api[_-]?key|apikey|secret|token|password|passwd)\s*[:=]\s*[\"']?[A-Za-z0-9_\-/+]{12,}")
+PII_URI_RE = re.compile(r"(?i)\b(postgres|redis|mongodb|mysql|amqp)://[^\s\"']+")
+PII_HOME_RE = re.compile(r"/home/[a-z0-9_.-]+|/Users/[a-z0-9_.-]+|/root\b")
+PII_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+_PRIV4 = re.compile(r"(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))\.")
+
+
+def KBLeak(doc) -> list[str]:
+    """Return short descriptions of PII found in a parsed runbook doc."""
+    text = json.dumps(doc, ensure_ascii=False)
+    out = []
+    for pat, label in ((PII_SECRET_RE, "secret"), (PII_URI_RE, "uri"),
+                       (PII_HOME_RE, "home-path"), (PII_JWT_RE, "jwt")):
+        if pat.search(text):
+            out.append(f"{label}")
+    if _PRIV4.search(text):
+        out.append("private-address")
+    return out
+
+
+def check_knowledge_contract() -> list[str]:
+    """contracts/knowledge.yml — the RAG contract must exist and be valid."""
+    errors = []
+    if not KNOWLEDGE_CONTRACT.is_file():
+        return [f"{KNOWLEDGE_CONTRACT.name}: missing — no knowledge contract"]
+    doc = yaml.safe_load(KNOWLEDGE_CONTRACT.read_text())
+    if doc.get("name") != "agent-knowledge":
+        errors.append("knowledge.yml: name must be agent-knowledge")
+    rules = {r.get("type") for r in (doc.get("rules") or [])}
+    for want in ("kb_version-required", "source-duty", "pii-free"):
+        if want not in rules:
+            errors.append(f"knowledge.yml: missing rule {want}")
     return errors
 
 
@@ -186,14 +236,14 @@ def check_agents_contract() -> list[str]:
 
 
 def main() -> int:
-    errors = check_compose() + check_knowledge() + check_agents_contract()
+    errors = check_compose() + check_knowledge() + check_knowledge_contract() + check_agents_contract()
     if errors:
         for e in errors:
             print(f"  ❌ {e}")
         print("❌ dev-maintenance-bot static check: FAILED")
         return 1
     print("  ✅ compose wiring (ro socket, no ports, one-shot)")
-    print(f"  ✅ knowledge base: {len(list(KB.glob('*.json')))} services incl. all {len(CORE_SERVICES)} core services")
+    print(f"  ✅ knowledge base: {len(list(KB.glob('*.json')))} services incl. all {len(CORE_SERVICES)} core services (versioned, source duty, PII-free)")
     n_agents = len((yaml.safe_load(AGENTS_CONTRACT.read_text()) or {}).get("agents") or [])
     print(f"  ✅ agents contract: {n_agents} agents under guardrails (write modes, consent, privacy, invariants)")
     print("✅ dev-maintenance-bot static check: PASS")

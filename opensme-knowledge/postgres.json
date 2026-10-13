@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "postgres",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["out of memory", "oom killed", "out of shared memory"],

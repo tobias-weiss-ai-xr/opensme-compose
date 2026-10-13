@@ -24,20 +24,27 @@ type Runbook struct {
 
 // Entry is one service file.
 type Entry struct {
-	Schema   int       `json:"schema"`
-	Service  string    `json:"service"`
-	Runbooks []Runbook `json:"runbooks"`
+	Schema    int       `json:"schema"`
+	Service   string    `json:"service"`
+	KBVersion string    `json:"kb_version"`
+	Runbooks  []Runbook `json:"runbooks"`
 }
 
-// Match is a knowledge query hit.
+// Match is a knowledge query hit. It carries the source file and KB version
+// so the consumer can show provenance — the answer evidence SHALL always
+// point at where it came from (agent-knowledge: source duty + aktualität).
 type Match struct {
-	Service string
-	Runbook Runbook
+	Service   string
+	Runbook   Runbook
+	Source    string `json:"source"`
+	KBVersion string `json:"kb_version"`
 }
 
 // Store is the loaded knowledge base.
 type Store struct {
 	byService map[string][]Runbook
+	version   map[string]string // service -> kb_version (aktualität)
+	source    map[string]string // service -> file name (source duty)
 }
 
 // Load reads every *.json runbook file in dir of fsys. A malformed file
@@ -48,7 +55,7 @@ func Load(fsys fs.FS, dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("knowledge dir: %w", err)
 	}
-	s := &Store{byService: map[string][]Runbook{}}
+	s := &Store{byService: map[string][]Runbook{}, version: map[string]string{}, source: map[string]string{}}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -67,6 +74,9 @@ func Load(fsys fs.FS, dir string) (*Store, error) {
 		if ent.Service == "" {
 			return nil, fmt.Errorf("%s: empty service name", e.Name())
 		}
+		if ent.KBVersion == "" {
+			return nil, fmt.Errorf("%s: missing kb_version (aktualität / source duty)", e.Name())
+		}
 		want := strings.TrimSuffix(e.Name(), ".json")
 		if ent.Service != want {
 			return nil, fmt.Errorf("%s: service %q does not match file name", e.Name(), ent.Service)
@@ -75,6 +85,8 @@ func Load(fsys fs.FS, dir string) (*Store, error) {
 			return nil, fmt.Errorf("%s: no runbooks", e.Name())
 		}
 		s.byService[ent.Service] = ent.Runbooks
+		s.version[ent.Service] = ent.KBVersion
+		s.source[ent.Service] = e.Name()
 	}
 	if len(s.byService) == 0 {
 		return nil, fmt.Errorf("no runbooks found in %s", dir)
@@ -104,13 +116,19 @@ func (s *Store) MatchSymptom(symptom string) []Match {
 		for _, rb := range s.byService[svc] {
 			for _, sym := range rb.Symptoms {
 				if strings.Contains(strings.ToLower(sym), q) {
-					out = append(out, Match{Service: svc, Runbook: rb})
+					out = append(out, Match{Service: svc, Runbook: rb, Source: s.source[svc], KBVersion: s.version[svc]})
 					break
 				}
 			}
 		}
 	}
 	return out
+}
+
+// Version returns the kb_version of the file that shipped a service's
+// runbooks (aktualität / provenance), "" if the service is unknown.
+func (s *Store) Version(service string) string {
+	return s.version[service]
 }
 
 // Services returns the sorted list of covered services.

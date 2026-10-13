@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "traefik",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["acme rate limit", "too many certificates", "letsencrypt error"],

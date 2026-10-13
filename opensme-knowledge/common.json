@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "common",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["image pull backoff", "imagepullbackoff", "errimagepull", "manifest unknown"],

@@ -10,11 +10,11 @@ import (
 func testFS() fstest.MapFS {
 	return fstest.MapFS{
 		"kb/stalwart.json": &fstest.MapFile{Data: []byte(`{
-			"schema": 1, "service": "stalwart",
+			"schema": 1, "service": "stalwart", "kb_version": "2026.10",
 			"runbooks": [{"symptoms": ["listener flapping"], "diagnosis": "port collision", "remediation": ["check bind error"]}]
 		}`)},
 		"kb/postgres.json": &fstest.MapFile{Data: []byte(`{
-			"schema": 1, "service": "postgres",
+			"schema": 1, "service": "postgres", "kb_version": "2026.10",
 			"runbooks": [
 				{"symptoms": ["out of memory"], "diagnosis": "work_mem too high", "remediation": ["lower work_mem"]},
 				{"symptoms": ["too many clients"], "diagnosis": "pool exhausted", "remediation": ["find leaker"]}
@@ -97,5 +97,39 @@ func TestRealKB(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Errorf("core services without runbook: %s", strings.Join(missing, ","))
+	}
+}
+
+// TestSourceDuty — agent-knowledge: every answer evidence (Match) must carry
+// its source file and KB version so the consumer can show provenance.
+func TestSourceDuty(t *testing.T) {
+	s, err := Load(testFS(), "kb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := s.MatchSymptom("listener flapping")
+	if len(ms) == 0 {
+		t.Fatal("expected a match for 'listener flapping'")
+	}
+	m := ms[0]
+	if m.Source != "stalwart.json" {
+		t.Errorf("source duty: got source %q, want stalwart.json", m.Source)
+	}
+	if m.KBVersion == "" {
+		t.Error("source duty: kb_version must be set on the answer evidence")
+	}
+	if s.Version("stalwart") != m.KBVersion {
+		t.Errorf("version mismatch: Store=%q Match=%q", s.Version("stalwart"), m.KBVersion)
+	}
+}
+
+// TestLoadRequiresKBVersion — agent-knowledge aktualität: a runbook file
+// without kb_version must be rejected (source duty enforced at load).
+func TestLoadRequiresKBVersion(t *testing.T) {
+	badFS := fstest.MapFS{
+		"kb/x.json": &fstest.MapFile{Data: []byte(`{"schema":1,"service":"x","runbooks":[{"symptoms":["s"],"diagnosis":"d","remediation":["r"]}]}`)},
+	}
+	if _, err := Load(badFS, "kb"); err == nil {
+		t.Error("expected error when kb_version missing (aktualität/source duty)")
 	}
 }

@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "service": "operaton",
+  "kb_version": "2026.10",
   "runbooks": [
     {
       "symptoms": ["database connection failed", "jdbc connection refused", "cannot acquire connection"],
