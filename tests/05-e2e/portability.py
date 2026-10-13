@@ -97,6 +97,8 @@ def main() -> int:
 
     install_dns_fallback()
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _src = open(__file__).read()
+    print(f"  [ver] diag={'yes' if '[diag]' in _src else 'NO'} retry6={'yes' if 'range(6)' in _src else 'NO'}", flush=True)
 
     result = Result("portability")
     result.header(f"openSME e2e portability journey — domain={args.domain}")
