@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
-# ── openSME — register the persistent OpenCloud OIDC client in Zitadel ─────
+# ── openSME — register persistent OIDC clients in Zitadel ────────
 # Idempotent, secret-driven bootstrap helper.
 #
-# Registers (or reuses) the OIDC application that OpenCloud uses to log in
-# through the central IdP, so the demo's web login works instead of dead-
-# ending at an unregistered client. Safe to run on every demo boot: if the
-# app already exists it reports "already registered" and exits 0 without
-# touching anything.
+# Registers (or reuses) the OIDC application a service uses to log in
+# through the central IdP, so the service's web login works instead of
+# dead-ending at an unregistered client. Safe to run on every boot: if
+# the app already exists it reports "already registered" and exits 0
+# without touching anything.
+#
+# Apps (--app):
+#   opencloud  cloud.<domain>/oidc/callback(.html)      → OC_OIDC_CLIENT_ID/SECRET
+#   notes      notes.<domain>/oidc/callback/ (mozilla-django-oidc)
+#              → NOTES_OIDC_CLIENT_ID/SECRET
+#   synapse    matrix.<domain>/_synapse/client/oidc/callback
+#              → SYNAPSE_OIDC_CLIENT_ID/SECRET
 #
 # SECRET-DRIVEN: Zitadel's Management API takes no client_id / client_secret
 # input — it mints both and returns them (verified against the v4.19 proto;
 # AddOIDCApp only ever responds with clientId / clientSecret). This script
-# therefore persists the Zitadel-issued pair into .env as OC_OIDC_CLIENT_ID
-# and OC_OIDC_CLIENT_SECRET, so OpenCloud authenticates as the registered
-# client. A well-known default is never written: if .env still carries a
-# CHANGEME_ placeholder (or no secret at all), a fresh random secret is used
-# and a warning tells you to regenerate/re-source .env; Zitadel stays the
-# single source of truth for the deployed secret.
+# therefore persists the Zitadel-issued pair into .env under the app's own
+# keys (see the --app list above), so the service authenticates as the
+# registered client. A well-known default is never written: if .env still
+# carries a CHANGEME_ placeholder (or no secret at all), a fresh random
+# secret is issued and a warning tells you to regenerate/re-source .env;
+# Zitadel stays the single source of truth for the deployed secret.
 #
 # Redirect URIs registered for BOTH protocol faces of the demo stack (Traefik
 # terminates TLS at :443 and redirects http :80 -> https):
@@ -34,8 +41,10 @@
 # Requires: docker, curl, jq, openssl (same toolbox as scripts/demo.sh).
 #
 # Usage:
-#   scripts/zitadel-client.sh                 # register/verify idempotently
-#   scripts/zitadel-client.sh --dry-run       # print the plan, change nothing
+#   scripts/zitadel-client.sh --app opencloud   # register/verify (default)
+#   scripts/zitadel-client.sh --app notes       # Impress/Notes client
+#   scripts/zitadel-client.sh --app synapse     # Matrix/Synapse client
+#   scripts/zitadel-client.sh --dry-run         # print the plan, change nothing
 #   scripts/zitadel-client.sh --idp-url https://auth.example.test
 #   scripts/zitadel-client.sh --help
 # ═══════════════════════════════════════════════════════════════════════════
@@ -53,18 +62,20 @@ cd "$PROJECT_DIR"
 
 DRY_RUN=false
 IDP_URL_OVERRIDE=""
-PROJECT_NAME="opencloud"
-APP_NAME="opencloud"
+APP_KIND="opencloud"
 LOCAL_SUFFIX_RE='(\.local|\.localhost|\.test|\.invalid)$'
 
 usage() {
   cat <<'EOF'
 Usage: scripts/zitadel-client.sh [options]
 
-Register (or reuse) the persistent OpenCloud OIDC client in the running
-Zitadel instance. Idempotent — safe to run on every demo boot.
+Register (or reuse) a persistent OIDC client in the running Zitadel
+instance. Idempotent — safe to run on every boot.
 
 Options:
+  --app NAME         which client to ensure: opencloud (default), notes or
+                     synapse — selects the redirect URIs and the .env keys
+                     the Zitadel-issued credentials are persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -72,8 +83,8 @@ Options:
 
 Environment:
   ZITADEL_PAT / E2E_ZITADEL_PAT   machine PAT (skips docker compose cp)
-  OC_OIDC_CLIENT_ID              existing client id (looked up first)
-  OC_OIDC_CLIENT_SECRET          existing secret (placeholder detected/warned)
+  <APP>_OIDC_CLIENT_ID / SECRET   existing client credentials for the
+                                 selected --app (looked up first)
 
 Requires: docker, curl, jq, openssl. The machine PAT written by
 `zitadel setup --steps /steps.yaml` to /machinekey/pat is located the same
@@ -87,6 +98,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)  DRY_RUN=true; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
+    --app)
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|notes|synapse)"; exit 1; }
+      APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
   esac
@@ -131,33 +145,65 @@ if [[ -z "$IDP_URL" ]]; then
   IDP_URL="https://${idp_domain}"
 fi
 IDP_HOST="$(printf '%s' "$IDP_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
-CLOUD_DOMAIN="$(env_get OPENCLOUD_DOMAIN "$(env_get OC_DOMAIN cloud.opensme.local)")"
-# Client id currently configured for OpenCloud (after a first registration
-# this is the Zitadel-issued id; before that it is the opencloud.yml default)
-CLIENT_ID_LABEL="$(env_get OC_OIDC_CLIENT_ID opencloud)"
 
-# Registered callback set — both protocol faces, plus the URI the e2e suite
-# probes in section_opencloud (tests/05-e2e/run.py).
-REDIRECTS=(
-  "https://${CLOUD_DOMAIN}/oidc/callback"
-  "http://${CLOUD_DOMAIN}/oidc/callback"
-  "https://${CLOUD_DOMAIN}/oidc-callback.html"
-  "http://${CLOUD_DOMAIN}/oidc-callback.html"
-)
-POST_LOGOUT=(
-  "https://${CLOUD_DOMAIN}/oidc/callback"
-  "http://${CLOUD_DOMAIN}/oidc/callback"
-  "https://${CLOUD_DOMAIN}/oidc-callback.html"
-  "http://${CLOUD_DOMAIN}/oidc-callback.html"
-)
+# ── per-app configuration ────────────────────────────────────────────────
+# Each app: Zitadel project + app name, the .env keys the issued pair is
+# persisted under, and the callback paths it expects. Callbacks are
+# registered for BOTH protocol faces (Traefik terminates TLS at :443 and
+# redirects http :80 -> https).
+case "$APP_KIND" in
+  opencloud)
+    APP_PROJECT="opencloud"
+    APP_NAME="opencloud"
+    CLIENT_ID_KEY="OC_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="OC_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY="OC_OIDC_SECRET"   # legacy alias kept in sync
+    app_domain="$(env_get OPENCLOUD_DOMAIN "$(env_get OC_DOMAIN cloud.opensme.local)")"
+    CLIENT_ID_LABEL="$(env_get OC_OIDC_CLIENT_ID opencloud)"
+    base_paths=("/oidc/callback" "/oidc-callback.html")
+    ;;
+  notes)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-notes"
+    CLIENT_ID_KEY="NOTES_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="NOTES_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    app_domain="$(env_get NOTES_DOMAIN "notes.opensme.local")"
+    CLIENT_ID_LABEL="$(env_get NOTES_OIDC_CLIENT_ID opensme-notes)"
+    # mozilla-django-oidc callback (trailing slash is significant)
+    base_paths=("/oidc/callback/")
+    ;;
+  synapse)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-synapse"
+    CLIENT_ID_KEY="SYNAPSE_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="SYNAPSE_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    app_domain="$(env_get MATRIX_DOMAIN "matrix.opensme.local")"
+    CLIENT_ID_LABEL="$(env_get SYNAPSE_OIDC_CLIENT_ID synapse)"
+    # synapse derives its redirect from public_baseurl — exactly this URI
+    base_paths=("/_synapse/client/oidc/callback")
+    ;;
+  *)
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse)"
+    exit 1
+    ;;
+esac
+
+REDIRECTS=()
+POST_LOGOUT=()
+for p in "${base_paths[@]}"; do
+  REDIRECTS+=("https://${app_domain}${p}" "http://${app_domain}${p}")
+done
+POST_LOGOUT=("${REDIRECTS[@]}")
 
 # ── secret placeholder handling (never write a fixed default) ───────────────
-SECRET_CANDIDATE="$(env_get OC_OIDC_CLIENT_SECRET "$(env_get OC_OIDC_SECRET "")")"
+SECRET_CANDIDATE="$(env_get "$CLIENT_SECRET_KEY" "$( [[ -n "$SECRET_ALIAS_KEY" ]] && env_get "$SECRET_ALIAS_KEY" || printf '' )")"
 if [[ -z "$SECRET_CANDIDATE" || "$SECRET_CANDIDATE" == CHANGEME_* ]]; then
-  warn "OC_OIDC_CLIENT_SECRET in .env is '${SECRET_CANDIDATE:-<empty>}' (missing or a CHANGEME_ placeholder)."
+  warn "${CLIENT_SECRET_KEY} in .env is '${SECRET_CANDIDATE:-<empty>}' (missing or a CHANGEME_ placeholder)."
   warn "The registered secret is minted by Zitadel and written back into .env — no fixed default"
   warn "is ever shipped. Regenerate .env (./scripts/init-env.sh --force-env) or re-source it"
-  warn "so the deployed OpenCloud secret stays in sync with the registered client."
+  warn "so the deployed secret stays in sync with the registered client."
 fi
 
 # ── machine PAT — mirror tests/05-e2e/run.py fetch_seeded() ────────────────
@@ -260,8 +306,8 @@ if [[ "$DRY_RUN" == true ]]; then
   echo ""
   info "Dry run — no API calls, no file writes."
   info "IdP base:      ${IDP_URL}"
-  info "App to ensure: '${APP_NAME}' (project '${PROJECT_NAME}')"
-  info "Client id:     '${CLIENT_ID_LABEL}' (looked up first; persisted to .env as OC_OIDC_CLIENT_ID)"
+  info "App to ensure: '${APP_NAME}' (project '${APP_PROJECT}')"
+  info "Client id:     '${CLIENT_ID_LABEL}' (looked up first; persisted to .env as ${CLIENT_ID_KEY})"
   info "Machine PAT:   $([[ -n "$PAT" ]] && echo "found" || echo "NOT FOUND")"
   info "Redirect URIs:"
   for u in "${REDIRECTS[@]}"; do
@@ -271,9 +317,9 @@ if [[ "$DRY_RUN" == true ]]; then
   info "  1. POST ${IDP_URL}/management/v1/projects/_search  (readiness + auth probe)"
   info "  2. scan projects' apps for '$APP_NAME' / client id '$CLIENT_ID_LABEL'"
   info "     -> if found: report 'already registered', exit 0 (no changes)"
-  info "  3. otherwise: create project '$PROJECT_NAME' (if needed) and the OIDC app"
+  info "  3. otherwise: create project '$APP_PROJECT' (if needed) and the OIDC app"
   info "     (web, authorization-code, client_secret_basic, devMode, both http+https URIs)"
-  info "  4. write OC_OIDC_CLIENT_ID + OC_OIDC_CLIENT_SECRET into .env"
+  info "  4. write ${CLIENT_ID_KEY} + ${CLIENT_SECRET_KEY} into .env"
   exit 0
 fi
 
@@ -329,10 +375,10 @@ if [[ -n "$FOUND_APP" ]]; then
 fi
 
 # ── 3) ensure the project, then register the app ─────────────────────────────
-pid="$(printf '%s' "$projects_json" | jq -r --arg p "$PROJECT_NAME" '.result[]? | select(.name == $p) | .id' 2>/dev/null | head -1)"
+pid="$(printf '%s' "$projects_json" | jq -r --arg p "$APP_PROJECT" '.result[]? | select(.name == $p) | .id' 2>/dev/null | head -1)"
 if [[ -z "$pid" ]]; then
-  info "Creating project '${PROJECT_NAME}' in Zitadel..."
-  proj_resp="$(api POST /management/v1/projects "{\"name\":\"${PROJECT_NAME}\"}")"
+  info "Creating project '${APP_PROJECT}' in Zitadel..."
+  proj_resp="$(api POST /management/v1/projects "{\"name\":\"${APP_PROJECT}\"}")"
   case "$(api_http)" in
     200) pid="$(printf '%s' "$proj_resp" | jq -r '.id // empty' 2>/dev/null)" ;;
     *)
@@ -357,7 +403,7 @@ app_body="$(jq -nc --arg name "$APP_NAME" \
      authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
      devMode: true }')"
 
-info "Registering OIDC app '${APP_NAME}' in project '${PROJECT_NAME}'..."
+info "Registering OIDC app '${APP_NAME}' in project '${APP_PROJECT}'..."
 app_resp="$(api POST "/management/v1/projects/${pid}/apps/oidc" "$app_body")"
 case "$(api_http)" in
   200) ;;
@@ -373,21 +419,21 @@ if [[ -z "$new_client_id" || -z "$new_secret" ]]; then
   exit 1
 fi
 
-# ── 4) persist the Zitadel-issued credentials into .env ──────────────────────
-set_env OC_OIDC_CLIENT_ID "$new_client_id"
-set_env OC_OIDC_CLIENT_SECRET "$new_secret"
-if grep -q '^OC_OIDC_SECRET=' .env; then
+# ── 4) persist the Zitadel-issued credentials into .env ──────────────────
+set_env "$CLIENT_ID_KEY" "$new_client_id"
+set_env "$CLIENT_SECRET_KEY" "$new_secret"
+if [[ -n "$SECRET_ALIAS_KEY" ]] && grep -q "^${SECRET_ALIAS_KEY}=" .env; then
   # legacy alias kept in sync for older .env files / overlay consumers
-  set_env OC_OIDC_SECRET "$new_secret"
+  set_env "$SECRET_ALIAS_KEY" "$new_secret"
 fi
 
 echo ""
-ok "Registered persistent OpenCloud OIDC client."
-info "  Project:          ${PROJECT_NAME}  (id ${pid})"
+ok "Registered persistent OIDC client (${APP_KIND})."
+info "  Project:          ${APP_PROJECT}  (id ${pid})"
 info "  App:              ${APP_NAME}  (id ${FOUND_APP:-new})"
 info "  Client id:        ${new_client_id}"
 info "  Client secret:    <set> (written to .env, never printed)"
 info "  Redirect URIs:    $(IFS=', '; echo "${REDIRECTS[*]}")"
 info "  Post-logout URIs: $(IFS=', '; echo "${POST_LOGOUT[*]}")"
-info "Persisted into .env: OC_OIDC_CLIENT_ID and OC_OIDC_CLIENT_SECRET"
-warn "Re-source .env (or restart the stack) so OpenCloud picks up the new credentials."
+info "Persisted into .env: ${CLIENT_ID_KEY} and ${CLIENT_SECRET_KEY}"
+warn "Re-source .env (or restart the stack) so the service picks up the new credentials."

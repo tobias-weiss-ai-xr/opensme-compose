@@ -71,21 +71,31 @@ signing_key_path: "${SIGNING_KEY_FILE}"
 
 app_service_config_files: []
 federation_custom_pem_certificate: ""
-
-# OIDC (Zitadel) — uncomment and configure for SSO
-# oidc_providers:
-#   - idp_id: "zitadel"
-#     idp_name: "Zitadel"
-#     issuer: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}"
-#     client_id: "synapse"
-#     client_secret: "${SYNAPSE_OIDC_CLIENT_SECRET}"
-#     scopes: ["openid", "profile"]
-#     user_mapping_provider:
-#       module: "synapse.handlers.oidc_handler.OidcAuthenticator"
-#       config:
-#         localpart_template: "{{ user.preferred_username }}"
-#         display_name_template: "{{ user.name }}"
 SYNAPSE_EOF
+
+# OIDC (Zitadel) — emitted when a registered Zitadel client is configured.
+# The pair is minted by `scripts/zitadel-client.sh --app synapse` (which
+# registers the <public_baseurl>/_synapse/client/oidc/callback redirect and
+# persists SYNAPSE_OIDC_CLIENT_ID/SECRET); presence of a real (non-
+# placeholder) client id is the opt-in switch. Without it synapse keeps its
+# native login form — demo and CI are unaffected.
+if [[ -n "${SYNAPSE_OIDC_CLIENT_ID:-}" && "${SYNAPSE_OIDC_CLIENT_ID}" != CHANGEME_* ]]; then
+  cat >> "$CONFIG_FILE" <<SYNAPSE_OIDC_EOF
+
+oidc_providers:
+  - idp_id: "zitadel"
+    idp_name: "Zitadel"
+    issuer: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}"
+    client_id: "${SYNAPSE_OIDC_CLIENT_ID}"
+    client_secret: "${SYNAPSE_OIDC_CLIENT_SECRET}"
+    scopes: ["openid", "profile", "email"]
+    user_mapping_provider:
+      module: "synapse.handlers.oidc_handler.OidcAuthenticator"
+      config:
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.name }}"
+SYNAPSE_OIDC_EOF
+fi
 
 # Generate log config
 cat > "${DATA_DIR}/log.config" <<LOG_EOF

@@ -47,7 +47,7 @@ services:
       DB_USER: notes_user
       DB_PASSWORD: ${NOTES_DB_PASSWORD:-CHANGEME_notes}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/1
-      OIDC_RP_CLIENT_ID: "opensme-notes"
+      OIDC_RP_CLIENT_ID: ${NOTES_OIDC_CLIENT_ID:-opensme-notes}
       OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:-CHANGEME_notes_oidc}
       OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration/jwks"
       OIDC_OP_AUTHORIZATION_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/authorize"
