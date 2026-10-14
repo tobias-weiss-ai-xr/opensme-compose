@@ -8,6 +8,7 @@
 // - /heal:     explicit confirmation, then POST /heal against the agent API
 //              (requires serve mode: `docker compose run --rm dev-maintenance-bot -serve`)
 // - /drafts:   HITL visibility — list drafts with lifecycle + major flags
+//              (expired drafts are labeled; they can no longer be decided)
 // - /approve:  HITL decision — explicit confirmation, then the draft commits
 // - /reject:   HITL decision with a mandatory reason (the feedback signal)
 // - /feedback: the loop's aggregate — counts + rejection reasons
@@ -88,12 +89,13 @@ interface DraftRow {
 	approved: boolean;
 	rejected: boolean;
 	reason?: string;
+	expired?: boolean;
 }
 
 /** Render GET /drafts with pending decisions first (HITL visibility). */
 function renderDrafts(drafts: DraftRow[]): string {
-	const pending = drafts.filter((d) => !d.approved && !d.rejected);
-	const decided = drafts.filter((d) => d.approved || d.rejected);
+	const pending = drafts.filter((d) => !d.approved && !d.rejected && !d.expired);
+	const decided = drafts.filter((d) => d.approved || d.rejected || d.expired);
 	if (drafts.length === 0) return "no drafts";
 	const lines: string[] = [];
 	for (const d of pending) {
@@ -101,8 +103,9 @@ function renderDrafts(drafts: DraftRow[]): string {
 		lines.push(`   ${d.text}`);
 	}
 	for (const d of decided) {
+		const label = d.approved ? "COMMITTED" : d.rejected ? "REJECTED" : "EXPIRED";
 		lines.push(
-			`${d.approved ? "COMMITTED" : "REJECTED"} ${d.id} (${d.kind}) → ${d.where}` +
+			`${label} ${d.id} (${d.kind}) → ${d.where}` +
 				(d.reason ? ` — reason: ${d.reason}` : ""),
 		);
 	}
@@ -205,6 +208,10 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`draft ${id} was rejected — rejection is final (create a new draft)`, "warning");
 					return;
 				}
+				if (d.expired) {
+					ctx.ui.notify(`draft ${id} expired (TTL policy) — create a new draft`, "warning");
+					return;
+				}
 				const ok = await ctx.ui.confirm(
 					"Commit this draft?",
 					`[${d.major ? "MAJOR " : ""}${d.id}] (${d.kind}) → ${d.where}\n${d.text}\n\nApproval commits and is audited.`,
@@ -262,13 +269,15 @@ export default function (pi: ExtensionAPI) {
 				total: number;
 				approved: number;
 				rejected: number;
+				expired: number;
 				pending: number;
 				major_pending: number;
 				reasons: { id: string; kind: string; where: string; reason: string }[];
 			};
 			const lines = [
 				`total=${fb.total} approved=${fb.approved} rejected=${fb.rejected} pending=${fb.pending}` +
-					(fb.major_pending > 0 ? ` MAJOR_PENDING=${fb.major_pending}` : ""),
+					(fb.major_pending > 0 ? ` MAJOR_PENDING=${fb.major_pending}` : "") +
+					(fb.expired > 0 ? ` EXPIRED=${fb.expired}` : ""),
 			];
 			for (const r of fb.reasons ?? []) {
 				lines.push(`✗ ${r.id} (${r.kind}) → ${r.where}: ${r.reason}`);

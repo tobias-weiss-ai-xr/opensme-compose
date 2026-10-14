@@ -71,3 +71,27 @@ highest restored id so a fresh draft never overwrites a restored one.
 
 - **WHEN** drafts were restored and a new draft is created
 - **THEN** its id SHALL be greater than every restored id (no collision)
+
+### Requirement: Draft TTL is opt-in queue hygiene
+
+The bot SHALL support expiring stale pending drafts via
+`DEV_AGENT_DRAFT_TTL` (duration; 0 or unset = off, the default). Expiry
+SHALL only ever take the safe direction — a pending draft is marked
+`expired` (final: no approve, no reject), audited (kind `expire`) and
+counted separately in `/feedback` and `/metrics`; it can never commit.
+Drafts persisted before the `created_at` field existed SHALL never expire
+(the upgrade path must not mass-retire decisions), and `GET /drafts` SHALL
+apply the policy before listing.
+
+#### Scenario: A stale pending draft leaves the queue
+
+- **WHEN** `DEV_AGENT_DRAFT_TTL` is set and a pending draft is older than
+  the TTL
+- **THEN** the next reconcile or `/drafts` listing SHALL mark it expired
+- **AND** an approve on it SHALL be rejected with 409
+- **AND** `dev_agent_drafts_expired_total` SHALL count it
+
+#### Scenario: Policy off by default
+
+- **WHEN** `DEV_AGENT_DRAFT_TTL` is unset
+- **THEN** no draft SHALL ever be expired regardless of age

@@ -128,6 +128,9 @@ services:
       DEV_AGENT_ALLOW_HEAL: ${DEV_AGENT_ALLOW_HEAL:-false}
       DEV_AGENT_API_ADDR: 0.0.0.0:8082
       DEV_AGENT_HOSTNAMES: ${DEV_AGENT_HOSTNAMES:-}
+      # Draft TTL (HITL queue hygiene, opt-in): pending drafts older than
+      # this are marked expired (never committed, audited). 0 = off.
+      DEV_AGENT_DRAFT_TTL: ${DEV_AGENT_DRAFT_TTL:-0}
       # LLM analysis — OFF unless explicitly enabled (privacy default).
       # Bot-specific var so the stack-wide DEV_AGENT_LLM_BACKEND (python
       # dev-agent) cannot silently turn it on.

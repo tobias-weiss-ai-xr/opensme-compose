@@ -19,7 +19,11 @@ type Config struct {
 	AllowHeal  bool
 	APIAddr    string
 	HistoryMax int // cap on persisted history+evidence entries
-	LLM        LLMConfig
+	// DraftTTL expires pending drafts older than this (HITL queue hygiene,
+	// opt-in); 0 disables expiry (the default — a pending decision never
+	// disappears unless the operator asks for it).
+	DraftTTL time.Duration
+	LLM      LLMConfig
 	// Hostnames is the extra hostname list the anonymizer scrubs.
 	Hostnames []string
 }
@@ -59,6 +63,13 @@ func FromEnv() (*Config, error) {
 	}
 	if v := os.Getenv("DEV_AGENT_STATE_DIR"); v != "" {
 		c.StateDir = v
+	}
+	if v := os.Getenv("DEV_AGENT_DRAFT_TTL"); v != "" {
+		d, err := parseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("DEV_AGENT_DRAFT_TTL: %w", err)
+		}
+		c.DraftTTL = d
 	}
 	if v := os.Getenv("DEV_AGENT_ALLOW_HEAL"); v != "" {
 		b, err := strconv.ParseBool(v)

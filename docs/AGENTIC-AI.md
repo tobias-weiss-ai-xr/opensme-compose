@@ -180,4 +180,7 @@ Contract-Zeile.*
    Drafts, States und Rejection-Reasons überleben `docker restart` — der
    Compose-Sidecar persistiert auf Named Volume). Draft-Metriken
    (`dev_agent_drafts_pending/major_pending/approved_total/rejected_total`)
-   machen den Loop im Dashboard sichtbar. 19/19 Specs valid.
+   machen den Loop im Dashboard sichtbar. Queue-Hygiene: `DEV_AGENT_DRAFT_TTL`
+   (opt-in, default aus) expiret veraltete *pendings* — sichere Richtung, nie
+   Commit, auditiert als `expire`, Legacy-Drafts ohne `created_at` nie. 19/19
+   Specs valid.

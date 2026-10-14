@@ -106,6 +106,30 @@ func TestHistoryMax(t *testing.T) {
 	}
 }
 
+func TestDraftTTLEnv(t *testing.T) {
+	// Default: 0 = expiry off (a pending decision never disappears unless
+	// the operator opts in).
+	c, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DraftTTL != 0 {
+		t.Errorf("default DraftTTL = %v, want 0 (off)", c.DraftTTL)
+	}
+	setenv(t, map[string]string{"DEV_AGENT_DRAFT_TTL": "168h"})
+	c, err = FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DraftTTL != 168*time.Hour {
+		t.Errorf("DraftTTL = %v, want 168h", c.DraftTTL)
+	}
+	setenv(t, map[string]string{"DEV_AGENT_DRAFT_TTL": "bogus"})
+	if _, err := FromEnv(); err == nil {
+		t.Error("invalid draft TTL must error")
+	}
+}
+
 func TestLLMBudgetEnv(t *testing.T) {
 	// Default: 0 = unlimited (no behavior change when unset).
 	setenv(t, map[string]string{"DEV_AGENT_LLM_BACKEND": "ollama"})

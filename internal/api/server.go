@@ -47,10 +47,14 @@ type Draft struct {
 	// Major marks a major decision (HITL: always human-approved, flagged in
 	// the audit trail). Rejected+Reason record the human's verdict when a
 	// draft is turned down — the feedback signal the agent learns from.
-	Major    bool   `json:"major,omitempty"`
-	Approved bool   `json:"approved"`
-	Rejected bool   `json:"rejected"`
-	Reason   string `json:"reason,omitempty"`
+	// Expired marks a pending draft the TTL policy retired (opt-in; safe
+	// direction — nothing was ever committed).
+	Major     bool      `json:"major,omitempty"`
+	Approved  bool      `json:"approved"`
+	Rejected  bool      `json:"rejected"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Expired   bool      `json:"expired,omitempty"`
 }
 
 // StripRecord describes one anonymizer replacement (no raw values).
@@ -139,6 +143,7 @@ func (s *Server) Reconcile(ctx context.Context) error {
 	s.matches = map[string][]knowledge.Match{}
 	s.reconciles++
 	s.mu.Unlock()
+	s.expireStale(time.Now())
 
 	budgetPaused := false
 	for _, f := range findings {
@@ -300,13 +305,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(&b, "dev_agent_history_entries %d\n", len(s.history))
 	// Draft loop (agent-feedback): the operator dashboard watches HITL —
 	// pending decisions (especially major ones) and the feedback signal.
-	pending, majorPending, approved, rejected := 0, 0, 0, 0
+	pending, majorPending, approved, rejected, expiredCount := 0, 0, 0, 0, 0
 	for _, d := range s.drafts {
 		switch {
 		case d.Approved:
 			approved++
 		case d.Rejected:
 			rejected++
+		case d.Expired:
+			expiredCount++
 		default:
 			pending++
 			if d.Major {
@@ -326,6 +333,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(&b, "# HELP dev_agent_drafts_rejected_total Drafts rejected with feedback\n")
 	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_rejected_total gauge\n")
 	fmt.Fprintf(&b, "dev_agent_drafts_rejected_total %d\n", rejected)
+	fmt.Fprintf(&b, "# HELP dev_agent_drafts_expired_total Pending drafts retired by the TTL policy\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_expired_total gauge\n")
+	fmt.Fprintf(&b, "dev_agent_drafts_expired_total %d\n", expiredCount)
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(b.String()))
@@ -405,7 +415,7 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draftSeq++
 	d := &Draft{ID: fmt.Sprintf("d%d", s.draftSeq), Kind: req.Kind, Text: req.Text,
-		Where: req.Where, Major: req.Major, Approved: false}
+		Where: req.Where, Major: req.Major, Approved: false, CreatedAt: time.Now().UTC()}
 	s.drafts[d.ID] = d
 	what := "created kind=" + req.Kind
 	if req.Major {
@@ -442,6 +452,12 @@ func (s *Server) handleDraftApprove(w http.ResponseWriter, r *http.Request) {
 			"error": "draft " + id + " was rejected; rejection is final (create a new draft)"})
 		return
 	}
+	if d.Expired {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "draft " + id + " expired (TTL policy); create a new draft"})
+		return
+	}
 	if !d.Approved {
 		d.Approved = true
 		s.evidence = append(s.evidence, EvidenceEntry{
@@ -465,6 +481,9 @@ func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
 		return
 	}
+	// The listing is the operator's decision surface — it must never show a
+	// decision the TTL policy has already taken (opt-in policy).
+	s.expireStale(time.Now())
 	s.mu.Lock()
 	list := make([]Draft, 0, len(s.drafts))
 	for _, d := range s.drafts {
@@ -513,6 +532,12 @@ func (s *Server) handleDraftReject(w http.ResponseWriter, r *http.Request) {
 			"error": "draft " + id + " is already committed; it cannot be rejected"})
 		return
 	}
+	if d.Expired {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "draft " + id + " expired (TTL policy); create a new draft"})
+		return
+	}
 	if !d.Rejected {
 		d.Rejected = true
 		d.Reason = strings.TrimSpace(req.Reason)
@@ -543,6 +568,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		Where  string `json:"where"`
 		Reason string `json:"reason"`
 	}
+	s.expireStale(time.Now())
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.drafts))
 	for id := range s.drafts {
@@ -553,6 +579,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		Total        int          `json:"total"`
 		Approved     int          `json:"approved"`
 		Rejected     int          `json:"rejected"`
+		Expired      int          `json:"expired"`
 		Pending      int          `json:"pending"`
 		MajorPending int          `json:"major_pending"`
 		Reasons      []rejectInfo `json:"reasons"`
@@ -567,6 +594,8 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		case d.Rejected:
 			fb.Rejected++
 			fb.Reasons = append(fb.Reasons, rejectInfo{ID: d.ID, Kind: d.Kind, Where: d.Where, Reason: d.Reason})
+		case d.Expired:
+			fb.Expired++
 		default:
 			fb.Pending++
 			if d.Major {
@@ -656,6 +685,40 @@ func (s *Server) load() {
 			s.draftSeq = n
 		}
 	}
+}
+
+// expireStale applies the draft TTL policy (opt-in: cfg.DraftTTL > 0):
+// pending drafts older than the TTL are marked expired — the safe direction,
+// nothing was ever committed — and audited (kind "expire"). Legacy drafts
+// without a creation timestamp (state files from before the field existed)
+// are never expired: the upgrade path must not mass-retire decisions.
+// Returns the number of newly expired drafts. Must be called WITHOUT s.mu.
+func (s *Server) expireStale(now time.Time) int {
+	if s.cfg.DraftTTL <= 0 {
+		return 0
+	}
+	expired := 0
+	s.mu.Lock()
+	for _, d := range s.drafts {
+		if d.Approved || d.Rejected || d.Expired || d.CreatedAt.IsZero() {
+			continue
+		}
+		if now.Sub(d.CreatedAt) <= s.cfg.DraftTTL {
+			continue
+		}
+		d.Expired = true
+		expired++
+		s.evidence = append(s.evidence, EvidenceEntry{
+			Time: now.UTC(), Kind: "expire",
+			What:  "expired kind=" + d.Kind + " (ttl " + s.cfg.DraftTTL.String() + ")",
+			Where: d.ID, Why: "TTL policy: pending draft, nothing committed",
+		})
+	}
+	s.mu.Unlock()
+	if expired > 0 {
+		_ = s.Save()
+	}
+	return expired
 }
 
 // PrintStatus renders the current persisted status (used by `agent -status`).
