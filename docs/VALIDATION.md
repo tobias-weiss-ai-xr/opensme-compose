@@ -9,6 +9,7 @@ How the openSME Compose distribution is validated before release.
 | 0 · Static | yaml lint, env completeness, secret scan (`tests/00-static/`) | ✅ |
 | 0 · Perf gate | `tests/00-static/check_perf.py` — budgets, limits, log caps, healthchecks | ✅ |
 | 0 · Boot contracts | `tests/00-static/check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries | ✅ |
+| 0 · Backup coverage | `tests/00-static/check_backup.py` — every stateful volume the fragments ship is in backup.sh (drift guard) | ✅ |
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
 | 1 · Specs | spec compliance (`tests/01-specs`) | ✅ |
 | 2 · Contracts | service/contract validation | ✅ |

@@ -62,14 +62,20 @@ export BACKUP_PASSPHRASE
 
 # ── Known volumes ─────────────────────────────
 KNOWN_VOLUMES=(
-  postgres-data redis-data opencloud-config opencloud-data
+  postgres-data redis-data portal-data opencloud-config opencloud-data
+  opencloud-lib
   stalwart-etc stalwart-data sogo-config sogo-data
   traefik-data casdoor-data zitadel-machinekey
   cryptpad-data cryptpad-blob synapse-data notes-data
   seaweedfs-data paperless-data paperless-media paperless-export
   invoiceninja-db invoiceninja-public invoiceninja-storage
   nosdesk-uploads cms-data store-data limesurvey-uploads
-  # ai-models deliberately excluded: re-downloadable model cache
+  camunda-data
+  dev-agent-state dev-maintenance-bot-state predictive-agent-state
+  taskfleet-state
+  # Deliberately excluded (re-downloadable model cache, too large to
+  # back up): ai-models ollama-models — guarded by
+  # tests/00-static/check_backup.py
 )
 
 # ── Parse arguments ───────────────────────────
