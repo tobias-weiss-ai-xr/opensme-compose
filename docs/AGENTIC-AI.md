@@ -99,7 +99,9 @@ Neue Epic-Linie (Fortsetzung von A–AC in `E2E-JOURNEYS.md`). Stories im
 
 Existierend: `dev-agent`, `dev-agent-compose`, `dev-agent-extensions`,
 `dev-agent-knowledge`, `dev-agent-privacy`, `agent-guardrails`,
-`agent-knowledge`, `agent-assistant`, `agent-saga`.
+`agent-knowledge`, `agent-assistant`, `agent-saga`, `agent-self-maintenance`
+(AS6-Gate = Opt-in, nicht default: nur mit `AGENTIC_STRICT=1` erzwingend; sonst
+dokumentierend und nie rot — `tests/00-static/check_agentic.py`, `make agentic-gate`).
 
 ## 5. Contract — `contracts/agents.yml`
 
@@ -151,3 +153,13 @@ Contract-Zeile.*
    inert bis Approval, Verwerfen ist Normalfall. Fachliche Anbindung an die
    drei Empfänger (Nosdesk/Camunda/Paperless) bleibt je System ein
    eigener Turn — das Gate selbst ist bewiesen.
+6. ✅ AS6 Agentic self-maintenance — Repo-Arbeits-Governance als
+   **Opt-in-Fähigkeit (nicht default)**: `agent-self-maintenance`-Capability
+   + `tests/00-static/check_agentic.py` + `make agentic-gate`. Merge-Gate =
+   Testpyramide (jeder e2e-Journey ∈ `ci.yml` ∪ `mailcow.yml`, kein
+   Phantom-Verweis). Änderung nur als Commit mit grüner Pyramide; Push/Deploy
+   bleibt Operator-Entscheid (dieser gesamte Ablauf beweist es de facto).
+   Verhalten: `AGENTIC_STRICT` ungesetzt/0 → dokumentierend, Exit immer 0
+   (bricht nie, reguläre Layer-0-Suite unberührt, nicht in `run.sh`);
+   `AGENTIC_STRICT=1`/`--strict` → erzwingt, Exit 1 bei Verstoß (Allowlist
+   für Support-Module + dokumentierte Nicht-CI-Journeys). 18/18 Specs valid.

@@ -247,7 +247,13 @@ contracts:
 	@echo -e "$(BLUE)── contract validation ──$(NC)"
 	@$(PYTHON) tests/02-contracts/validate_contracts.py 2>&1
 
-test-static: lint specs contracts
+# AS6 agent self-maintenance gate — OPT-IN, NOT part of test-static/lint.
+# Default is informational (never fails); enforce with AGENTIC_STRICT=1.
+agentic-gate:
+	@echo -e "$(BLUE)── AS6 agent self-maintenance gate (opt-in) ──$(NC)"
+	@$(PYTHON) tests/00-static/check_agentic.py 2>&1
+
+The test-static: lint specs contracts
 	@echo -e "$(GREEN)✅ Static layers (0-2) complete$(NC)"
 
 # ---------------------------------------------------------------------------
