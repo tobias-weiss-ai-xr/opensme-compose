@@ -38,7 +38,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 
 # ── Config ────────────────────────────────────
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:opencloud/minio.yml:mail/stalwart.yml:mail/sogo.yml:services/invoice-ninja.yml:services/paperless.yml:monitoring/dev-agent.yml:compose.internal.yml:profiles/medium.yml}"
 export COMPOSE_FILE
 
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
@@ -214,9 +214,13 @@ if [ "$BACKUP_VOLUMES" = true ]; then
   mkdir -p "$PARTIAL_DIR"
 
   # volumes are only consistent while the writers are down
-  echo "🛑 Stopping services for volume backup..."
-  docker compose down --remove-orphans 2>/dev/null || true
-  sleep 5
+  if [ "$NO_STOP" = false ]; then
+    echo "🛑 Stopping services for volume backup..."
+    docker compose down 2>/dev/null || true
+    sleep 5
+  else
+    echo "ℹ️  --no-stop: volume backup while stack is running (may be inconsistent)"
+  fi
 
   for vol in "${SELECTED_VOLUMES[@]}"; do
     FULL_VOL="${PROJECT_NAME}_${vol}"
@@ -242,8 +246,8 @@ if [ "$BACKUP_VOLUMES" = true ]; then
 fi
 
 # ── Restart services (only if volume backup stopped them) ──
-if [ "$BACKUP_VOLUMES" = true ] && [ "$NO_STOP" = false ]; then
-  echo "🚀 Restarting services..."
+if [ "$BACKUP_VOLUMES" = true ] && [ "$NO_STOP" = false ] && [ "$DRY_RUN" = false ]; then
+  echo "🚀 Restarting services (full ${COMPOSE_FILE})..."
   docker compose up -d
   sleep 10
 fi
