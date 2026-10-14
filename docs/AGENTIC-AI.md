@@ -101,7 +101,10 @@ Existierend: `dev-agent`, `dev-agent-compose`, `dev-agent-extensions`,
 `dev-agent-knowledge`, `dev-agent-privacy`, `agent-guardrails`,
 `agent-knowledge`, `agent-assistant`, `agent-saga`, `agent-self-maintenance`
 (AS6-Gate = Opt-in, nicht default: nur mit `AGENTIC_STRICT=1` erzwingend; sonst
-dokumentierend und nie rot — `tests/00-static/check_agentic.py`, `make agentic-gate`).
+dokumentierend und nie rot — `tests/00-static/check_agentic.py`, `make agentic-gate`),
+`agent-feedback` (HITL-Sichtbarkeit `GET /drafts`, Ablehnung mit Grund als
+first-class Outcome, abfragbares `GET /feedback`-Aggregat, Major-Flag,
+Loop-Closure: aktuelle Rejections fließen anonymisiert in den LLM-Kontext).
 
 ## 5. Contract — `contracts/agents.yml`
 
@@ -163,3 +166,12 @@ Contract-Zeile.*
    (bricht nie, reguläre Layer-0-Suite unberührt, nicht in `run.sh`);
    `AGENTIC_STRICT=1`/`--strict` → erzwingt, Exit 1 bei Verstoß (Allowlist
    für Support-Module + dokumentierte Nicht-CI-Journeys). 18/18 Specs valid.
+7. ✅ Feedback-Loop + HITL für Major-Entscheidungen (`agent-feedback`):
+   `GET /drafts` (der Mensch sieht, worüber er entscheidet),
+   `POST /draft/{id}/reject` mit Pflicht-Grund (Ablehnung ist final —
+   approven einer abgelehnten Draft → 409, nie commit; Grund bleibt auf der
+   Draft, nie im Evidence-Log), `GET /feedback`-Aggregat (Counts + Gründe,
+   neueste zuerst), `major:true`-Flag (auditiert als "(major)"), und die
+   Schleife schließt: die 3 letzten Rejections fließen anonymisiert in den
+   LLM-Prompt (Teil des Cache-Keys → neues Feedback invalidiert). E2E:
+   `agent_draft_saga.py` B1–B6 + C1–C6 (13/13 grün). 19/19 Specs valid.

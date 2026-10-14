@@ -16,6 +16,15 @@ Against a live serve-mode dev-maintenance-bot via its private API (docker exec):
   B5  approving an unknown draft → 404
   B6  an unapproved draft stays inert (discarding is the normal default)
 
+HITL + feedback loop (openspec `agent-feedback`, docs §7.7):
+
+  C1  GET /drafts lists drafts with their lifecycle state (HITL visibility)
+  C2  a major draft is flagged major:true (major decision marker)
+  C3  POST /draft/{id}/reject records the human's reason (feedback signal)
+  C4  rejecting without a reason → 400 (feedback needs the why)
+  C5  a rejected draft cannot be approved afterwards (rejection is final)
+  C6  GET /feedback aggregates decisions and carries the rejection reasons
+
 Fully isolated: runs its own opensme-draft-bot container, drives the API via
 docker exec (no host port), tears the bot down in every path. Safe against a
 live stack on the same host (distinct container name).
@@ -172,6 +181,9 @@ def main() -> int:
                 pass
         (result.ok if d2_inert else result.fail)(
             "B6 an unapproved draft stays inert (discarding is the default)")
+        if not d2_inert:
+            return 1
+        did2 = json.loads(d2.stdout)["id"]
 
         # B3: human approval commits.
         ap = bot_http(f"/draft/{did}/approve", {"approve": True})
@@ -189,6 +201,86 @@ def main() -> int:
         commits_final = [e for e in evidence_kinds() if e.get("kind") == "commit"]
         (result.ok if len(commits_final) >= 1 else result.fail)(
             "B4 approval is audited (kind commit)")
+
+        # ---- HITL + feedback loop (agent-feedback) ----
+
+        # C1: the human must SEE what to decide on.
+        dl = bot_http("/drafts")
+        visible = False
+        if dl.returncode == 0:
+            try:
+                lst = json.loads(dl.stdout)
+                visible = len(lst) >= 2 and any(d.get("approved") for d in lst) \
+                    and any(not d.get("approved") and not d.get("rejected") for d in lst)
+            except json.JSONDecodeError:
+                pass
+        (result.ok if visible else result.fail)(
+            "C1 GET /drafts lists drafts with lifecycle states (HITL visibility)"
+            if visible else f"C1 /drafts: rc={dl.returncode} body={dl.stdout[:200]}")
+
+        # C2: a major decision is flagged.
+        d3 = bot_http("/draft", {"kind": "config-change", "text": "raise memory limit",
+                                 "where": "app/deploy", "major": True})
+        major = False
+        if d3.returncode == 0:
+            try:
+                major = json.loads(d3.stdout).get("major") is True
+            except json.JSONDecodeError:
+                pass
+        (result.ok if major else result.fail)(
+            "C2 a major draft is flagged major:true"
+            if major else f"C2 major draft: rc={d3.returncode} body={d3.stdout[:200]}")
+
+        # C3: rejection records the human's reason (the feedback signal).
+        why = "wrong classification: this is a billing question"
+        rj = bot_http(f"/draft/{did2}/reject", {"reason": why})
+        rejected = False
+        if rj.returncode == 0:
+            try:
+                j = json.loads(rj.stdout)
+                rejected = j.get("rejected") is True and j.get("reason") == why \
+                    and j.get("approved") is False
+            except json.JSONDecodeError:
+                pass
+        (result.ok if rejected else result.fail)(
+            "C3 rejection records the human's reason (feedback)"
+            if rejected else f"C3 reject: rc={rj.returncode} body={rj.stdout[:200]}")
+
+        # C4: feedback without a why is not feedback.
+        rj0 = bot_http(f"/draft/{did2}/reject", {"reason": ""})
+        needs_reason = rj0.returncode != 0 or "reason required" in rj0.stdout
+        (result.ok if needs_reason else result.fail)(
+            "C4 rejecting without a reason is refused (400)"
+            if needs_reason else f"C4 got rc={rj0.returncode} body={rj0.stdout[:120]}")
+
+        # C5: rejection is final — approving a rejected draft must NOT commit.
+        ap2 = bot_http(f"/draft/{did2}/approve", {"approve": True})
+        dl2 = bot_http("/drafts")
+        final_rejected = ap2.returncode != 0
+        if dl2.returncode == 0:
+            try:
+                for d in json.loads(dl2.stdout):
+                    if d.get("id") == did2:
+                        final_rejected = d.get("rejected") is True and d.get("approved") is False
+            except json.JSONDecodeError:
+                final_rejected = False
+        (result.ok if final_rejected else result.fail)(
+            "C5 a rejected draft cannot be approved afterwards (rejection is final)"
+            if final_rejected else f"C5 approve-after-reject: rc={ap2.returncode} drafts={dl2.stdout[:200]}")
+
+        # C6: the loop's queryable signal — decisions + reasons, newest first.
+        fb = bot_http("/feedback")
+        loop_ok = False
+        if fb.returncode == 0:
+            try:
+                f = json.loads(fb.stdout)
+                loop_ok = (f.get("approved", 0) >= 1 and f.get("rejected", 0) >= 1
+                           and any(r.get("reason") == why for r in f.get("reasons", [])))
+            except json.JSONDecodeError:
+                pass
+        (result.ok if loop_ok else result.fail)(
+            "C6 GET /feedback aggregates decisions with rejection reasons"
+            if loop_ok else f"C6 /feedback: rc={fb.returncode} body={fb.stdout[:200]}")
     finally:
         subprocess.run(["docker", "rm", "-f", BOT], capture_output=True,
                        text=True, timeout=120)

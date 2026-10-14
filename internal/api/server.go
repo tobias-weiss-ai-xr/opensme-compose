@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +40,17 @@ type EvidenceEntry struct {
 // draft → human-approval → commit; a draft is never committed on its own).
 // Raw text may enter the draft body; it never enters the evidence log.
 type Draft struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	Text     string `json:"text"`
-	Where    string `json:"where"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Text  string `json:"text"`
+	Where string `json:"where"`
+	// Major marks a major decision (HITL: always human-approved, flagged in
+	// the audit trail). Rejected+Reason record the human's verdict when a
+	// draft is turned down — the feedback signal the agent learns from.
+	Major    bool   `json:"major,omitempty"`
 	Approved bool   `json:"approved"`
+	Rejected bool   `json:"rejected"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // StripRecord describes one anonymizer replacement (no raw values).
@@ -103,7 +111,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/evidence", s.handleEvidence)
 	mux.HandleFunc("/heal", s.handleHeal)
 	mux.HandleFunc("/draft", s.handleDraft)
+	mux.HandleFunc("/drafts", s.handleDrafts)
 	mux.HandleFunc("/draft/{id}/approve", s.handleDraftApprove)
+	mux.HandleFunc("/draft/{id}/reject", s.handleDraftReject)
+	mux.HandleFunc("/feedback", s.handleFeedback)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/knowledge", s.handleKnowledge)
 	return mux
@@ -346,6 +357,7 @@ type draftRequest struct {
 	Kind  string `json:"kind"`
 	Text  string `json:"text"`
 	Where string `json:"where"`
+	Major bool   `json:"major"`
 }
 
 func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
@@ -365,11 +377,15 @@ func (s *Server) handleDraft(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draftSeq++
 	d := &Draft{ID: fmt.Sprintf("d%d", s.draftSeq), Kind: req.Kind, Text: req.Text,
-		Where: req.Where, Approved: false}
+		Where: req.Where, Major: req.Major, Approved: false}
 	s.drafts[d.ID] = d
+	what := "created kind=" + req.Kind
+	if req.Major {
+		what += " (major)"
+	}
 	s.evidence = append(s.evidence, EvidenceEntry{
 		Time: time.Now().UTC(), Kind: "draft",
-		What:  "created kind=" + req.Kind,
+		What:  what,
 		Where: req.Where, Why: "agent draft (inert until human approval)",
 	})
 	s.trimLocked()
@@ -392,6 +408,12 @@ func (s *Server) handleDraftApprove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown draft " + id})
 		return
 	}
+	if d.Rejected {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "draft " + id + " was rejected; rejection is final (create a new draft)"})
+		return
+	}
 	if !d.Approved {
 		d.Approved = true
 		s.evidence = append(s.evidence, EvidenceEntry{
@@ -405,6 +427,127 @@ func (s *Server) handleDraftApprove(w http.ResponseWriter, r *http.Request) {
 	_ = s.Save()
 	slog.Info("draft approved (commit)", "id", d.ID)
 	writeJSON(w, http.StatusOK, d)
+}
+
+// handleDrafts lists every draft with its lifecycle state — HITL visibility:
+// a human can only decide on drafts they can actually see (pending, approved,
+// rejected, major-flagged), oldest first.
+func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
+		return
+	}
+	s.mu.Lock()
+	list := make([]Draft, 0, len(s.drafts))
+	for _, d := range s.drafts {
+		list = append(list, *d)
+	}
+	s.mu.Unlock()
+	sort.Slice(list, func(i, j int) bool { return draftNum(list[i].ID) < draftNum(list[j].ID) })
+	writeJSON(w, http.StatusOK, list)
+}
+
+// draftNum parses the numeric part of a "d<n>" draft id; ids are always of
+// that shape (draftSeq), so a parse failure cannot happen — fall back to 0.
+func draftNum(id string) int {
+	n, _ := strconv.Atoi(strings.TrimPrefix(id, "d"))
+	return n
+}
+
+// handleDraftReject records the human's verdict WITH a reason. The reason is
+// the feedback loop's signal: it stays on the draft (queryable via /feedback
+// and injected into the LLM context) and never enters the evidence log —
+// operator free text must not leak into the audit trail. Rejection is final:
+// a rejected draft cannot be approved afterwards.
+func (s *Server) handleDraftReject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reason required (feedback needs the why)"})
+		return
+	}
+	id := r.PathValue("id")
+	s.mu.Lock()
+	d, ok := s.drafts[id]
+	if !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown draft " + id})
+		return
+	}
+	if d.Approved {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "draft " + id + " is already committed; it cannot be rejected"})
+		return
+	}
+	if !d.Rejected {
+		d.Rejected = true
+		d.Reason = strings.TrimSpace(req.Reason)
+		s.evidence = append(s.evidence, EvidenceEntry{
+			Time: time.Now().UTC(), Kind: "reject",
+			What:  "rejected kind=" + d.Kind,
+			Where: d.ID, Why: "human feedback (agent loop; reason stays on the draft)",
+		})
+		s.trimLocked()
+	}
+	s.mu.Unlock()
+	_ = s.Save()
+	slog.Info("draft rejected (feedback)", "id", d.ID)
+	writeJSON(w, http.StatusOK, d)
+}
+
+// handleFeedback aggregates the human decisions so the agent (or an operator
+// dashboard) can query the feedback signal: counts plus every rejection with
+// its reason, newest first.
+func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
+		return
+	}
+	type rejectInfo struct {
+		ID     string `json:"id"`
+		Kind   string `json:"kind"`
+		Where  string `json:"where"`
+		Reason string `json:"reason"`
+	}
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.drafts))
+	for id := range s.drafts {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return draftNum(ids[i]) > draftNum(ids[j]) })
+	var fb struct {
+		Total        int          `json:"total"`
+		Approved     int          `json:"approved"`
+		Rejected     int          `json:"rejected"`
+		Pending      int          `json:"pending"`
+		MajorPending int          `json:"major_pending"`
+		Reasons      []rejectInfo `json:"reasons"`
+	}
+	fb.Reasons = []rejectInfo{}
+	for _, id := range ids {
+		d := s.drafts[id]
+		fb.Total++
+		switch {
+		case d.Approved:
+			fb.Approved++
+		case d.Rejected:
+			fb.Rejected++
+			fb.Reasons = append(fb.Reasons, rejectInfo{ID: d.ID, Kind: d.Kind, Where: d.Where, Reason: d.Reason})
+		default:
+			fb.Pending++
+			if d.Major {
+				fb.MajorPending++
+			}
+		}
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, fb)
 }
 
 // ListenAndServe starts the private API; blocks until ctx is done.

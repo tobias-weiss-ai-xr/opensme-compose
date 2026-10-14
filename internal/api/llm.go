@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,40 @@ func (s *Server) kbContext(f checker.Finding, matches []knowledge.Match) string 
 	return b.String()
 }
 
+// feedbackContext renders the most recent human rejections as anonymized
+// feedback for the prompt — this is what closes the agent feedback loop: the
+// model sees WHY earlier drafts were turned down and can adjust. Reasons are
+// operator-authored free text, so the whole blob passes through the
+// anonymizer like any other outbound byte. No s.mu is held across Anonymize
+// (same reasoning as findingContext: Anonymize self-synchronizes).
+func (s *Server) feedbackContext() string {
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.drafts))
+	for id, d := range s.drafts {
+		if d.Rejected && d.Reason != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return draftNum(ids[i]) > draftNum(ids[j]) })
+	if len(ids) > 3 {
+		ids = ids[:3]
+	}
+	raws := make([]string, 0, len(ids))
+	for _, id := range ids {
+		d := s.drafts[id]
+		raws = append(raws, fmt.Sprintf("draft %s (kind=%s where=%s) rejected: %q",
+			id, d.Kind, d.Where, d.Reason))
+	}
+	s.mu.Unlock()
+	if len(raws) == 0 {
+		return ""
+	}
+	raw := "Recent human feedback on agent drafts (avoid repeating these mistakes): " +
+		strings.Join(raws, "; ")
+	clean, _ := s.Anonymize(raw)
+	return clean
+}
+
 // cacheKey hashes the finding context to a stable key for LLM response caching.
 // Same finding → same analysis (avoids redundant LLM calls on repeated cycles).
 func cacheKey(ctx string) string {
@@ -126,7 +161,10 @@ func (l *LLM) Analyze(ctx context.Context, s *Server, f checker.Finding) (string
 		return "", errors.New("analyze requires a server context")
 	}
 	findingCtx := s.findingContext(f)
-	key := cacheKey(findingCtx)
+	fbCtx := s.feedbackContext()
+	// The feedback context is part of the cache key: new human feedback must
+	// invalidate a cached analysis, or the loop would feed on stale answers.
+	key := cacheKey(findingCtx + "\x00" + fbCtx)
 	// Cache lookup
 	l.cacheMu.Lock()
 	if entry, ok := l.cache[key]; ok && time.Since(entry.at) < 10*time.Minute {
@@ -155,6 +193,9 @@ func (l *LLM) Analyze(ctx context.Context, s *Server, f checker.Finding) (string
 		"Give a one-sentence root-cause hypothesis and one remediation step."
 	if kbCtx != "" {
 		prompt += " Existing runbook knowledge: " + kbCtx
+	}
+	if fbCtx != "" {
+		prompt += " " + fbCtx
 	}
 	prompt += " Context: " + findingCtx
 	analysis, err := l.callWithRetry(ctx, prompt)

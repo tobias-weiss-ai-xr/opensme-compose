@@ -55,6 +55,7 @@ agents:
       - llm budget default unlimited (0) but wired; operator sets a cap
       - one-shot (restart "no")
       - agent draft gate: /draft is inert until human /draft/{id}/approve (write_mode consent)
+      - agent feedback loop: rejection records the human reason (final, never committed) and flows back into the LLM context; major drafts are flagged for HITL
 
   - name: predictive-agent
     compose_service: predictive-agent
