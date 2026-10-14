@@ -25,7 +25,7 @@
         specs contracts yaml-lint \
         container smoke integration e2e saga security \
         bootstrap bpm-deploy clean help \
-        up down status logs pull \
+        up down status logs pull upgrade \
         mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
         up-soho up-small up-medium up-all \
         nix-build nix-load nix-images \
@@ -140,6 +140,10 @@ logs:
 pull:
 	@$(FULL_COMPOSE) pull
 	@echo -e "$(GREEN)✓ Images pulled$(NC)"
+
+upgrade:
+	@echo -e "$(BLUE)── safe upgrade: pre-flight + pull + rolling up ──$(NC)"
+	@./scripts/upgrade.sh --all
 
 # ---------------------------------------------------------------------------
 # Mail backend — switch MAIL_BACKEND=stalwart|mailcow (strict XOR)
