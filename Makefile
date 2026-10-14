@@ -23,7 +23,7 @@
 
 .PHONY: test test-all test-static lint compose-check env-check secret-scan \
         specs contracts yaml-lint \
-        container smoke integration e2e security \
+        container smoke integration e2e saga security \
         bootstrap bpm-deploy clean help \
         up down status logs pull \
         mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
@@ -274,6 +274,14 @@ integration:
 e2e:
 	@echo -e "$(BLUE)── layer 5: e2e — SSO flows (requires running stack) ──$(NC)"
 	@$(PYTHON) tests/05-e2e/run.py $(DOMAIN) 2>&1
+	@$(MAKE) saga
+
+saga:
+	@echo -e "$(BLUE)── layer 5: saga journey blueprints (requires running stack) ──$(NC)"
+	@for script in saga_onboarding saga_quote_to_cash saga_leave_request \
+	            saga_support_ticket saga_publishing saga_team_knowledge; do \
+		$(PYTHON) tests/05-e2e/$$script.py $(DOMAIN) 2>&1 || exit 1; \
+	done
 
 security:
 	@echo -e "$(BLUE)── layer 6: security audit ──$(NC)"
@@ -450,6 +458,7 @@ help:
 	@echo "    make smoke               Layer 3: HTTP smoke tests (requires stack)"
 	@echo "    make integration         Layer 4: integration tests (not yet implemented)"
 	@echo "    make e2e                 Layer 5: e2e SSO/OIDC flows (running stack; e.g. make e2e DOMAIN=opensme.local)"
+	@echo "    make saga                Layer 5: saga journey blueprints (running stack; skips cleanly on partial deployments)"
 	@echo "    make security            Layer 6: security audit (exposed ports, secrets, TLS)"
 	@echo "    make test                Layers 0-3 (static + container + smoke)"
 	@echo "    make test-all            Layers 0-6 (full suite)"

@@ -522,17 +522,43 @@ sme-interoperability). Contracts: `contracts/tiles.yml`,
 
 | Saga | Journey (user story) | Navigation edges | Deep tests |
 |------|----------------------|------------------|------------|
-| S1 Daily work |MA öffnet Portal → Cloud/Webmail/Notes | tiles → service edges answer | `run.py` (webmail, cloud), `webmail.py` |
-| S2 Quote-to-cash | BO erstellt Angebot → Rechnung → Freigabe → Ablage | invoice → workflow → archive | `saga_smoke.py` P5 (auth-walled APIs), `check_bootstrap.py` (BPMN) |
-| S3 Approvals | GF genehmigt Urlaub/Rechnung im Cockpit | workflow tile → engine | `run.py` SSO, `bootstrap/bpmn-deploy.sh` |
-| S4 Customer service | SUP löst Ticket im Helpdesk | support tile → ticketing | overlay reachability (`run.py` apps) |
-| S5 External visibility | MA publiziert News/Shop; Portal liest Feeds | website/shop tiles, `/api/feeds` degrade | `saga_smoke.py` P2, `feeds.rs` unit tests |
-| S6 Knowledge | Team verlinkt Notes-Snippets in Intercom | notes tile, share-link shape | `check_interop.py` (share links), `intercom.py` |
+| S1 Daily work (onboarding) | MA öffnet Portal → Cloud/Webmail/Notes | tiles → service edges answer | `saga_onboarding.py` (OIDC discovery → first tile → SSO reuse), `run.py` (webmail, cloud), `webmail.py` |
+| S2 Quote-to-cash | BO erstellt Angebot → Rechnung → Freigabe → Ablage | invoice → workflow → archive | `saga_quote_to_cash.py` (invoice export + DMS ingest APIs), `saga_smoke.py` P5, `check_bootstrap.py` (BPMN) |
+| S3 Approvals (leave request) | GF genehmigt Urlaub/Rechnung im Cockpit | workflow tile → engine | `saga_leave_request.py` (engine API + vacation-request BPMN), `run.py` SSO, `bootstrap/bpmn-deploy.sh` |
+| S4 Customer service (support ticket) | SUP löst Ticket im Helpdesk | support tile → ticketing | `saga_support_ticket.py` (ticketing API), `run.py` apps |
+| S5 External visibility (publishing) | MA publiziert News/Shop; Portal liest Feeds | website/shop tiles, `/api/feeds` degrade | `saga_publishing.py` (CMS publish API + public URL), `saga_smoke.py` P2, `feeds.rs` unit tests |
+| S6 Knowledge (team knowledge) | Team verlinkt Notes-Snippets in Intercom | notes tile, share-link shape | `saga_team_knowledge.py` (Notes API), `check_interop.py` (share links), `intercom.py` |
+
+### Journey blueprints
+
+Each catalog saga has a dedicated journey blueprint that validates the
+participating services' **public contracts** (not just navigation edges).
+All blueprints skip cleanly when a participating service is not deployed.
+
+| Blueprint | Participating services | Public contract validated | Skip when |
+|----------|------------------------|---------------------------|-----------|
+| `saga_onboarding.py` | IdP, portal, OpenCloud, SOGo | OIDC discovery → portal `/health` → first tile opens → OpenCloud + SOGo SSO reuse (auth-code redirect) | OpenCloud or SOGo not deployed |
+| `saga_quote_to_cash.py` | Invoice Ninja, Paperless-ngx | Invoice export endpoint (401/403, not 404) + DMS ingest endpoint (401/403, not 404) | Invoice Ninja or Paperless-ngx not deployed |
+| `saga_leave_request.py` | Operaton (BPMN), mail | Engine API (`/engine-rest/engine`) reachable + vacation-request process definition deployed | Operaton not deployed |
+| `saga_support_ticket.py` | Ticketing (Nosdesk) | Ticketing service answers at the edge (HTTP < 400) | Ticketing not deployed |
+| `saga_publishing.py` | CMS (website) | CMS publish API (`/admin`, auth-walled) + published site reachable (200) | CMS not deployed |
+| `saga_team_knowledge.py` | Notes (Impress) | Notes API (`/api/v1.0/documents/`, auth-walled, not 404) | Notes not deployed |
 
 ```bash
 # saga navigation smoke — works against demo stack OR live deployment:
 python3 tests/05-e2e/saga_smoke.py opensme.local
 python3 tests/05-e2e/saga_smoke.py home.opensme.graphwiz.ai
+
+# individual journey blueprints (each skips cleanly on partial deployments):
+python3 tests/05-e2e/saga_onboarding.py opensme.local
+python3 tests/05-e2e/saga_quote_to_cash.py opensme.local
+python3 tests/05-e2e/saga_leave_request.py opensme.local
+python3 tests/05-e2e/saga_support_ticket.py opensme.local
+python3 tests/05-e2e/saga_publishing.py opensme.local
+python3 tests/05-e2e/saga_team_knowledge.py opensme.local
+
+# all six saga blueprints via make:
+make saga DOMAIN=opensme.local
 ```
 
 Skips are saga preconditions, not failures: an overlay that is not

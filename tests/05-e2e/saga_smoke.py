@@ -40,9 +40,9 @@ from conftest import Result  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run import T, install_dns_fallback, is_localish, load_env_file  # noqa: E402
-
-# Catalog functions that are NOT auto-visible: saga preconditions.
-OPTIONAL_CATALOG = ("support", "website", "shop", "invoice", "archive", "chat", "notes")
+from saga_common import (  # noqa: E402
+    OPTIONAL_CATALOG, probe_portal, service_deployed,
+)
 
 
 def main() -> bool:
@@ -67,36 +67,17 @@ def main() -> bool:
     session.verify = not localish
     result = Result("saga-smoke")
 
-    # Portal host varies per deployment (demo: portal.<domain>, coexist
-    # hosts: home.<domain>, and an explicit arg may already BE the portal
-    # host). Probe candidates, first /health wins.
+    # Portal discovery + /api/services via the shared harness (saga_common).
     env_portal = os.environ.get("PORTAL_DOMAIN") or cfg("PORTAL_DOMAIN", "")
-    candidates = ([env_portal] if env_portal and env_portal != domain else []) + [
-        domain,
-        f"portal.{domain}",
-        f"home.{domain}",
-    ]
-    portal_base = None
-    for cand in candidates:
-        base = "http://127.0.0.1:8080" if localish and cand == f"portal.{domain}" and domain in ("localhost", "127.0.0.1") \
-            else f"{schema}{cand}"
-        try:
-            if session.get(base + "/health", timeout=T).status_code == 200:
-                portal_base = base
-                break
-        except requests.RequestException:
-            continue
+    portal_base, services = probe_portal(session, domain, localish, schema, env_portal)
     if portal_base is None:
         result.skip("portal unreachable — start the stack first")
         return result.summary()
 
     result.header(f"saga navigation smoke — portal={portal_base}")
 
-    # P1: portal health — precondition of every saga
-    health = session.get(portal_base + "/health", timeout=T)
-    if health.status_code != 200:
-        result.fail(f"portal /health → {health.status_code}")
-        return result.summary()
+    # P1: portal health — precondition of every saga (probe_portal confirmed
+    # /health answered 200 to find the base; re-assert for explicit output).
     result.ok("portal /health answers")
 
     # P2: feeds degrade gracefully (S5 precondition)
@@ -108,11 +89,6 @@ def main() -> bool:
         result.ok(f"/api/feeds serves {len(cols)} columns (degradation-safe)")
 
     # P3: every rendered tile leads somewhere — no tile to nowhere
-    svc_resp = session.get(portal_base + "/api/services", timeout=T)
-    if svc_resp.status_code != 200:
-        result.fail(f"/api/services → {svc_resp.status_code}")
-        return result.summary()
-    services = svc_resp.json().get("services") or []
     if not services:
         result.fail("portal renders no tiles — catalog is empty")
     for svc in services:
@@ -132,9 +108,8 @@ def main() -> bool:
             result.fail(f"tile '{sid}' → {url} broken (HTTP {r.status_code})")
 
     # P4: saga preconditions absent → visible skips, never silent
-    rendered = {s.get("id") for s in services}
     for sid in OPTIONAL_CATALOG:
-        if sid not in rendered:
+        if not service_deployed(services, sid):
             result.skip(f"catalog function '{sid}' not deployed — saga step skipped")
 
     # P5: document-flow endpoints behind auth walls (S2 quote-to-cash).
