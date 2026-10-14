@@ -539,6 +539,34 @@ Skips are saga preconditions, not failures: an overlay that is not
 deployed skips its saga step visibly. A rendered tile whose edge does
 not answer is always a failure — "no tile to nowhere".
 
+## Agentic journeys — agent actions are decisions (AS1–AS6)
+
+> *Der Agent darf nichts alleine: jeder Schreibzugriff ist ein Draft mit
+> menschlicher Entscheidung, jede Remidiation braucht Consent, und jede
+> Ablehnung wird zum Feedback, aus dem der Agent lernt.*
+
+Specs: openspec `agent-saga`, `agent-feedback`, `agent-self-maintenance`,
+`dev-agent-extensions`. Contract: `contracts/agents.yml` (write_mode
+consent). Bots: serve-mode dev-maintenance-bot (eigenes Isolated-Container-
+Setup je Journey — kein Live-Stack nötig).
+
+| Journey | Datei | Beweis |
+|---------|-------|--------|
+| AS1 Saga: krank → diagnose → consent → heal → audit | `tests/05-e2e/agent_saga.py` | 11 Checks: Consent-Gate, Heal-Receipt, Evidence-Kette |
+| AS2/3/5 Write-Gate + HITL + Feedback-Loop | `tests/05-e2e/agent_draft_saga.py` | B1–B6 (Draft inert bis Approve, Commit auditiert) + C1–C6 (`/drafts`-Sichtbarkeit, Major-Flag, Reject mit Pflicht-Grund, finale Ablehnung, `/feedback`-Aggregat) — 13 Checks |
+| AS6 Merge-Gate = Testpyramide | `make agentic-gate` | Opt-in (`AGENTIC_STRICT=1` erzwingt; default nie rot) |
+
+Operator-Oberfläche (pi-Extension): `/drafts` (Sichtbarkeit), `/approve <id>`
+(mit Confirm — der Commit), `/reject <id> <grund>` (Pflicht-Grund → Feedback),
+`/feedback` (Aggregat). Die Loop schließt: die letzten Rejections fließen
+anonymisiert in den LLM-Kontext des Bots.
+
+```bash
+python3 tests/05-e2e/agent_saga.py
+python3 tests/05-e2e/agent_draft_saga.py
+AGENTIC_STRICT=1 python3 tests/00-static/check_agentic.py
+```
+
 ## Running
 
 ```bash

@@ -173,5 +173,7 @@ Contract-Zeile.*
    Draft, nie im Evidence-Log), `GET /feedback`-Aggregat (Counts + Gründe,
    neueste zuerst), `major:true`-Flag (auditiert als "(major)"), und die
    Schleife schließt: die 3 letzten Rejections fließen anonymisiert in den
-   LLM-Prompt (Teil des Cache-Keys → neues Feedback invalidiert). E2E:
+   LLM-Prompt (Teil des Cache-Keys → neues Feedback invalidiert). Operator-
+   Oberfläche in der pi-Extension: `/drafts`, `/approve <id>` (mit Confirm),
+   `/reject <id> <grund>`, `/feedback`. E2E:
    `agent_draft_saga.py` B1–B6 + C1–C6 (13/13 grün). 19/19 Specs valid.

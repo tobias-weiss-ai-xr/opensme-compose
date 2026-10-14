@@ -2,21 +2,24 @@
 
 Defines the pi-extension integration: `.pi/extensions/opensme-dev-agent.ts`
 registers the agent with pi (capability `com.opensme.agent`) and exposes
-`/status`, `/heal` and `/diag` commands that call the agent REST API, so the
-agent driving this repository can operate the maintenance bot directly.
+`/status`, `/heal`, `/diag` plus the HITL commands `/drafts`, `/approve`,
+`/reject` and `/feedback` that call the agent REST API, so the operator can
+run the maintenance loop — including draft decisions and the feedback
+signal — directly from the pi console.
 
 ## Requirements
 
 ### Requirement: Extension registers the agent with pi
 
-The pi extension SHALL use `registerCommand` to register `/status`, `/heal`
-and `/diag`, and SHALL advertise the capability `com.opensme.agent` for agent
-discovery.
+The pi extension SHALL use `registerCommand` to register `/status`, `/heal`,
+`/diag`, `/drafts`, `/approve`, `/reject` and `/feedback`, and SHALL
+advertise the capability `com.opensme.agent` for agent discovery.
 
 #### Scenario: Commands are registered
 
 - **WHEN** pi loads the extension
-- **THEN** `/status`, `/heal` and `/diag` SHALL be registered as commands
+- **THEN** `/status`, `/heal`, `/diag`, `/drafts`, `/approve`, `/reject` and
+  `/feedback` SHALL be registered as commands
 
 #### Scenario: Agent is discoverable
 
@@ -70,3 +73,28 @@ remediation, forcing the payload through the anonymizer.
 
 - **WHEN** `/diag` produces output
 - **THEN** secrets, private IPs, hostnames and user paths SHALL be absent
+
+### Requirement: HITL commands gate the draft decisions
+
+The extension SHALL expose the draft lifecycle: `/drafts` SHALL list drafts
+with their lifecycle state and major flag (pending first), `/approve` SHALL
+require explicit user confirmation before calling the approve endpoint and
+SHALL never commit a rejected draft, and `/reject` SHALL require a
+non-empty reason before calling the reject endpoint.
+
+#### Scenario: Drafts listing surfaces pending major decisions
+
+- **WHEN** `/drafts` runs while a major draft is pending
+- **THEN** the listing SHALL show the draft as pending with a major marker
+
+#### Scenario: Approve without confirmation makes no commit call
+
+- **WHEN** the user declines the confirmation dialog of `/approve`
+- **THEN** the command SHALL NOT call the approve endpoint and the draft
+  SHALL stay inert
+
+#### Scenario: Reject without a reason is refused
+
+- **WHEN** `/reject <id>` is invoked without a reason
+- **THEN** the command SHALL print usage and SHALL NOT call the reject
+  endpoint (feedback needs the why)
