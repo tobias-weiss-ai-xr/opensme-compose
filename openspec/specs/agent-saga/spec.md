@@ -53,3 +53,21 @@ evidence entry. The safe default therefore SHALL need no special handling.
 - **WHEN** a draft is created and left unapproved
 - **THEN** no `commit` evidence entry SHALL exist for it
 - **AND** the draft SHALL remain `approved: false`
+
+### Requirement: Drafts survive a restart
+
+Draft persistence SHALL cover the whole draft lifecycle: the state file
+SHALL contain drafts with their states, major flag and rejection reasons,
+startup SHALL restore them, and the id sequence SHALL continue past the
+highest restored id so a fresh draft never overwrites a restored one.
+
+#### Scenario: A pending decision outlives the bot
+
+- **WHEN** drafts exist in different states and the bot restarts
+- **THEN** `GET /drafts` and `GET /feedback` SHALL show the same drafts,
+  states and reasons as before the restart
+
+#### Scenario: The id sequence continues
+
+- **WHEN** drafts were restored and a new draft is created
+- **THEN** its id SHALL be greater than every restored id (no collision)

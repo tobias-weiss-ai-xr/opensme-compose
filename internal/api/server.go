@@ -298,6 +298,34 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(&b, "# HELP dev_agent_history_entries Current history entry count\n")
 	fmt.Fprintf(&b, "# TYPE dev_agent_history_entries gauge\n")
 	fmt.Fprintf(&b, "dev_agent_history_entries %d\n", len(s.history))
+	// Draft loop (agent-feedback): the operator dashboard watches HITL —
+	// pending decisions (especially major ones) and the feedback signal.
+	pending, majorPending, approved, rejected := 0, 0, 0, 0
+	for _, d := range s.drafts {
+		switch {
+		case d.Approved:
+			approved++
+		case d.Rejected:
+			rejected++
+		default:
+			pending++
+			if d.Major {
+				majorPending++
+			}
+		}
+	}
+	fmt.Fprintf(&b, "# HELP dev_agent_drafts_pending Drafts awaiting a human decision\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_pending gauge\n")
+	fmt.Fprintf(&b, "dev_agent_drafts_pending %d\n", pending)
+	fmt.Fprintf(&b, "# HELP dev_agent_drafts_major_pending Major drafts awaiting a human decision\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_major_pending gauge\n")
+	fmt.Fprintf(&b, "dev_agent_drafts_major_pending %d\n", majorPending)
+	fmt.Fprintf(&b, "# HELP dev_agent_drafts_approved_total Drafts committed by human approval\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_approved_total gauge\n")
+	fmt.Fprintf(&b, "dev_agent_drafts_approved_total %d\n", approved)
+	fmt.Fprintf(&b, "# HELP dev_agent_drafts_rejected_total Drafts rejected with feedback\n")
+	fmt.Fprintf(&b, "# TYPE dev_agent_drafts_rejected_total gauge\n")
+	fmt.Fprintf(&b, "dev_agent_drafts_rejected_total %d\n", rejected)
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(b.String()))
@@ -570,6 +598,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 type persisted struct {
 	History  []healer.Receipt `json:"history"`
 	Evidence []EvidenceEntry  `json:"evidence"`
+	// Drafts persist across restarts (agent-saga + agent-feedback): the bot
+	// runs as a sidecar — compose recreate or a host reboot happens between
+	// "agent drafts" and "human decides". Losing pending drafts (or the
+	// rejection reasons of the feedback loop) would silently break HITL.
+	Drafts []*Draft `json:"drafts,omitempty"`
 }
 
 func (s *Server) stateFile() string { return filepath.Join(s.cfg.StateDir, "state.json") }
@@ -582,7 +615,12 @@ func (s *Server) Save() error {
 		return fmt.Errorf("state dir: %w", err)
 	}
 	s.mu.Lock()
-	p := persisted{History: s.history, Evidence: s.evidence}
+	list := make([]*Draft, 0, len(s.drafts))
+	for _, d := range s.drafts {
+		list = append(list, d)
+	}
+	sort.Slice(list, func(i, j int) bool { return draftNum(list[i].ID) < draftNum(list[j].ID) })
+	p := persisted{History: s.history, Evidence: s.evidence, Drafts: list}
 	s.mu.Unlock()
 	raw, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -607,6 +645,17 @@ func (s *Server) load() {
 		return
 	}
 	s.history, s.evidence = p.History, p.Evidence
+	// Restore drafts and continue the id sequence past the highest restored
+	// id — a fresh draft must never overwrite a restored one.
+	for _, d := range p.Drafts {
+		if d == nil || d.ID == "" {
+			continue
+		}
+		s.drafts[d.ID] = d
+		if n := draftNum(d.ID); n > s.draftSeq {
+			s.draftSeq = n
+		}
+	}
 }
 
 // PrintStatus renders the current persisted status (used by `agent -status`).

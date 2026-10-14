@@ -24,10 +24,14 @@ HITL + feedback loop (openspec `agent-feedback`, docs §7.7):
   C4  rejecting without a reason → 400 (feedback needs the why)
   C5  a rejected draft cannot be approved afterwards (rejection is final)
   C6  GET /feedback aggregates decisions and carries the rejection reasons
+  C7  drafts, states and rejection reasons survive a bot restart (HITL
+      durability: compose recreate / reboot must not orphan a decision)
 
-Fully isolated: runs its own opensme-draft-bot container, drives the API via
-docker exec (no host port), tears the bot down in every path. Safe against a
-live stack on the same host (distinct container name).
+Fully isolated: runs its own opensme-draft-bot container with a per-run
+host state dir (bind mount, wiped afterwards — survives `docker restart`
+within the run, unlike tmpfs), drives the API via docker exec (no host
+port), tears the bot down in every path. Safe against a live stack on the
+same host (distinct container name).
 
 Usage: python3 tests/05-e2e/agent_draft_saga.py
 Exit codes: 0 = pass, 1 = failed (skips don't fail).
@@ -35,8 +39,10 @@ Exit codes: 0 = pass, 1 = failed (skips don't fail).
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -47,6 +53,11 @@ BOT = "opensme-draft-bot"
 IMAGE = "opensme-dev-maintenance-bot:latest"
 API = "http://localhost:8082"
 STATE = "/var/lib/opensme/bot"
+# Host-side state dir for this run (bind-mounted at STATE). tmpfs would NOT
+# survive `docker restart` — Docker wipes tmpfs on every container start —
+# while the real compose sidecar persists on a named volume. A per-run host
+# dir keeps the journey fully isolated AND restart-durable; wiped in finally.
+state_dir: str | None = None
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -76,6 +87,7 @@ def wait_bot(timeout_s=90):
 
 
 def start_bot(extra_env: dict | None = None):
+    global state_dir
     env = dict(extra_env or {})
     env.update({
         "DEV_AGENT_WATCH": "opensme",
@@ -83,10 +95,12 @@ def start_bot(extra_env: dict | None = None):
         "DEV_AGENT_ALLOW_HEAL": "false",
         "DEV_AGENT_HISTORY_MAX": "50",
         "DEV_AGENT_API_ADDR": "0.0.0.0:8082",
+        "DEV_AGENT_STATE_DIR": STATE,
     })
+    state_dir = tempfile.mkdtemp(prefix="opensme-draft-saga-")
     args = ["docker", "run", "-d", "--name", BOT, "--restart", "no",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
-            "--mount", f"type=tmpfs,destination={STATE}"]
+            "-v", f"{state_dir}:{STATE}"]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
     args += [IMAGE, "-serve"]
@@ -222,9 +236,12 @@ def main() -> int:
         d3 = bot_http("/draft", {"kind": "config-change", "text": "raise memory limit",
                                  "where": "app/deploy", "major": True})
         major = False
+        did3 = ""
         if d3.returncode == 0:
             try:
-                major = json.loads(d3.stdout).get("major") is True
+                j3 = json.loads(d3.stdout)
+                major = j3.get("major") is True
+                did3 = j3.get("id", "")
             except json.JSONDecodeError:
                 pass
         (result.ok if major else result.fail)(
@@ -281,9 +298,38 @@ def main() -> int:
         (result.ok if loop_ok else result.fail)(
             "C6 GET /feedback aggregates decisions with rejection reasons"
             if loop_ok else f"C6 /feedback: rc={fb.returncode} body={fb.stdout[:200]}")
+
+        # C7: HITL durability — the decision queue survives a restart. The
+        # bot SIGTERM-saves state (tmpfs survives docker restart); the new
+        # process must reload drafts with states and rejection reasons.
+        rst = docker("restart", BOT)
+        if rst.returncode != 0 or not wait_bot():
+            result.fail("C7 bot did not come back after restart")
+            return 1
+        dl3 = bot_http("/drafts")
+        fb3 = bot_http("/feedback")
+        survived = False
+        if dl3.returncode == 0 and fb3.returncode == 0:
+            try:
+                lst = json.loads(dl3.stdout)
+                f = json.loads(fb3.stdout)
+                survived = (len(lst) >= 3
+                            and any(d.get("id") == did2 and d.get("rejected") is True
+                                    and d.get("reason") == why for d in lst)
+                            and any(d.get("id") == did3 and d.get("major") is True
+                                    and not d.get("approved") and not d.get("rejected")
+                                    for d in lst)
+                            and any(r.get("reason") == why for r in f.get("reasons", [])))
+            except json.JSONDecodeError:
+                pass
+        (result.ok if survived else result.fail)(
+            "C7 drafts, states and rejection reasons survive a bot restart"
+            if survived else f"C7 after restart: drafts={dl3.stdout[:200]} fb={fb3.stdout[:200]}")
     finally:
         subprocess.run(["docker", "rm", "-f", BOT], capture_output=True,
                        text=True, timeout=120)
+        if state_dir:
+            shutil.rmtree(state_dir, ignore_errors=True)
 
     print()
     ok = result.summary()

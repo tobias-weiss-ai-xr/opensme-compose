@@ -553,7 +553,7 @@ Setup je Journey — kein Live-Stack nötig).
 | Journey | Datei | Beweis |
 |---------|-------|--------|
 | AS1 Saga: krank → diagnose → consent → heal → audit | `tests/05-e2e/agent_saga.py` | 11 Checks: Consent-Gate, Heal-Receipt, Evidence-Kette |
-| AS2/3/5 Write-Gate + HITL + Feedback-Loop | `tests/05-e2e/agent_draft_saga.py` | B1–B6 (Draft inert bis Approve, Commit auditiert) + C1–C6 (`/drafts`-Sichtbarkeit, Major-Flag, Reject mit Pflicht-Grund, finale Ablehnung, `/feedback`-Aggregat) — 13 Checks |
+| AS2/3/5 Write-Gate + HITL + Feedback-Loop | `tests/05-e2e/agent_draft_saga.py` | B1–B6 (Draft inert bis Approve, Commit auditiert) + C1–C7 (`/drafts`-Sichtbarkeit, Major-Flag, Reject mit Pflicht-Grund, finale Ablehnung, `/feedback`-Aggregat, Restart-Dauerhaftigkeit) — 14 Checks |
 | AS6 Merge-Gate = Testpyramide | `make agentic-gate` | Opt-in (`AGENTIC_STRICT=1` erzwingt; default nie rot) |
 
 Operator-Oberfläche (pi-Extension): `/drafts` (Sichtbarkeit), `/approve <id>`

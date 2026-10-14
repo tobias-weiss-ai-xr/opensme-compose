@@ -84,3 +84,15 @@ cached analysis.
   analysis
 - **THEN** the prompt SHALL contain that reason (anonymized) and the analysis
   SHALL NOT be served from a cache entry created before the rejection
+
+### Requirement: The loop is observable
+
+`GET /metrics` SHALL expose the draft loop in Prometheus format: pending
+drafts, pending major drafts, approved drafts and rejected drafts, so an
+operator dashboard can watch decisions awaiting a human.
+
+#### Scenario: The dashboard sees pending major decisions
+
+- **WHEN** a major draft is pending
+- **THEN** `dev_agent_drafts_pending` and `dev_agent_drafts_major_pending`
+  SHALL both count it

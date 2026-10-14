@@ -176,4 +176,8 @@ Contract-Zeile.*
    LLM-Prompt (Teil des Cache-Keys → neues Feedback invalidiert). Operator-
    Oberfläche in der pi-Extension: `/drafts`, `/approve <id>` (mit Confirm),
    `/reject <id> <grund>`, `/feedback`. E2E:
-   `agent_draft_saga.py` B1–B6 + C1–C6 (13/13 grün). 19/19 Specs valid.
+   `agent_draft_saga.py` B1–B6 + C1–C7 (14/14 grün; C7 = Restart-Dauerhaftigkeit:
+   Drafts, States und Rejection-Reasons überleben `docker restart` — der
+   Compose-Sidecar persistiert auf Named Volume). Draft-Metriken
+   (`dev_agent_drafts_pending/major_pending/approved_total/rejected_total`)
+   machen den Loop im Dashboard sichtbar. 19/19 Specs valid.
