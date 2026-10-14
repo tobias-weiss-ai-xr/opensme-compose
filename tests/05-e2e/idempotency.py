@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from conftest import Result, ensure_portal_routed
+from conftest import Result, ensure_portal_routed, print_boot_failure
 
 import importlib.util
 
@@ -164,12 +164,15 @@ def main() -> int:
         boot = subprocess.run(["bash", "scripts/demo.sh"], cwd=str(root),
                               capture_output=True, text=True, timeout=1200)
         x1_ok = boot.returncode == 0 and sha256(env_path) == env_hash_before
-        (result.ok if x1_ok else result.fail)(
-            "second demo.sh run succeeded; .env byte-identical"
-            if x1_ok
-            else f"second boot diverged: rc={boot.returncode} "
-                 f"env_changed={sha256(env_path) != env_hash_before}"
-        )
+        if x1_ok:
+            result.ok("second demo.sh run succeeded; .env byte-identical")
+        else:
+            result.fail(f"second boot diverged: rc={boot.returncode} "
+                        f"env_changed={sha256(env_path) != env_hash_before}")
+            # The boot output was swallowed (capture_output) — without
+            # showing it here, a CI flake like "rc=1 env_changed=False"
+            # is undiagnosable from the CI log alone.
+            print_boot_failure(boot, "demo.sh")
 
         if not ensure_portal_routed(session, portal):
             result.fail("portal unreachable after the second boot")

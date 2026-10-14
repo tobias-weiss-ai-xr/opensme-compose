@@ -516,3 +516,21 @@ def ensure_portal_routed(session, portal_base: str, log=print) -> bool:
     _sp.run(["docker", "restart", "opensme-traefik"],
             capture_output=True, timeout=120)
     return wait_http_ok(session, portal_base + "/health", deadline_s=90, stable=2)
+
+
+def print_boot_failure(proc, label="boot", tail=30):
+    """Print the last non-empty lines of a failed subprocess boot.
+
+    Journeys run boot scripts with capture_output=True (quiet success, no
+    interleaving with the journey's own output). But that also means a
+    FAILED boot shows only "rc=1" in the CI log — the actual error is in
+    the swallowed streams and the flake is undiagnosable. Call this right
+    after reporting the failure so the CI log shows WHY the boot diverged.
+    """
+    for name, stream in (("stdout", proc.stdout or ""), ("stderr", proc.stderr or "")):
+        lines = [l for l in stream.splitlines() if l.strip()]
+        if not lines:
+            continue
+        print(f"--- {label} {name} (last {min(len(lines), tail)} of {len(lines)} lines)")
+        for line in lines[-tail:]:
+            print(f"    {line}")

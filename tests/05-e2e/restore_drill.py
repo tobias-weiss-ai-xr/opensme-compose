@@ -35,7 +35,7 @@ import urllib3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ensure_portal_routed
+from conftest import Result, ensure_portal_routed, print_boot_failure
 
 import requests
 
@@ -241,9 +241,14 @@ def main() -> int:
         # guarantee: stack back to the demo state, drill DB gone
         psql(env, f"DROP DATABASE IF EXISTS {DB}")
         if not ensure_portal_routed(session, portal):
-            subprocess.run(["bash", "scripts/demo.sh"], cwd=str(Path.cwd()),
-                           env=drill_env(backup_dir), capture_output=True,
-                           timeout=1200)
+            rb = subprocess.run(["bash", "scripts/demo.sh"], cwd=str(Path.cwd()),
+                                env=drill_env(backup_dir), capture_output=True,
+                                text=True, timeout=1200)
+            # recovery boot: if THIS fails too, the stack is left broken —
+            # the operator must see why, not just a silent finally block.
+            if rb.returncode != 0:
+                print(f"--- recovery boot FAILED rc={rb.returncode} — stack may be down")
+                print_boot_failure(rb, "demo.sh recovery")
             ensure_portal_routed(session, portal)
         import shutil
         shutil.rmtree(backup_dir, ignore_errors=True)
