@@ -30,6 +30,10 @@
         up-soho up-small up-medium up-all \
         nix-build nix-load nix-images \
         agent-build agent-status
+.PHONY: agentic-gate backup backup-db backup-dry-run bench compliance \
+        down-volumes fmt lint-code logs-size perf-check \
+        provision-demo-users provision-demo-users-clean provision-demo-users-dry \
+        prune restore restore-from survey-deploy test-run
 
 .DEFAULT_GOAL := help
 
