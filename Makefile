@@ -356,11 +356,11 @@ backup-dry-run:
 restore:
 	@bash scripts/restore.sh --list
 	@echo ""
-	@echo "Run: make restore-from BACKUP=<timestamp>"
+	@echo "Run: make restore-from BACKUP=<timestamp> [PASSPHRASE=<p>]"
 	@echo "Or:  ./scripts/restore.sh <timestamp>"
 
 restore-from:
-	@bash scripts/restore.sh $(BACKUP)
+	@bash scripts/restore.sh $(BACKUP) $$([ -n "$$PASSPHRASE" ] && echo "--passphrase $(PASSPHRASE)")
 
 # ---------------------------------------------------------------------------
 # Demo User Provisioning
@@ -475,7 +475,7 @@ help:
 	@echo "    make backup-db           PostgreSQL + Traefik only"
 	@echo "    make backup-dry-run      Preview backup"
 	@echo "    make restore             List available backups"
-	@echo "    make restore-from BACKUP=<ts>  Restore from backup"
+	@echo "    make restore-from BACKUP=<ts> [PASSPHRASE=<p>]  Restore from backup (PASSPHRASE for .enc backups)"
 	@echo ""
 	@echo -e "  $(GREEN)Monitoring images (Nix)$(NC)"
 	@echo "    make nix-build            Build dev-agent, predictive-agent, taskfleet images"
