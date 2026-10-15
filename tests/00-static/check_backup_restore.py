@@ -46,13 +46,13 @@ ARTIFACTS = ("postgres_", "traefik_", "volumes_")
 # One apply-marker grep per artifact: proves restore.sh actually feeds the
 # produced archive back in, instead of only echoing the name in --list.
 APPLY_MARKERS = {
-    "postgres_": re.compile(r'gunzip\s+-c\s+"\$PG_FILE"'),
-    "traefik_": re.compile(r'tar\s+-x\S*f\s+"\$TRAEFIK_FILE"'),
-    "volumes_": re.compile(r'tar\s+-x\S*f\s+"\$VOLUMES_FILE"'),
+    "postgres_": re.compile(r'gunzip\s+-c\s+"\$ACTUAL_FILE"'),
+    "traefik_": re.compile(r'tar\s+-x\S*f\s+"\$ARCHIVE"'),
+    "volumes_": re.compile(r'tar\s+-x\S*f\s+"\$ARCHIVE"'),
 }
 
 # restore.sh must validate the combined volume tar loudly before extracting.
-LOUD_VOLUME_TAR = re.compile(r'!\s+tar\s+-x\S*f\s+"\$VOLUMES_FILE"')
+LOUD_VOLUME_TAR = re.compile(r'!\s+tar\s+-x\S*f\s+"\$ARCHIVE"')
 LOUD_VOLUME_MSG = re.compile(r"not a valid tar")
 
 # Dump first, stop later: the SQL/traefik dump machinery and artifact writes
