@@ -150,7 +150,7 @@ impl FeedFetcher {
             .into_iter()
             .map(|col| {
                 let cached = {
-                    let cache = self.cache.read().unwrap();
+                    let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
                     cache.get(&col.id).and_then(|c| {
                         if now.duration_since(c.fetched_at) < CACHE_TTL {
                             Some(c.entries.clone())
@@ -196,7 +196,7 @@ impl FeedFetcher {
         let mut entries: Vec<FeedEntry> = per_url.into_iter().flatten().collect();
         entries = merge_and_cap(entries);
         if !entries.is_empty() {
-            self.cache.write().unwrap().insert(
+            self.cache.write().unwrap_or_else(|e| e.into_inner()).insert(
                 col.id.clone(),
                 CachedColumn {
                     entries: entries.clone(),
