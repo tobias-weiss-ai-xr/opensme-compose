@@ -25,6 +25,8 @@ x-service-defaults: &service-defaults
 services:
   synapse:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: matrixdotorg/synapse:latest
     container_name: opensme-synapse
     restart: unless-stopped

@@ -25,6 +25,8 @@ x-service-defaults: &service-defaults
 services:
   element-web:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: vectorim/element-web:latest
     container_name: opensme-element
     restart: unless-stopped

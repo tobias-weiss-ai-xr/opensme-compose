@@ -26,6 +26,8 @@ services:
   # officially supported MariaDB instead of the shared postgres.
   invoiceninja-db:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: ${MARIADB_IMAGE:-mariadb:11}
     container_name: opensme-invoiceninja-db
     restart: unless-stopped
@@ -57,6 +59,8 @@ services:
 
   invoiceninja:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: invoiceninja-pg:5
     # upstream image lacks pdo_pgsql — local build adds it (see Dockerfile);
     # harmless with MariaDB but keeps the pg option buildable
@@ -121,6 +125,8 @@ services:
   # forwards FastCGI to the "invoiceninja" service
   invoiceninja-web:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: ${INVOICENINJA_NGINX_IMAGE:-nginx:alpine}
     container_name: opensme-invoiceninja-web
     restart: unless-stopped

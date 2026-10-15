@@ -44,6 +44,8 @@ x-service-defaults: &service-defaults
 services:
   limesurvey:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     # Community image, checksum-pinned builds, tracks stable releases.
     # Pin minor via LIMESURVEY_TAG in .env (e.g. 6.17-apache) to hold a
     # known-good release across redeploys.
@@ -108,6 +110,8 @@ services:
   # empty the sidecar idles — the survey tool works standalone.
   limesurvey-cloud-sync:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     image: rclone/rclone:${RCLONE_TAG:-latest}
     container_name: opensme-limesurvey-cloud-sync
     restart: unless-stopped
