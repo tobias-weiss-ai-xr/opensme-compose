@@ -99,7 +99,8 @@ declare -A USED_VARS=()
 # throw the registration away).
 DERIVED_VAR=""
 derive_var() {
-  local svc="$1" base="$svc" sfx cand
+  local svc="$1"
+  local base="$svc" sfx cand
   for sfx in -ngx -backend -frontend -y-provider -web -cloud-sync \
              -gotenberg -tika -db -data; do
     if [[ "$base" == *"$sfx" ]] && ((${#base} > ${#sfx})); then
