@@ -278,8 +278,14 @@ if [ "$S3" = true ]; then
     S3_ARGS+=(--host="$S3_ENDPOINT" --host-bucket="$S3_ENDPOINT")
   fi
   # shellcheck disable=SC2068
+  set +e
   s3cmd sync "${S3_ARGS[@]}" --no-check-md5 --acl-private \
     "${BACKUP_DIR}/" "s3://${S3_BUCKET}/${S3_PREFIX}/"
+  RC=$?
+  set -e
+  if [ "$RC" -ne 0 ]; then
+    echo "Warning: S3 upload failed (exit $RC) — local backup remains" >&2
+  fi
 fi
 
 # ── Summary ───────────────────────────────────
