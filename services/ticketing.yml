@@ -28,8 +28,6 @@ x-service-defaults: &service-defaults
 services:
   nosdesk:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: ${NOSDESK_IMAGE:-ghcr.io/nosdesk/nosdesk:1.0.12}
     container_name: opensme-nosdesk
     restart: unless-stopped

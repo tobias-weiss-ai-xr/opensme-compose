@@ -23,8 +23,6 @@ x-service-defaults: &service-defaults
 services:
   cryptpad:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: cryptpad/cryptpad:latest
     container_name: opensme-cryptpad
     restart: unless-stopped

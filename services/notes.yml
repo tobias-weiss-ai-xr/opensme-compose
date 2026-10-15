@@ -25,8 +25,6 @@ x-service-defaults: &service-defaults
 services:
   notes-backend:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: lasuite/impress-backend:latest
     container_name: opensme-notes-backend
     restart: unless-stopped
@@ -100,8 +98,6 @@ services:
 
   notes-frontend:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: lasuite/impress-frontend:latest
     container_name: opensme-notes-frontend
     restart: unless-stopped
@@ -137,8 +133,6 @@ services:
 
   notes-y-provider:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: lasuite/impress-y-provider:latest
     container_name: opensme-notes-y-provider
     restart: unless-stopped

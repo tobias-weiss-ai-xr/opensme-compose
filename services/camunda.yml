@@ -36,8 +36,6 @@ x-service-defaults: &service-defaults
 services:
   camunda:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: ${CAMUNDA_IMAGE:-operaton/operaton:2.1.5}
     container_name: opensme-camunda
     restart: unless-stopped

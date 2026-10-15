@@ -24,8 +24,6 @@ x-service-defaults: &service-defaults
 services:
   paperless-ngx:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     container_name: opensme-paperless
     restart: unless-stopped
@@ -98,8 +96,6 @@ services:
 
   paperless-gotenberg:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: gotenberg/gotenberg:latest
     container_name: opensme-gotenberg
     restart: unless-stopped
@@ -126,8 +122,6 @@ services:
 
   paperless-tika:
     <<: *service-defaults
-    cap_drop:
-      - ALL
     image: ${TIKA_IMAGE:-apache/tika:latest}
     container_name: opensme-tika
     restart: unless-stopped
