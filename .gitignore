@@ -4,6 +4,10 @@
 !.env.example
 !.env.demo
 
+# Digest-pinned image manifest (environment-specific, produced by --generate).
+# Keep manifests/pinned-images.env.example tracked; never commit the real one.
+manifests/pinned-images.env
+
 # Runtime backup artifacts (scripts/backup.sh output).
 # They carry a PostgreSQL dump, the Zitadel machine key and the OpenCloud
 # config — never commit them.
