@@ -16,12 +16,17 @@
 #   ./scripts/backup.sh --encrypt              # AES-256-encrypt every artifact
 #   ./scripts/backup.sh --s3                   # Sync backups to an S3 bucket
 #                                             #   (MinIO/OpenCloud-compatible)
+#   ./scripts/backup.sh --s3-rclone           # Same, via rclone (no s3cmd needed)
+#   ./scripts/backup.sh --s3-tool rclone      # Explicit tool: s3cmd|rclone
 #
 # --encrypt wraps each artifact in AES-256-CBC (openssl, PBKDF2). The
 #   passphrase comes from $BACKUP_PASSPHRASE (never a flag; no default).
-# --s3 uploads $BACKUP_DIR to s3://$S3_BUCKET/$S3_PREFIX via s3cmd.
-#   Point $S3_ENDPOINT at a MinIO/OpenCloud S3 endpoint (empty = AWS S3);
-#   credentials via $S3_ACCESS_KEY / $S3_SECRET_KEY (or s3cmd's own config).
+# --s3 uploads $BACKUP_DIR to s3://$S3_BUCKET/$S3_PREFIX via s3cmd (default)
+#   or rclone (--s3-rclone / --s3-tool rclone). Point $S3_ENDPOINT at a
+#   MinIO/OpenCloud S3 endpoint (empty = AWS S3); credentials via
+#   $S3_ACCESS_KEY / $S3_SECRET_KEY (or s3cmd's own config). With rclone,
+#   uploads go to ${RCLONE_REMOTE:-s3:$S3_BUCKET}/$S3_PREFIX using the same
+#   S3_* env translated to inline --s3-* flags.
 #
 # Volume names (without project prefix):
 #   postgres-data, redis-data, opencloud-config, opencloud-data,
@@ -48,6 +53,9 @@ BACKUP_VOLUMES=false
 NO_STOP=false
 ENCRYPT=false
 S3=false
+S3_RCLONE=false
+S3_TOOL=""                       # --s3-tool s3cmd|rclone (explicit choice)
+S3_UPLOAD_TOOL=""                # resolved uploader: s3cmd (default) or rclone
 SERVICES=""
 
 # --encrypt / --s3 config (env, no defaults beyond these)
@@ -57,6 +65,7 @@ S3_ENDPOINT="${S3_ENDPOINT:-}"          # MinIO/OpenCloud host; empty = AWS
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 S3_PREFIX="${S3_PREFIX:-backups}"
+RCLONE_REMOTE="${RCLONE_REMOTE:-s3:${S3_BUCKET}}"   # rclone remote for --s3-rclone
 # openssl reads it via `-pass env:`; export so a non-exported caller var works.
 export BACKUP_PASSPHRASE
 
@@ -86,6 +95,8 @@ while [ $# -gt 0 ]; do
     --no-stop)    NO_STOP=true; shift ;;
     --encrypt)    ENCRYPT=true; shift ;;
     --s3)         S3=true; shift ;;
+    --s3-rclone)  S3=true; S3_RCLONE=true; shift ;;
+    --s3-tool)    shift; S3=true; S3_TOOL="$1"; shift ;;
     --services)   shift; SERVICES="$1"; shift ;;
     -h|--help)
       echo "Usage: $0 [--volumes] [--services vol1,vol2,...] [--encrypt] [--s3] [--dry-run] [--no-stop]"
@@ -95,16 +106,44 @@ while [ $# -gt 0 ]; do
       echo "  --services <list>   Comma-separated volume names (implies --volumes)"
       echo "  --encrypt           Encrypt every artifact with AES-256 (openssl, PBKDF2)"
       echo "  --s3                Upload backups to an S3 bucket (MinIO/OpenCloud)"
+      echo "  --s3-rclone         Upload via rclone instead of s3cmd (implies --s3)"
+      echo "  --s3-tool <tool>    Upload tool: s3cmd (default) or rclone (implies --s3)"
       echo "  --dry-run           Preview without making changes"
       echo "  --no-stop           Don't stop services (risk: inconsistent backup)"
       echo ""
       echo "--encrypt needs BACKUP_PASSPHRASE; --s3 needs S3_BUCKET (+ S3_ENDPOINT for"
       echo "MinIO/OpenCloud, credentials via S3_ACCESS_KEY/S3_SECRET_KEY)."
+      echo ""
+      echo "S3 uploader parity: both s3cmd and rclone are supported (default s3cmd)."
+      echo "  * s3cmd   (default): s3cmd sync ./backups/ → s3://\$S3_BUCKET/\$S3_PREFIX/"
+      echo "  * rclone  (--s3-rclone or --s3-tool rclone): rclone copyto each artifact as"
+      echo "    \$RCLONE_REMOTE/\$S3_PREFIX/ — RCLONE_REMOTE defaults to s3:\$S3_BUCKET."
+      echo "    S3_ENDPOINT/S3_ACCESS_KEY/S3_SECRET_KEY are passed to rclone as inline"
+      echo "    --s3-* flags, so a named rclone remote is NOT required. Use the same"
+      echo "    \$RCLONE_REMOTE here as rotate-backups.sh --remote to keep one config."
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+# Resolve the S3 uploader once: "--s3-tool" wins, else "--s3-rclone" ⇒ rclone,
+# else keep the default s3cmd (unchanged behavior).
+select_s3_tool() {
+  if [ -n "$S3_TOOL" ]; then
+    case "$S3_TOOL" in
+      s3cmd|rclone) S3_UPLOAD_TOOL="$S3_TOOL" ;;
+      *) echo "✗ --s3-tool must be 's3cmd' or 'rclone' (got '$S3_TOOL')" >&2; exit 1 ;;
+    esac
+  elif [ "$S3_RCLONE" = true ]; then
+    S3_UPLOAD_TOOL="rclone"
+  else
+    S3_UPLOAD_TOOL="s3cmd"
+  fi
+}
+if [ "$S3" = true ]; then
+  select_s3_tool
+fi
 
 if [ -n "$SERVICES" ]; then
   BACKUP_VOLUMES=true
@@ -119,7 +158,7 @@ echo "   PG dump:    yes"
 echo "   Traefik:    yes"
 echo "   Volumes:    $([ "$BACKUP_VOLUMES" = true ] && echo 'yes' || echo 'no')"
 echo "   Encrypt:    $([ "$ENCRYPT" = true ] && echo 'yes (AES-256)' || echo 'no')"
-echo "   S3 upload:  $([ "$S3" = true ] && echo "s3://${S3_BUCKET}/${S3_PREFIX}/" || echo 'no')"
+echo "   S3 upload:  $([ "$S3" = true ] && echo "s3://${S3_BUCKET}/${S3_PREFIX}/ via ${S3_UPLOAD_TOOL}" || echo 'no')"
 [ -n "$SERVICES" ] && echo "   Services:   ${SERVICES}"
 echo ""
 
@@ -161,7 +200,11 @@ if [ "$DRY_RUN" = true ]; then
   fi
   if [ "$S3" = true ]; then
     [ -n "$S3_BUCKET" ] || { echo "  ✗ --s3 needs S3_BUCKET set"; exit 1; }
-    echo "  S3:          s3cmd sync ${BACKUP_DIR}/ → s3://${S3_BUCKET}/${S3_PREFIX}/"
+    if [ "$S3_UPLOAD_TOOL" = "rclone" ]; then
+      echo "    rclone copyto ${BACKUP_DIR}/<artifact> → ${RCLONE_REMOTE}/${S3_PREFIX}/"
+    else
+      echo "  S3:          s3cmd sync ${BACKUP_DIR}/ → s3://${S3_BUCKET}/${S3_PREFIX}/"
+    fi
   fi
   exit 0
 fi
@@ -173,7 +216,11 @@ if [ "$ENCRYPT" = true ] && [ -z "$BACKUP_PASSPHRASE" ]; then
 fi
 if [ "$S3" = true ]; then
   [ -n "$S3_BUCKET" ] || { echo "✗ --s3 needs S3_BUCKET set"; exit 1; }
-  command -v s3cmd >/dev/null 2>&1 || { echo "✗ --s3 needs s3cmd installed"; exit 1; }
+  if [ "$S3_UPLOAD_TOOL" = "rclone" ]; then
+    command -v rclone >/dev/null 2>&1 || { echo "✗ --s3-rclone needs rclone installed"; exit 1; }
+  else
+    command -v s3cmd >/dev/null 2>&1 || { echo "✗ --s3 needs s3cmd installed"; exit 1; }
+  fi
 fi
 
 # ── Stop services for consistent backup ───────
@@ -266,25 +313,53 @@ if [ "$ENCRYPT" = true ]; then
   done
 fi
 
-# ── S3 upload (MinIO/OpenCloud via s3cmd) ──────
+# ── S3 upload (MinIO/OpenCloud via s3cmd or rclone) ──────
 if [ "$S3" = true ]; then
-  echo "☁  Uploading to s3://${S3_BUCKET}/${S3_PREFIX}/ ..."
-  S3_ARGS=()
-  [ -n "$S3_ACCESS_KEY" ] && S3_ARGS+=(--access_key="$S3_ACCESS_KEY")
-  [ -n "$S3_SECRET_KEY" ] && S3_ARGS+=(--secret_key="$S3_SECRET_KEY")
-  if [ -n "$S3_ENDPOINT" ]; then
-    # Path-style URL on the custom host (MinIO/OpenCloud): s3cmd switches
-    # off bucket-in-DNS when --host-bucket equals --host.
-    S3_ARGS+=(--host="$S3_ENDPOINT" --host-bucket="$S3_ENDPOINT")
-  fi
-  # shellcheck disable=SC2068
-  set +e
-  s3cmd sync "${S3_ARGS[@]}" --no-check-md5 --acl-private \
-    "${BACKUP_DIR}/" "s3://${S3_BUCKET}/${S3_PREFIX}/"
-  RC=$?
-  set -e
-  if [ "$RC" -ne 0 ]; then
-    echo "Warning: S3 upload failed (exit $RC) — local backup remains" >&2
+  if [ "$S3_UPLOAD_TOOL" = "rclone" ]; then
+    # rclone uploader: inline S3 provider flags translated from the SAME
+    # S3_* env that s3cmd uses, so no named rclone remote is required.
+    # Target: ${RCLONE_REMOTE}/${S3_PREFIX}/ where RCLONE_REMOTE defaults
+    # to s3:${S3_BUCKET} — mirror rotate-backups.sh --remote for one-config
+    # parity.
+    echo "☁  Uploading to ${RCLONE_REMOTE}/${S3_PREFIX}/ via rclone ..."
+    RCLONE_ARGS=(copyto)
+    if [ -n "$S3_ENDPOINT" ]; then
+      RCLONE_ARGS+=(--s3-provider Minio --s3-endpoint "$S3_ENDPOINT")
+    else
+      RCLONE_ARGS+=(--s3-provider AWS)
+    fi
+    [ -n "$S3_ACCESS_KEY" ] && RCLONE_ARGS+=(--s3-access-key-id "$S3_ACCESS_KEY")
+    [ -n "$S3_SECRET_KEY" ] && RCLONE_ARGS+=(--s3-secret-access-key "$S3_SECRET_KEY")
+    # shellcheck disable=SC2068
+    set +e
+    for f in "${BACKUP_DIR}"/*"_${TIMESTAMP}."*; do
+      [ -f "$f" ] || continue
+      rclone "${RCLONE_ARGS[@]}" "$f" "${RCLONE_REMOTE}/${S3_PREFIX}/"
+      RC=$?
+      if [ "$RC" -ne 0 ]; then
+        echo "Warning: rclone upload of ${f##*/} failed (exit $RC) — local backup remains" >&2
+      fi
+    done
+    set -e
+  else
+    echo "☁  Uploading to s3://${S3_BUCKET}/${S3_PREFIX}/ ..."
+    S3_ARGS=()
+    [ -n "$S3_ACCESS_KEY" ] && S3_ARGS+=(--access_key="$S3_ACCESS_KEY")
+    [ -n "$S3_SECRET_KEY" ] && S3_ARGS+=(--secret_key="$S3_SECRET_KEY")
+    if [ -n "$S3_ENDPOINT" ]; then
+      # Path-style URL on the custom host (MinIO/OpenCloud): s3cmd switches
+      # off bucket-in-DNS when --host-bucket equals --host.
+      S3_ARGS+=(--host="$S3_ENDPOINT" --host-bucket="$S3_ENDPOINT")
+    fi
+    # shellcheck disable=SC2068
+    set +e
+    s3cmd sync "${S3_ARGS[@]}" --no-check-md5 --acl-private \
+      "${BACKUP_DIR}/" "s3://${S3_BUCKET}/${S3_PREFIX}/"
+    RC=$?
+    set -e
+    if [ "$RC" -ne 0 ]; then
+      echo "Warning: S3 upload failed (exit $RC) — local backup remains" >&2
+    fi
   fi
 fi
 

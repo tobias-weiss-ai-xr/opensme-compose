@@ -37,3 +37,21 @@ keeps only 7 days locally. Point rotate-backups.sh at the same
 bucket/prefix (start with `--dry-run`), then schedule both in cron, e.g.
 `backup.sh --s3` followed by `rotate-backups.sh --remote "s3:$S3_BUCKET"
 --retention 7`, so the off-site copy stays in line with local retention.
+
+## Matching backup.sh
+
+`scripts/backup.sh --s3-rclone` (or `--s3-tool rclone`) uploads backups
+with **rclone** instead of s3cmd, so both scripts can share one tool and
+one config for the same S3 bucket. It translates the existing
+`S3_BUCKET`/`S3_ENDPOINT`/`S3_ACCESS_KEY`/`S3_SECRET_KEY` env into
+rclone's inline `--s3-provider Minio|AWS --s3-endpoint … --s3-access-key-id
+… --s3-secret-access-key …` flags, and uploads each artifact to
+`$RCLONE_REMOTE/$S3_PREFIX/` where `RCLONE_REMOTE` defaults to
+`s3:$S3_BUCKET` — no named rclone remote required. Point
+`rotate-backups.sh --remote "$RCLONE_REMOTE:$S3_PREFIX"` (e.g.
+`--remote s3:opensme-backups:backups`) at the same remote/prefix and the
+two scripts align on the same rclone configuration, so an operator can use
+rclone alone: `backup.sh --s3-rclone` to upload and
+`rotate-backups.sh --remote s3:$S3_BUCKET --prefix $S3_PREFIX` to prune.
+s3cmd remains the default uploader and is fully unchanged when
+`--s3-rclone`/`--s3-tool` are not given.
