@@ -67,12 +67,7 @@ while [ $# -gt 0 ]; do
 done
 
 # --help is handled above, so it works even without rclone installed.
-# ── Validate tooling / safety ─────────────────
-command -v rclone >/dev/null 2>&1 || {
-  echo "Error: rclone is not installed. Install rclone (https://rclone.org) and configure" >&2
-  echo "       the remote with 'rclone config' before running rotate-backups.sh." >&2
-  exit 1
-}
+# ── Validate safety / tooling ─────────────────
 
 # Refuse to run without a remote target.
 [ -n "$REMOTE" ] || {
@@ -103,6 +98,13 @@ case "$RETENTION" in
   ''|*[!0-9]*) echo "Error: --retention must be a positive integer, got '${RETENTION}'." >&2; exit 1 ;;
   '0') echo "Error: --retention must be >= 1 (0 would delete everything)." >&2; exit 1 ;;
 esac
+
+# ── Validate tooling ──────────────────────────
+command -v rclone >/dev/null 2>&1 || {
+  echo "Error: rclone is not installed. Install rclone (https://rclone.org) and configure" >&2
+  echo "       the remote with 'rclone config' before running rotate-backups.sh." >&2
+  exit 1
+}
 
 # ── Prune ─────────────────────────────────────
 TARGET="${REMOTE}/${PREFIX}"
