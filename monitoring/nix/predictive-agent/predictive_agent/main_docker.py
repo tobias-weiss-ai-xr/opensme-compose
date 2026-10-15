@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -65,18 +66,7 @@ def _docker_available() -> bool:
 
 def _get_container_memory_limit(container_name: str) -> int:
     """Get container memory limit in MiB from docker inspect."""
-    rc, stdout, _ = subprocess.run(
-        ["docker", "inspect", "--format",
-         "{{.HostConfig.Memory}}", container_name],
-        capture_output=True, text=True, timeout=5,
-    ).returncode, subprocess.run(
-        ["docker", "inspect", "--format",
-         "{{.HostConfig.Memory}}", container_name],
-        capture_output=True, text=True, timeout=5,
-    ).stdout, None
-    # Simpler: just use docker inspect
-    import subprocess as sp
-    result = sp.run(
+    result = subprocess.run(
         ["docker", "inspect", "--format", "{{.HostConfig.Memory}}", container_name],
         capture_output=True, text=True, timeout=5,
     )
