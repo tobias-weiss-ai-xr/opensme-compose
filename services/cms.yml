@@ -28,6 +28,8 @@ x-service-defaults: &service-defaults
 services:
   cms:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     # upstream publishes :latest only today (no semver tags yet — 0
     # GitHub releases as of 2026-10); allowlisted as mutable in
     # tests/00-static/check_boot.py. Override to pin once tags exist.

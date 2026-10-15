@@ -34,6 +34,8 @@ x-service-defaults: &service-defaults
 services:
   ai:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     # build-numbered tag (llama.cpp publishes no semver docker tags)
     image: ${AI_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-b11223}
     container_name: opensme-ai

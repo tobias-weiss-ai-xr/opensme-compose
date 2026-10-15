@@ -30,6 +30,8 @@ x-service-defaults: &service-defaults
 services:
   store:
     <<: *service-defaults
+    cap_drop:
+      - ALL
     # local build from the pinned upstream release artifact (sha256-
     # verified in services/store/Dockerfile) — no registry image exists
     image: raisfast:0.4.2
