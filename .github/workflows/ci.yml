@@ -62,8 +62,26 @@ jobs:
       # ── Shell (scripts) ──────────────────────────────────
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-      - name: shellcheck (scripts)
-        run: shellcheck scripts/*.sh
+      - name: shellcheck (all tracked .sh)
+        # Defense-in-depth: shellcheck EVERY tracked .sh (git ls-files), not
+        # just scripts/*.sh — 13 tracked scripts outside scripts/ were never
+        # checked (e.g. bootstrap/scripts, mail/*-entrypoint.sh). -S warning
+        # makes ANY warning fail the build (plain shellcheck defaults to
+        # severity=style and exits 0 on warnings only).
+        run: |
+          set -u
+          FAIL=0
+          while IFS= read -r -d '' f; do
+            # Vendored/third-party trees are deliberately excluded:
+            #  - mail/mailcow-dockerized   (upstream submodule)
+            #  - monitoring/nix/taskfleet-files (vendored taskfleet lib)
+            case "$f" in
+              */mailcow-dockerized/*|*/taskfleet-files/*) continue ;;
+            esac
+            echo "shellcheck $f"
+            shellcheck -S warning "$f" || FAIL=1
+          done < <(git ls-files -z '*.sh')
+          exit $FAIL
 
   static:
     name: Static validation + secret scan
