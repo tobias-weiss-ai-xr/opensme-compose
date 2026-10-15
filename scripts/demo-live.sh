@@ -86,8 +86,16 @@ if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
   # Generate Traefik dashboard password and hash
   TRAEFIK_PASS=$(openssl rand -base64 16)
   TRAEFIK_HASH=$(printf '%s' "$TRAEFIK_PASS" | openssl passwd -apr1 -stdin 2>/dev/null || printf 'admin:')
+  # Compose interpolates $ inside .env values — escape $ → $$ so the
+  # apr1 hash ($apr1$salt$hash) survives; compose unescapes it again
+  # when injecting the variable into containers.
+  TRAEFIK_HASH_ESC=${TRAEFIK_HASH//\$/\$\$}
 
-  cat > .env <<ENVEOF
+  # Write to a temp file first, then move into place — a failed generation
+  # must not leave a truncated .env that poisons subsequent runs
+  # ("using existing .env" would then boot with compose defaults).
+  env_tmp=$(mktemp)
+  cat > "$env_tmp" <<ENVEOF
 # openSME — Live Demo
 # Generated: $(date -Iseconds)
 
@@ -130,12 +138,14 @@ BPM_URL=
 # ── Traefik ──
 TRAEFIK_ACME_EMAIL=${ACME_EMAIL}
 TRAEFIK_ACME_ENABLED=false
-TRAEFIK_USERS=${TRAEFIK_HASH}
+TRAEFIK_USERS=${TRAEFIK_HASH_ESC}
 
 # ── Logging ──
 LOG_LEVEL=info
 LOG_PRETTY=true
 ENVEOF
+
+  mv "$env_tmp" .env
 
   ok ".env created (secrets auto-generated)"
 else
