@@ -75,7 +75,7 @@ services:
       # (unknowable ⇒ broken OIDC setup on fresh installs).
       ZITADEL_FIRSTINSTANCE_ORG_NAME: openSME
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: zitadel-admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: ${ZITADEL_ADMIN_EMAIL:-admin@${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}}}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: ${ZITADEL_ADMIN_EMAIL:-admin@${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_FIRSTNAME: Admin
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_LASTNAME: openSME
       # must satisfy the default password complexity policy (min 8, upper,
