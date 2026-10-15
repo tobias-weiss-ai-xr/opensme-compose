@@ -224,8 +224,7 @@ cmd_generate() {
 # ── check ───────────────────────────────────────────────────────────
 cmd_check() {
   if [[ ! -f "$MANIFEST" ]]; then
-    warn "$MANIFEST not found — nothing to check (run --generate first)"
-    return 0
+    die "$MANIFEST not found — no digest pins active (run --generate first)"
   fi
   local bad=0 lineno=0 line=""
   while IFS= read -r line || [[ -n "$line" ]]; do
