@@ -51,7 +51,7 @@ INSERT INTO lime_surveys_languagesettings (surveyls_survey_id, surveyls_language
   surveyls_title, surveyls_description, surveyls_welcometext, surveyls_endtext,
   surveyls_dateformat)
 VALUES ($SID, 'de', '$TITLE',
-  'Demo-Umfrage der openSME-Suite: eine Textfrage und eine Datei-Upload-Frage. Hochgeladene Dateien werden automatisch in die OpenCloud gespiegelt (Ordner „Umfragen/LimeSurvey“).',
+  'Demo-Umfrage der openSME-Suite: eine Textfrage und eine Datei-Upload-Frage. Hochgeladene Dateien werden automatisch in die OpenCloud gespiegelt (Ordner "Umfragen/LimeSurvey").',
   'Danke fürs Ausprobieren!', 'Deine Antwort wurde gespeichert.', 1);
 
 -- ── Question group ──
