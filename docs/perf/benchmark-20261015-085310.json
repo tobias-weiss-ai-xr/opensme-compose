@@ -1,0 +1,85 @@
+{
+  "generated_at": "2026-10-15T08:53:07+00:00",
+  "samples": 30,
+  "memory": {
+    "sogo6-server": {
+      "mem": "0B / 0B",
+      "cpu": "0.00%"
+    },
+    "sogo6-redis": {
+      "mem": "5.598MiB / 256MiB",
+      "cpu": "0.15%"
+    },
+    "opensme-opencloud": {
+      "mem": "114.8MiB / 1GiB",
+      "cpu": "0.30%"
+    },
+    "opensme-portal": {
+      "mem": "2.199MiB / 256MiB",
+      "cpu": "0.00%"
+    },
+    "opensme-memcached": {
+      "mem": "1.734MiB / 128MiB",
+      "cpu": "0.01%"
+    },
+    "opensme-traefik": {
+      "mem": "42.55MiB / 256MiB",
+      "cpu": "0.00%"
+    },
+    "gha-runner-sogo6-server": {
+      "mem": "99.66MiB / 15.13GiB",
+      "cpu": "0.01%"
+    },
+    "opensme-postgres": {
+      "mem": "105.1MiB / 512MiB",
+      "cpu": "0.08%"
+    },
+    "opensme-zitadel": {
+      "mem": "113.8MiB / 1GiB",
+      "cpu": "0.34%"
+    },
+    "opensme-redis": {
+      "mem": "10.51MiB / 256MiB",
+      "cpu": "0.13%"
+    },
+    "gha-runner-local": {
+      "mem": "75.79MiB / 15.13GiB",
+      "cpu": "0.00%"
+    },
+    "file-share-dockerized-upload-1": {
+      "mem": "39.84MiB / 15.13GiB",
+      "cpu": "0.01%"
+    }
+  },
+  "latency": {
+    "portal": {
+      "p50_ms": 0.5,
+      "p95_ms": 0.7,
+      "p99_ms": 0.9,
+      "samples": 30
+    },
+    "opencloud": {
+      "p50_ms": 0.5,
+      "p95_ms": 0.7,
+      "p99_ms": 0.9,
+      "samples": 30
+    },
+    "paperless": {
+      "p50_ms": 0.6,
+      "p95_ms": 0.7,
+      "p99_ms": 0.7,
+      "samples": 30
+    }
+  },
+  "boot_baseline": {
+    "opensme-postgres": {
+      "boot_ms": 907
+    },
+    "opensme-traefik": {
+      "boot_ms": 11298
+    },
+    "opensme-portal": {
+      "boot_ms": 1332
+    }
+  }
+}
