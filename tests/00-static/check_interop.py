@@ -232,6 +232,22 @@ def main():
             "Redis enforces it (Notes already broke live 2026-10-16)"
         )
 
+    # ── 11. Profile redis command overrides must keep requirepass ──────
+    # profiles/{demo.dev,demo.live,medium,small}.yml re-declare the redis
+    # command and silently DROPPED --requirepass — the server came up
+    # unauthenticated in production while consumers sent REDIS_PASSWORD
+    # (Notes broke live with AUTH errors, 2026-10-16). Any override of the
+    # redis command must carry requirepass.
+    for pf in (ROOT / "profiles").glob("*.yml"):
+        body = pf.read_text()
+        if "\n  redis:\n    command:\n" in body and "--requirepass" not in body:
+            failures.append(
+                f"{pf.name} re-declares the redis command without "
+                "--requirepass — profile overrides win over docker-compose.yml "
+                "and the server quietly runs unauthenticated; add "
+                "--requirepass ${REDIS_PASSWORD}"
+            )
+
     if failures:
         for f in failures:
             result.fail(f)
