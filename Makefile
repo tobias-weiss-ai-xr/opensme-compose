@@ -261,8 +261,10 @@ agentic-gate:
 	@echo -e "$(BLUE)── AS6 agent self-maintenance gate (opt-in) ──$(NC)"
 	@$(PYTHON) tests/00-static/check_agentic.py 2>&1
 
-The test-static: lint specs contracts
-	@echo -e "$(GREEN)✅ Static layers (0-2) complete$(NC)"
+test-static:
+	@echo "$(BLUE)── static layers 0-2 (single entry point) ──$(NC)"
+	@$(PYTHON) tests/run.py --static 2>&1
+	@echo "$(GREEN)✅ Static layers (0-2) complete$(NC)"
 
 # ---------------------------------------------------------------------------
 # Layer 3+ — Require running stack
@@ -287,7 +289,8 @@ e2e:
 saga:
 	@echo -e "$(BLUE)── layer 5: saga journey blueprints (requires running stack) ──$(NC)"
 	@for script in saga_onboarding saga_quote_to_cash saga_leave_request \
-	            saga_support_ticket saga_publishing saga_team_knowledge; do \
+	            saga_support_ticket saga_publishing saga_team_knowledge \
+	            saga_smoke; do \
 		$(PYTHON) tests/05-e2e/$$script.py $(DOMAIN) 2>&1 || exit 1; \
 	done
 

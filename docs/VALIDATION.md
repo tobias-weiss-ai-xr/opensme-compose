@@ -11,6 +11,9 @@ How the openSME Compose distribution is validated before release.
 | 0 · Boot contracts | `tests/00-static/check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries | ✅ |
 | 0 · Backup coverage | `tests/00-static/check_backup.py` — every stateful volume the fragments ship is in backup.sh (drift guard) | ✅ |
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
+| 0 · Agent lint | `tests/00-static/check_agent.py` — dev-maintenance-bot knowledge/spec parity | ✅ |
+| 0 · Suite coverage | `tests/00-static/check_suite_coverage.py` — no silently-dead checks (inventory below) | ✅ |
+| 0 · Agentic gate | `tests/00-static/check_agentic.py` — AS6 self-maintenance, **OPT-IN** (`AGENTIC_STRICT=1`) | — |
 | 1 · Specs | spec compliance (`tests/01-specs`) | ✅ |
 | 2 · Contracts | service/contract validation | ✅ |
 | 3 · Smoke | HTTP endpoints + container health (`tests/03-smoke`) | host |
@@ -23,6 +26,37 @@ How the openSME Compose distribution is validated before release.
 
 Run everything locally: `make test-static`, `make test-all`, `make bench`,
 `cd portal && cargo test`.
+
+## Layer-0 check inventory
+
+> Machine-readable fence: `check_suite_coverage.py` verifies this block
+> stays in sync with `tests/run.py` (every wired check listed here, nothing
+> phantom). Edit this list when you add or rename a `tests/00-static/check_*`
+> script.
+
+<!-- CHECK-INVENTORY-BEGIN -->
+- [x] `check_agent.py` — dev-maintenance-bot static lint (Layer 0)
+- [x] `check_agentic.py` — AS6 self-maintenance gate (OPT-IN, not default)
+- [x] `check_artifacts.py` — committed-artifact hygiene
+- [x] `check_backup.py` — every stateful volume is in backup.sh (drift guard)
+- [x] `check_backup_restore.py` — backup/restore contract
+- [x] `check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries
+- [x] `check_bootstrap.py` — bootstrap seed data (BPMN)
+- [x] `check_env.py` — env completeness
+- [x] `check_interop.py` — interoperability surfaces (SSO, routing, Redis auth)
+- [x] `check_mail_backend.py` — mail backend switch (XOR)
+- [x] `check_oidc.py` — Zitadel OIDC client registration
+- [x] `check_perf.py` — budgets, limits, log caps, healthchecks
+- [x] `check_platform.py` — platform versions (k3s/docker)
+- [x] `check_suite_coverage.py` — this inventory's keeper
+- [x] `check_tiles.py` — portal function catalog
+- [x] `compose_config.py` — overlay matrix
+- [x] `scan_secrets.py` — secret scan
+- [x] `yaml_lint.py` — YAML syntax lint
+<!-- CHECK-INVENTORY-END -->
+
+The inventory fences the full set of `tests/00-static` checks; see the
+"Static gate" section for what CI actually blocks.
 
 ## Static gate (what CI blocks)
 
