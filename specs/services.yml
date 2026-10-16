@@ -254,3 +254,22 @@ services:
     traefik_labels: true
     resource_limits:
       memory: 1G
+
+  limesurvey:
+    # community image, checksum-pinned builds; tracks stable releases (tag via LIMESURVEY_TAG)
+    image: martialblog/limesurvey:6-apache
+    compose_file: services/limesurvey.yml
+    required: false
+    profiles: [surveys]
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    depends_on: [postgres]
+    volumes:
+      - limesurvey-uploads:/var/www/html/upload
+    env:
+      - SURVEYS_DB_PASSWORD
+      - SURVEYS_DOMAIN
+    traefik_labels: true
+    resource_limits:
+      memory: 384M

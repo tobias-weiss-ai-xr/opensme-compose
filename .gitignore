@@ -41,7 +41,6 @@ result-*
 logs/
 *.log
 __pycache__/
-result-*
 # Zitadel masterkey + system API key (provisioned at deploy time)
 idm/secrets/masterkey
 idm/secrets/zitadel-system-key.pem

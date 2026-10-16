@@ -107,6 +107,8 @@ rules:
       - matrixdotorg/synapse:latest
       - vectorim/element-web:latest
       - lasuite/impress-y-provider:latest
+      - ghcr.io/dkluhzeb/crap-cms:latest   # upstream publishes :latest only
+      - rclone/rclone:latest              # evidence mirror sidecar (RCLONE_TAG)
       - lasuite/impress-backend:latest
       - lasuite/impress-frontend:latest
       - opensme-dev-maintenance-bot:latest

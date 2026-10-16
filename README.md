@@ -459,6 +459,7 @@ openSME-compose/
 │   ├── cms.yml                 # Overlay: crap-cms website (--profile cms)
 │   ├── store.yml               # Overlay: RaisFast e-commerce (--profile store)
 │   ├── ai.yml                  # Overlay: llama.cpp AI backend (--profile ai)
+│   ├── limesurvey.yml          # Overlay: LimeSurvey surveys (--profile surveys)
 │   ├── synapse-setup.sh        # Synapse homeserver.yaml generator (POSIX-sh)
 │   └── cryptpad-config/        # CryptPad configuration
 ├── monitoring/
@@ -511,7 +512,6 @@ openSME-compose/
 │   ├── CONTRIBUTING.md         # Knowledge contribution guidelines
 │   ├── README.md              # Knowledge base overview
 │   ├── common.json            # Common openSME terminology
-│   ├── camunda.json           # Camunda BPMN knowledge base
 │   ├── invoice-ninja.json     # Invoice Ninja knowledge
 │   ├── opencloud.json         # OpenCloud/S3 knowledge
 │   ├── operaton.json          # Operaton/BPMN knowledge

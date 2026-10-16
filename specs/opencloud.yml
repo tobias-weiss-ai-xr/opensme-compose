@@ -46,18 +46,17 @@ services:
     resource_limits:
       memory: 4G
 
-  minio:
-    image: minio/minio:latest
+  seaweedfs:
+    # SeaweedFS S3 (replaces MinIO; minio-data volumes are cold backup only)
+    image: registry.hrz.uni-marburg.de/dockerio-cache/chrislusf/seaweedfs:latest
     compose_file: opencloud/minio.yml
     required: false
     host_ports: []
     healthcheck: true
     networks: [opensme-net]
     volumes:
-      - minio-data:/data
-    env:
-      - OC_S3_ACCESS_KEY
-      - OC_S3_SECRET_KEY
+      - seaweedfs-data:/data
+    env: []
     traefik_labels: true
     resource_limits:
-      memory: 2G
+      memory: 1.5G
