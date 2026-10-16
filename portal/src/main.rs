@@ -384,8 +384,18 @@ fn build_landing_page(config: &AppConfig) -> String {
         .tab-btn.is-active {{ background: #fff; color: var(--accent); }}
         .tab-panel[hidden] {{ display: none; }}
         .logout-form {{ margin-left: 10px; }}
-        .logout-form .btn-ghost {{ border-color: #E9573F; }}
-        .logout-form .btn-ghost:hover {{ background: rgba(233,87,63,0.25); }}
+        /* Logout must read as a solid action (not a ghost): white on
+           #A93226 = 6.62:1, WCAG AA for normal text. The previous thin
+           red border on the blue header only reached 1.83:1. */
+        .logout-form .btn-ghost {{
+            background: #A93226;
+            border-color: #A93226;
+            color: #fff;
+        }}
+        .logout-form .btn-ghost:hover {{
+            background: #8E1F1F;
+            border-color: #8E1F1F;
+        }}
         .func-grid.single {{ grid-template-columns: minmax(220px, 420px); justify-content: center; }}
         .btn-ghost {{
             text-decoration: none; font-size: 14px; font-weight: 600;
@@ -1871,6 +1881,23 @@ mod tests {
         );
         assert!(html[..grid].find("intercom-card").is_none());
         assert!(html[..grid].find("polls-card").is_none());
+    }
+
+    #[test]
+    fn logout_button_has_solid_high_contrast_style() {
+        // White-on-#A93226 = 6.62:1 (WCAG AA); the button must NOT regress
+        // to a thin red border on blue (1.83:1) or a transparent ghost
+        // (white 3.56:1 on the border — both fail AA).
+        let html = build_landing_page(&cfg_with("", None, ""));
+        // Render output: format! already collapsed {{ }} → { }
+        let css = &html[html.find(".logout-form { margin-left").expect("logout css")..];
+        assert!(css.contains("background: #A93226"), "solid red fill");
+        assert!(css.contains("border-color: #A93226"), "border matches fill");
+        assert!(
+            !css.contains("border-color: #E9573F"),
+            "old low-contrast border gone"
+        );
+        assert!(css.contains("color: #fff"), "white text on the fill");
     }
 
     #[test]
