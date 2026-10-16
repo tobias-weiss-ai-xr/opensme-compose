@@ -171,6 +171,12 @@ def main():
         )
 
     # ── 8. SSO: groupware must not fall back to an own login ───────────
+    # Redis auth must be uniform: the server enforces requirepass
+    # (REDIS_PASSWORD), so every consumer URL must carry it. A bare
+    # redis://host/db consumer stays green while the server is unauthenticated
+    # and breaks the moment requirepass arrives (seen 2026-10-16: paperless
+    # bare, notes broken with AUTH error because the live server still ran
+    # without requirepass from a pre-password deploy).
     # Epic C3: webmail must reach the central IdP. SOGo ≥5.12 supports
     # OpenID natively (SOGoAuthenticationType = openid). Implementing the
     # full chain also requires a Stalwart XOAUTH2 directory — deploy-wide
@@ -213,6 +219,17 @@ def main():
             "services/notes.yml must set DJANGO_ALLOWED_HOSTS (impress/"
             "django-configurations prefix) — plain ALLOWED_HOSTS is ignored "
             "and the backend 400s every public request with DisallowedHost"
+        )
+
+    # ── 10. Redis consumers must all carry the server requirepass ─────┐─
+    paper_yml = (ROOT / "services" / "paperless.yml").read_text()
+    if "PAPERLESS_REDIS: redis://" in paper_yml and \
+       "${REDIS_PASSWORD" not in paper_yml:
+        failures.append(
+            "services/paperless.yml PAPERLESS_REDIS must include the "
+            "REDIS_PASSWORD (redis://:*@...) — a bare URL works only while "
+            "the server runs without requirepass and breaks the moment "
+            "Redis enforces it (Notes already broke live 2026-10-16)"
         )
 
     if failures:

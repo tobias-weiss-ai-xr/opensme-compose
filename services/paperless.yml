@@ -34,7 +34,7 @@ services:
     tmpfs:
       - /tmp
     environment:
-      PAPERLESS_REDIS: redis://redis:6379/2
+      PAPERLESS_REDIS: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2
       PAPERLESS_DBHOST: postgres
       PAPERLESS_DBPORT: "5432"
       PAPERLESS_DBNAME: paperless_db
