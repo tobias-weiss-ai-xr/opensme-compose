@@ -14,6 +14,8 @@
 #              → NOTES_OIDC_CLIENT_ID/SECRET
 #   synapse    matrix.<domain>/_synapse/client/oidc/callback
 #              → SYNAPSE_OIDC_CLIENT_ID/SECRET
+#   ticketing  help.<domain>/auth/oidc/callback (Nosdesk)
+#              → NOSDESK_OIDC_CLIENT_ID/SECRET
 #
 # SECRET-DRIVEN: Zitadel's Management API takes no client_id / client_secret
 # input — it mints both and returns them (verified against the v4.19 proto;
@@ -73,9 +75,10 @@ Register (or reuse) a persistent OIDC client in the running Zitadel
 instance. Idempotent — safe to run on every boot.
 
 Options:
-  --app NAME         which client to ensure: opencloud (default), notes or
-                     synapse — selects the redirect URIs and the .env keys
-                     the Zitadel-issued credentials are persisted under
+  --app NAME         which client to ensure: opencloud (default), notes,
+                     synapse or ticketing — selects the redirect URIs and
+                     the .env keys the Zitadel-issued credentials are
+                     persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -184,8 +187,20 @@ case "$APP_KIND" in
     # synapse derives its redirect from public_baseurl — exactly this URI
     base_paths=("/_synapse/client/oidc/callback")
     ;;
+  ticketing)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-ticketing"
+    CLIENT_ID_KEY="NOSDESK_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="NOSDESK_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    # Nosdesk serves the helpdesk under help.<domain>; the OIDC block in
+    # services/ticketing.yml wires its redirect to $FRONTEND_URL/auth/oidc/callback
+    app_domain="$(env_get NOSDESK_DOMAIN "help.$OPENSME_DOMAIN")"   # NOSDESK_DOMAIN else help.<OPENSME_DOMAIN>
+    CLIENT_ID_LABEL="$(env_get NOSDESK_OIDC_CLIENT_ID opensme-ticketing)"
+    base_paths=("/auth/oidc/callback")
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing)"
     exit 1
     ;;
 esac
