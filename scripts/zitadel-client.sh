@@ -195,7 +195,7 @@ case "$APP_KIND" in
     SECRET_ALIAS_KEY=""
     # Nosdesk serves the helpdesk under help.<domain>; the OIDC block in
     # services/ticketing.yml wires its redirect to $FRONTEND_URL/auth/oidc/callback
-    app_domain="$(env_get NOSDESK_DOMAIN "help.$OPENSME_DOMAIN")"   # NOSDESK_DOMAIN else help.<OPENSME_DOMAIN>
+    app_domain="$(env_get NOSDESK_DOMAIN "help.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
     CLIENT_ID_LABEL="$(env_get NOSDESK_OIDC_CLIENT_ID opensme-ticketing)"
     base_paths=("/auth/oidc/callback")
     ;;
