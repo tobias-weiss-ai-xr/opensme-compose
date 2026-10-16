@@ -248,8 +248,11 @@ fn build_landing_page(config: &AppConfig) -> String {
     };
 
     let ic_rendered = render_intercom(&config.intercom_store.list());
-    let polls_card = match &config.polls {
-        Some(_) => r#"<div class="card func-card polls" id="polls-card">
+    let polls_panel = match &config.polls {
+        Some(_) => r#"<section class="tab-panel" id="tab-umfragen" aria-label="Umfragen" hidden>
+            <h2 class="section-title">Umfragen</h2>
+            <div class="func-grid single">
+                <div class="card func-card polls" id="polls-card">
                 <span class="func-icon" aria-hidden="true">📊</span>
                 <h3>Umfragen</h3>
                 <p class="product">Team-Abstimmungen — optional mit Dokument aus der Cloud</p>
@@ -269,12 +272,17 @@ fn build_landing_page(config: &AppConfig) -> String {
                         <p class="ic-out pl-out" hidden></p>
                     </div>
                 </details>
-            </div>"#
-        .to_string(),
+                </div>
+            </div>
+        </section>"#
+            .to_string(),
         None => String::new(),
     };
-    let intercom_card = format!(
-        r#"<div class="card func-card intercom" id="intercom-card">
+    let notizen_panel = format!(
+        r#"<section class="tab-panel" id="tab-notizen" aria-label="Notizen" hidden>
+            <h2 class="section-title">Notizen</h2>
+            <div class="func-grid single">
+                <div class="card func-card intercom" id="intercom-card">
                 <span class="func-icon" aria-hidden="true">💬</span>
                 <h3>Team-Notizen</h3>
                 <p class="product">Kurze Notiz für das Team</p>
@@ -290,8 +298,15 @@ fn build_landing_page(config: &AppConfig) -> String {
                     </div>
                     <p class="ic-out" hidden></p>
                 </div>
-            </div>"#
+                </div>
+            </div>
+        </section>"#
     );
+    let umfragen_tab = if config.polls.is_some() {
+        r#"<button class="tab-btn" type="button" role="tab" data-tab="umfragen">Umfragen</button>"#
+    } else {
+        ""
+    };
 
     let announcements = render_announcements(&config.announcements);
     let feed_cards = render_feed_cards(config.feed_fetcher.columns());
@@ -359,6 +374,19 @@ fn build_landing_page(config: &AppConfig) -> String {
         .brand h1 {{ font-size: 26px; margin-bottom: 2px; letter-spacing: 0.3px; }}
         .brand p {{ opacity: 0.9; font-size: 15px; }}
         .user-nav {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
+        .tab-btn {{
+            background: transparent; border: 1px solid transparent; color: #fff;
+            font: inherit; font-size: 14px; font-weight: 600;
+            border-radius: 999px; padding: 7px 16px; cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }}
+        .tab-btn:hover {{ background: rgba(255,255,255,0.15); }}
+        .tab-btn.is-active {{ background: #fff; color: var(--accent); }}
+        .tab-panel[hidden] {{ display: none; }}
+        .logout-form {{ margin-left: 10px; }}
+        .logout-form .btn-ghost {{ border-color: #E9573F; }}
+        .logout-form .btn-ghost:hover {{ background: rgba(233,87,63,0.25); }}
+        .func-grid.single {{ grid-template-columns: minmax(220px, 420px); justify-content: center; }}
         .btn-ghost {{
             text-decoration: none; font-size: 14px; font-weight: 600;
             border-radius: 999px; padding: 7px 16px; color: #fff;
@@ -538,27 +566,29 @@ fn build_landing_page(config: &AppConfig) -> String {
                 <p>Dein Startpunkt für alle Dienste</p>
             </div>
             <nav class="user-nav" aria-label="Navigation">
-                <a class="btn-ghost" href="#dienste">Dienste</a>
-                <a class="btn-ghost" href="#aktuelles">Aktuelles</a>
+                <button class="tab-btn is-active" type="button" role="tab" aria-selected="true" data-tab="dienste">Dienste</button>
+                {umfragen_tab}
+                <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="notizen">Notizen</button>
+                <form class="logout-form" method="post" action="/api/logout">
+                    <button class="btn-ghost" type="submit">Abmelden</button>
+                </form>
             </nav>
         </div>
     </header>
     <main class="container">
-        <section aria-label="Dienste" id="dienste">
+        <section class="tab-panel is-active" id="tab-dienste" aria-label="Dienste" role="tabpanel">
             <h2 class="section-title">Dienste</h2>
             <div class="func-grid">
                 {cards}
                 {ai_card}
-                {intercom_card}
-                {polls_card}
             </div>
-        </section>
-        <section aria-label="Aktuelles" id="aktuelles">
             <h2 class="section-title">Aktuelles</h2>
             <div class="feeds">
                 {feed_cards}
             </div>
         </section>
+        {polls_panel}
+        {notizen_panel}
     </main>
     <footer>
         <div class="container">
@@ -1789,6 +1819,67 @@ mod tests {
         let html = build_landing_page(&cfg_with("", None, ""));
         assert!(html.contains("id=\"intercom-card\""));
         assert!(html.contains("ic-send"));
+    }
+
+    #[test]
+    fn tab_bar_has_dienste_notizen_and_logout() {
+        let html = build_landing_page(&cfg_with("", None, ""));
+        // Dienste + Notizen tabs always present
+        assert!(html.contains("data-tab=\"dienste\""));
+        assert!(html.contains("data-tab=\"notizen\""));
+        // Umfragen tab is optional (gated on polls config) — absent here
+        assert!(!html.contains("data-tab=\"umfragen\""));
+        // Logout always rendered (POST /api/logout)
+        assert!(html.contains("action=\"/api/logout\""));
+        assert!(html.contains("method=\"post\""));
+        assert!(html.contains("Abmelden"));
+    }
+
+    #[test]
+    fn umfragen_tab_gated_on_polls_config() {
+        let plain = build_landing_page(&cfg_with("", None, ""));
+        assert!(!plain.contains("data-tab=\"umfragen\""));
+        assert!(!plain.contains("id=\"tab-umfragen\""));
+
+        let mut c = cfg_with("", None, "");
+        c.polls = Some(Arc::new(polls::PollStore::open(None, None, None)));
+        let html = build_landing_page(&c);
+        assert!(html.contains("data-tab=\"umfragen\""));
+        assert!(html.contains("id=\"tab-umfragen\""));
+        assert!(html.contains("id=\"polls-card\""));
+    }
+
+    #[test]
+    fn widget_cards_moved_out_of_service_grid() {
+        // Widgets live in their own tab panels, AFTER the services grid —
+        // the Dienste section never contains intercom/polls markup.
+        let mut c = cfg_with("", None, "");
+        c.polls = Some(Arc::new(polls::PollStore::open(None, None, None)));
+        let html = build_landing_page(&c);
+        let grid = html.find("func-grid").expect("services grid");
+        let notizen = html.find("id=\"tab-notizen\"").expect("notizen panel");
+        let umfragen = html.find("id=\"tab-umfragen\"").expect("umfragen panel");
+        let intercom = html.find("id=\"intercom-card\"").expect("intercom widget");
+        let polls = html.find("id=\"polls-card\"").expect("polls widget");
+        assert!(
+            intercom > notizen,
+            "intercom-card must be inside the Notizen panel"
+        );
+        assert!(
+            polls > umfragen,
+            "polls-card must be inside the Umfragen panel"
+        );
+        assert!(html[..grid].find("intercom-card").is_none());
+        assert!(html[..grid].find("polls-card").is_none());
+    }
+
+    #[test]
+    fn dienste_tab_is_default_active() {
+        let html = build_landing_page(&cfg_with("", None, ""));
+        assert!(html.contains("class=\"tab-panel is-active\""));
+        // Notizen panel starts hidden (aria-label sits between id and hidden)
+        let notizen = html.find("id=\"tab-notizen\"").expect("notizen panel");
+        assert!(html[notizen..].starts_with(r#"id="tab-notizen" aria-label="Notizen" hidden"#));
     }
 
     #[test]

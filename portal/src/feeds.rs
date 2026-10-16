@@ -196,13 +196,16 @@ impl FeedFetcher {
         let mut entries: Vec<FeedEntry> = per_url.into_iter().flatten().collect();
         entries = merge_and_cap(entries);
         if !entries.is_empty() {
-            self.cache.write().unwrap_or_else(|e| e.into_inner()).insert(
-                col.id.clone(),
-                CachedColumn {
-                    entries: entries.clone(),
-                    fetched_at: Instant::now(),
-                },
-            );
+            self.cache
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    col.id.clone(),
+                    CachedColumn {
+                        entries: entries.clone(),
+                        fetched_at: Instant::now(),
+                    },
+                );
         }
         entries
     }

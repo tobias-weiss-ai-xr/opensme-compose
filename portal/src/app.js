@@ -5,9 +5,29 @@
 // 2. AI assistant: minimal ask-box wired to POST /api/ai/chat (same-origin,
 //    so CSP connect-src 'self' holds). The endpoint is only mounted when the
 //    operator configured AI_API_URL; the box is hidden otherwise.
+// 3. Tabs: Dienste / Umfragen / Notizen switch panels in-page (no reload).
+// 4. Logout: POST /api/logout in a plain form (HttpOnly session cookie —
+//    the button is always rendered; the handler is a no-op without a session).
 
 (function () {
   "use strict";
+
+  // ── Tabs ────────────────────────────────────────────────────────────
+  var tabButtons = document.querySelectorAll(".tab-btn");
+  var tabPanels = document.querySelectorAll(".tab-panel");
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = btn.getAttribute("data-tab");
+      tabButtons.forEach(function (b) {
+        var active = b === btn;
+        b.classList.toggle("is-active", active);
+        b.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      tabPanels.forEach(function (p) {
+        p.hidden = p.id !== "tab-" + target;
+      });
+    });
+  });
 
   // ── Fast-switch palette ────────────────────────────────────────────
   var palette = document.createElement("div");
