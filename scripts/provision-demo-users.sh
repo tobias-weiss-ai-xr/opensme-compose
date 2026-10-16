@@ -91,6 +91,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Default: talk to the zitadel container via docker network
+#
+# NOTE: the zitadel container runs with '--tlsMode external' (Traefik
+# terminates TLS in front), so it speaks ONLY plain HTTP on :8080. All
+# CURL_HOST/container-direct curls MUST therefore use http:// — exactly
+# like the compose healthcheck (http://localhost:8080/debug/ready). The
+# external BASE_URL below may keep https:// because it goes through
+# Traefik's TLS termination.
 [[ -z "$HOST" ]] && HOST="opensme-zitadel:8080"
 [[ -z "$EXTERNAL_HOST" ]] && EXTERNAL_HOST="$HOST"
 
@@ -112,9 +119,9 @@ ztcurl() {
 # ── wait for Zitadel ──────────────────────────────────────────────────
 wait_zitadel() {
     if ! $WAIT; then return 0; fi
-    info "Waiting for Zitadel at https://$EXTERNAL_HOST..."
+    info "Waiting for Zitadel at http://$CURL_HOST..."
     for _ in $(seq 1 60); do
-        if ztcurl -k "https://$CURL_HOST/healthz" >/dev/null 2>&1; then
+        if ztcurl -k "http://$CURL_HOST/healthz" >/dev/null 2>&1; then
             info "Zitadel is ready"
             return 0
         fi
@@ -165,7 +172,7 @@ api() {
     local data="${3:-}"
     shift 3
     
-    local url="https://$CURL_HOST$path"
+    local url="http://$CURL_HOST$path"
     local token="$1"
     
     local extra=("-H" "Authorization: Bearer $token")
