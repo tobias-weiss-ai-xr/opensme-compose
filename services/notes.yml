@@ -95,6 +95,19 @@ services:
         reservations:
           cpus: "0.1"
           memory: 64M
+    labels:
+      # Django backend must be reachable on the public host for BOTH the
+      # JSON API and the mozilla-django-oidc exchange (/oidc/authenticate,
+      # /oidc/callback, /oidc/logout). Without the /oidc prefix every SSO
+      # path 404s on the static SPA despite a registered Zitadel client
+      # (seen 2026-10-16 live). priority=100 beats the SPA Host-catchall.
+      - "traefik.enable=true"
+      - "traefik.http.routers.notesapi.rule=Host(`notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`) && (PathPrefix(`/api`) || PathPrefix(`/oidc`))"
+      - "traefik.http.routers.notesapi.tls=true"
+      - "traefik.http.routers.notesapi.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.notesapi.entrypoints=websecure"
+      - "traefik.http.routers.notesapi.priority=100"
+      - "traefik.http.services.notesapi.loadbalancer.server.port=8000"
 
   notes-frontend:
     <<: *service-defaults

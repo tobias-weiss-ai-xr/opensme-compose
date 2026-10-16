@@ -133,6 +133,77 @@ def main():
     if "paperless-export" not in paper_vols:
         failures.append("paperless export volume (DMS ingest sink) missing")
 
+    # ── 7. SSO round-trip surfaces: routed host == IdP-facing host ──────
+    # Every OIDC consumer must derive its public/callback base URL from the
+    # SAME variables Compose routes (ZITADEL_DOMAIN / OPENSME_DOMAIN). A
+    # leftover ${DOMAIN} without the OPENSME_ prefix silently produces a
+    # public_baseurl that differs from the routed host — the login redirect
+    # then bounces to an unroutable name (seen 2026-10-16: synapse
+    # public_baseurl=https://matrix.opensme.graphwiz.ai while the router
+    # listens on matrix.home.opensme.graphwiz.ai).
+    synapse_sh = (ROOT / "services" / "synapse-setup.sh").read_text()
+    if re.search(r"matrix\.\$\{DOMAIN(?::|-)", synapse_sh):
+        failures.append(
+            "synapse-setup.sh derives public_baseurl from ${DOMAIN}; must use "
+            "OPENSME_DOMAIN (SYNAPSE_SERVER_NAME already does) so SSO "
+            "redirects resolve on the routed host"
+        )
+    # public_baseurl must be derived from SYNAPSE_SERVER_NAME (the compose /
+    # coexist-authoritative host) so server_name and public_baseurl always
+    # agree — an independent derivation drifts on multi-domain deploys.
+    if "PUBLIC_BASEURL=\"https://${SERVER_NAME}\"" not in synapse_sh:
+        failures.append(
+            "synapse-setup.sh must derive public_baseurl from "
+            "SYNAPSE_SERVER_NAME (server_name/public_baseurl agreement)"
+        )
+    # The compose-provided server_name must be the authoritative host, and
+    # the setup script must reference it (not hardcode a bare domain).
+    synapse_yml = (ROOT / "services" / "synapse.yml").read_text()
+    if "SYNAPSE_SERVER_NAME" not in synapse_yml or "OPENSME_DOMAIN" not in synapse_yml:
+        failures.append(
+            "services/synapse.yml must set SYNAPSE_SERVER_NAME from "
+            "OPENSME_DOMAIN (authoritative routed matrix host)"
+        )
+    if '"${SYNAPSE_SERVER_NAME' not in synapse_sh:
+        failures.append(
+            "synapse-setup.sh must take server_name from "
+            "SYNAPSE_SERVER_NAME (compose-provided)"
+        )
+
+    # ── 8. SSO: groupware must not fall back to an own login ───────────
+    # Epic C3: webmail must reach the central IdP. SOGo ≥5.12 supports
+    # OpenID natively (SOGoAuthenticationType = openid). Implementing the
+    # full chain also requires a Stalwart XOAUTH2 directory — deploy-wide
+    # change, tracked as a warning (the E2E journey section_sogo_sso
+    # likewise warns, it cannot pass until the whole chain is wired).
+    sogo_yml = (ROOT / "mail" / "sogo.yml").read_text()
+    if "SOGoOIDCEnabled" not in sogo_yml and "OIDC" not in sogo_yml.upper():
+        result.warn(
+            "mail/sogo.yml ships no OIDC wiring — webmail login falls "
+            "back to SOGo's own form (Epic C3, needs Zitadel client + "
+            "Stalwart XOAUTH2 directory)"
+        )
+
+    # ── 9. Notes: the Django backend (mozilla-django-oidc) must be on the
+    # public router, not just the static SPA. The coexist overlay routes
+    # PathPrefix(/api) to notes-backend but began without /oidc — every
+    # OIDC path (authenticate/callback/logout) then 404s on the frontend
+    # and Notes SSO is dead even with a registered Zitadel client.
+    notes_yml = (ROOT / "services" / "notes.yml").read_text()
+    # Require a backend router whose Rule routes BOTH the JSON API and the
+    # OIDC exchange to notes-backend; a bare SPA router (as shipped at
+    # 2026-10-16) leaves /oidc/* 404ing on the static frontend.
+    api_route = "PathPrefix(`/api`)" in notes_yml or "PathPrefix(\"/api\")" in notes_yml
+    oidc_route = "PathPrefix(`/oidc`)" in notes_yml or "PathPrefix(\"/oidc\")" in notes_yml
+    if not (api_route and oidc_route):
+        failures.append(
+            "services/notes.yml must route notes-backend to BOTH "
+            "PathPrefix(/api) AND PathPrefix(/oidc) on the public router — "
+            "mozilla-django-oidc lives under /oidc/* (authenticate/"
+            "callback/logout); unrouted, the static SPA 404s them and "
+            "Notes SSO is dead (registered client or not)"
+        )
+
     if failures:
         for f in failures:
             result.fail(f)
