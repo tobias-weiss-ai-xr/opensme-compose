@@ -203,6 +203,17 @@ def main():
             "callback/logout); unrouted, the static SPA 404s them and "
             "Notes SSO is dead (registered client or not)"
         )
+    # impress uses django-configurations: values.ListValue(
+    # environ_name="ALLOWED_HOSTS") inherits the DJANGO_ class prefix, so
+    # the env var must be DJANGO_ALLOWED_HOSTS. Setting ALLOWED_HOSTS is
+    # silently ignored (settings only ever see the container IP → every
+    # public request is DisallowedHost → SSO/API 400; seen 2026-10-16).
+    if "DJANGO_ALLOWED_HOSTS" not in notes_yml:
+        failures.append(
+            "services/notes.yml must set DJANGO_ALLOWED_HOSTS (impress/"
+            "django-configurations prefix) — plain ALLOWED_HOSTS is ignored "
+            "and the backend 400s every public request with DisallowedHost"
+        )
 
     if failures:
         for f in failures:

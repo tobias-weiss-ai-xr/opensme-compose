@@ -77,7 +77,6 @@ catalog:
     # notesapp (not 'notes') — live traefik silently dropped the 'notes'
     # router name during the 2026-10-13 deploy; renamed and verified
     router: notesapp
-
   - id: chat
     tile: Chat
     url_env: CHAT_URL
@@ -131,4 +130,5 @@ excluded:
   - id: cryptpad     # alternative embedded editor (collab profile)
   - id: seaweedfs    # S3 storage admin UI
   - id: synapse      # Matrix homeserver API — UI is element-web
+  - id: notes-backend # Django API + SSO exchange behind the notes tile (no own journey start)
   - id: ai           # vLLM/OpenAI-compatible API — surfaced as AI card
