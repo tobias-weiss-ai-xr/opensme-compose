@@ -248,6 +248,20 @@ def main():
                 "--requirepass ${REDIS_PASSWORD}"
             )
 
+    # ── 12. notes Zitadel callback must match impress's lasuite.oidc_login ─┐──#
+    # flow (under /api/v1.0/), not mozilla-django-oidc's /oidc/. A mismatched
+    # redirect_uri makes Zitadel answer redirect_uri_mismatch at the end of a
+    # working SSO chain (verified live 2026-10-16: /oidc/callback/ registered,
+    # /api/v1.0/callback/ → 400 from the authorize endpoint).
+    oidc_script = (ROOT / "scripts" / "zitadel-client.sh").read_text()
+    if "/api/v1.0/callback/" not in oidc_script:
+        failures.append(
+            "scripts/zitadel-client.sh notes base_paths must register "
+            "/api/v1.0/callback/ — impress uses lasuite.oidc_login under the "
+            "API prefix; /oidc/callback/ alone means Zitadel answers "
+            "redirect_uri_mismatch on every Notes login"
+        )
+
     if failures:
         for f in failures:
             result.fail(f)

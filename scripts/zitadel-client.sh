@@ -10,7 +10,7 @@
 #
 # Apps (--app):
 #   opencloud  cloud.<domain>/oidc/callback(.html)      → OC_OIDC_CLIENT_ID/SECRET
-#   notes      notes.<domain>/oidc/callback/ (mozilla-django-oidc)
+#   notes      notes.<domain>/api/v1.0/callback/ (lasuite oidc_login)
 #              → NOTES_OIDC_CLIENT_ID/SECRET
 #   synapse    matrix.<domain>/_synapse/client/oidc/callback
 #              → SYNAPSE_OIDC_CLIENT_ID/SECRET
@@ -173,8 +173,14 @@ case "$APP_KIND" in
     SECRET_ALIAS_KEY=""
     app_domain="$(env_get NOTES_DOMAIN "notes.opensme.local")"
     CLIENT_ID_LABEL="$(env_get NOTES_OIDC_CLIENT_ID opensme-notes)"
-    # mozilla-django-oidc callback (trailing slash is significant)
-    base_paths=("/oidc/callback/")
+    # lasuite.oidc_login callback: impress's OIDC lives under the API
+    # prefix (/api/v1.0/...), NOT mozilla-django-oidc's /oidc/ — verified
+    # on the lasuite/impress image (core/urls.py includes lasuite.oidc_login
+    # under api/<version>/; reverse('oidc_authentication_init') =
+    # /api/v1.0/authenticate/, callback = /api/v1.0/callback/). Registering
+    # the wrong URI (e.g. /oidc/callback/) makes Zitadel answer
+    # redirect_uri_mismatch on an otherwise working login.
+    base_paths=("/api/v1.0/callback/")
     ;;
   synapse)
     APP_PROJECT="opensme"
