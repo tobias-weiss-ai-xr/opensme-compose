@@ -75,6 +75,8 @@ MUTABLE_IMAGES = {
     "synapse",          # element-hq/synapse:latest — upstream ships :latest only
     "element-web",      # elementio/element-web:latest — upstream ships :latest only
     "notes-y-provider",  # lasuite/impress-y-provider:latest — upstream :latest only
+    "notes-backend",     # lasuite/impress-backend:latest — upstream :latest only
+    "notes-frontend",    # lasuite/impress-frontend:latest — upstream :latest only
     "pgbouncer",        # bitnamilegacy/pgbouncer:latest — legacy bitnami image
     "dev-maintenance-bot",  # built from repo source, :latest is the local tag
     "dev-agent",        # built from repo source (role uses a local version tag)

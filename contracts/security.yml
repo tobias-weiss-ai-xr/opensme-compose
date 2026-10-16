@@ -104,9 +104,11 @@ rules:
       - gotenberg/gotenberg:latest
       - apache/tika:latest
       - cryptpad/cryptpad:latest
-      - element-hq/synapse:latest
-      - elementio/element-web:latest
+      - matrixdotorg/synapse:latest
+      - vectorim/element-web:latest
       - lasuite/impress-y-provider:latest
+      - lasuite/impress-backend:latest
+      - lasuite/impress-frontend:latest
       - opensme-dev-maintenance-bot:latest
 
 ---
