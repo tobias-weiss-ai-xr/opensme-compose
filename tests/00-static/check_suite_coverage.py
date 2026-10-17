@@ -116,8 +116,19 @@ def main() -> int:
                 "entry point); invoking layer-0 check scripts individually "
                 "lets a newly added check silently drop out of the gate"
             )
-        # CI must not pin a stale check list itself (individual calls are
-        # allowed as an *extra*, but the full suite has to be there too).
+        # Single-entry-point guard: CI must NOT call any tests/00-static/*.py
+        # directly. The runner (`tests/run.py --static`) owns the layer-0
+        # script list; a direct individual call means adding a check to run.py
+        # silently does not protect the release, recreating the dead-check bug
+        # at the CI layer (a stale, self-pinned check list).
+        direct_calls = re.findall(r"tests/00-static/([A-Za-z0-9_]+\.py)", ci_text)
+        if direct_calls:
+            failures.append(
+                "CI static job must not call tests/00-static/"
+                f"{direct_calls[0]} directly — tests/run.py --static is the "
+                "single entry point; a direct call recreates the dead-check "
+                "bug at the CI layer"
+            )
 
     # ── 1. every check on disk is run or documented-opt-in ─────────────
     unknown = [f for f in disk if f not in wired and f not in OPT_IN]
