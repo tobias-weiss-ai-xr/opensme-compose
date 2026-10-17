@@ -128,8 +128,8 @@ make integration   # Layer 4: cross-service wiring (requires stack)
 make e2e           # Layer 5: SSO/OIDC e2e flows (requires stack)
 make security      # Layer 6: security audit
 make bench         # Layer 7: live benchmark (optional)
-make test          # Layers 0-3 (static + container + smoke)
-make test-all      # Layers 0-6 (full suite incl. e2e + integration)
+make test          # Layers 0-4 (static + container + smoke + integration; integration self-skips)
+make test-all      # Layers 0-6 (full suite incl. e2e)
 ```
 
 ## Integration contracts (`04-integration/`)

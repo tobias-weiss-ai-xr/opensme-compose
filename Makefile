@@ -301,12 +301,12 @@ security:
 # ---------------------------------------------------------------------------
 # Combined test targets
 # ---------------------------------------------------------------------------
-test: test-static container smoke
+test: test-static container smoke integration
 	@echo -e "$(GREEN)═══════════════════════════════════$(NC)"
-	@echo -e "$(GREEN) Layers 0-3 complete.$(NC)"
+	@echo -e "$(GREEN) Layers 0-4 complete (integration self-skips per service).$(NC)"
 	@echo -e "$(GREEN)═══════════════════════════════════$(NC)"
 
-test-all: test integration e2e security
+test-all: test e2e security
 	@echo -e "$(GREEN)═══════════════════════════════════$(NC)"
 	@echo -e "$(GREEN) All test layers complete.$(NC)"
 	@echo -e "$(GREEN)═══════════════════════════════════$(NC)"

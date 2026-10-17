@@ -221,6 +221,47 @@ def main() -> int:
             f"{', '.join(saga_missing)} (add them to the for-script list)"
         )
 
+    # ── 7. the default `run.py` covers every implemented stack layer ────
+    # Layers 3 (smoke) and 4 (integration) are both stack-gated but
+    # self-skipping (WARN + skip when the stack is down / a service is
+    # absent); leaving 4 out of the default run silently drops all
+    # cross-wiring contracts (seen live: the default run skipped layer 4
+    # with a stale "4 unimplemented" comment years after 3777151 added it).
+    runpy = (ROOT / "tests" / "run.py").read_text()
+    layer4_exists = bool(re.search(r"^\s*4: \{", runpy, re.M))
+    if layer4_exists:
+        # last [0,N,...] list assignment is the else/default branch
+        lists = re.findall(r"layers_to_run = \[([0-9, ]+)\]", runpy)
+        if lists:
+            default_list = [int(x) for x in lists[-1].split(",") if x.strip()]
+            if 4 not in default_list:
+                failures.append(
+                    "tests/run.py default run omits layer 4 (integration) even "
+                    "though it is implemented and self-skips like layer 3 — "
+                    "cross-wiring contracts would silently never run"
+                )
+    # --domain must reach integration with the resolved value (not a
+    # hard-coded default) OR be dropped silently; check for the explicit
+    # marker pairs that encode both properties.
+    # The --domain → integration hand-off must be present as a unit.
+    # Three independent markers are required together; requiring them all
+    # (rather than keying off one of them) keeps the check active even when
+    # a contributor deletes the whole branch. Every --domain run must
+    # smoke-test and integration-validate the SAME host.
+    _fwd_markers = (
+        'domain_explicit = "--domain" in sys.argv',
+        'elif "integration" in script_path and domain_explicit',
+        '["--domain", domain]',
+    )
+    missing_fwd = [m for m in _fwd_markers if m not in runpy]
+    if missing_fwd:
+        failures.append(
+            "tests/run.py --domain forwarding to integration is broken "
+            f"(missing: {', '.join(missing_fwd)}) — a --domain run would "
+            "validate smoke and integration wiring against different hosts "
+            "(silent skew)"
+        )
+
     if failures:
         for f in failures:
             result.fail(f)

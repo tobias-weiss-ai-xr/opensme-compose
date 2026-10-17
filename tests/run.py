@@ -133,14 +133,22 @@ def run_script(name: str, script_path: str, domain: str = "localhost",
         return False, f"{script_path} not found"
 
     cmd = [sys.executable, str(full_path)]
-    # Smoke always targets the local port. E2E, by contrast, resolves the
-    # domain itself from .env (OPENSME_DOMAIN) unless the caller was
-    # explicit — passing the default "localhost" would hide a demo-domain
-    # .env, so only append a domain argument when --domain was given.
+    # Smoke always targets the local port. E2E and integration, by contrast,
+    # resolve the domain themselves from .env (OPENSME_DOMAIN) unless the
+    # caller was explicit — passing the default "localhost" would hide a
+    # demo-domain .env, so only append a domain argument when --domain was
+    # given. Note the two call conventions: smoke/e2e take it positionally,
+    # integration takes --domain as a flag. Every stack-gated layer must
+    # see the same resolved domain, or a --domain run would validate smoke
+    # against one host and integration against another (silent skew).
+    domain_explicit = "--domain" in sys.argv or "-d" in sys.argv \
+        or "--domain=" in " ".join(sys.argv[1:])
     if "smoke" in script_path:
         cmd.append(domain)
     elif "e2e" in script_path and e2e:
         cmd.append(domain)
+    elif "integration" in script_path and domain_explicit:
+        cmd += ["--domain", domain]
 
     try:
         result = subprocess.run(
@@ -193,7 +201,10 @@ def main():
     elif args.layer:
         layers_to_run = [int(x) for x in args.layer.split(",")]
     else:
-        layers_to_run = [0, 1, 2, 3, 6]  # Skip 4, 5, 8 (4 unimplemented; 5 & 8 need opt-in stack access)
+        layers_to_run = [0, 1, 2, 3, 4, 6]  # 5 (E2E) & 8 (k8s) stay opt-in:
+        # E2E needs Zitadel PAT + fully provisioned stores (long, ~420s),
+        # k8s needs kubectl + a cluster. Layer 4 (integration) self-skips
+        # per-service when a part isn't running — same contract as smoke.
 
     print(f"\n{BOLD}╔══════════════════════════════════════════════════════════════╗{NC}")
     print(f"{BOLD}║  openSME — Spec / Contract / Test Scaffold             ║{NC}")
