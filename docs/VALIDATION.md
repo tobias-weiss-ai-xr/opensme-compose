@@ -13,7 +13,7 @@ How the openSME Compose distribution is validated before release.
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
 | 0 · Agent lint | `tests/00-static/check_agent.py` — dev-maintenance-bot knowledge/spec parity | ✅ |
 | 0 · Suite coverage | `tests/00-static/check_suite_coverage.py` — no silently-dead checks (inventory below) | ✅ |
-| 0 · Mutation tests | `tests/00-static/check_mutations.py` — every critical check provably catches its invariant | ✅ |
+| 0 · Mutation tests | `tests/00-static/check_mutations.py` — every wired check has teeth (mutation-flipped) or a documented shadow-incompat reason; full-coverage self-check | ✅ |
 | 0 · Agentic gate | `tests/00-static/check_agentic.py` — AS6 self-maintenance, **OPT-IN** (`AGENTIC_STRICT=1`) | — |
 | 1 · Specs | spec compliance (`tests/01-specs`) | ✅ |
 | 2 · Contracts | service/contract validation | ✅ |
@@ -46,7 +46,7 @@ Run everything locally: `make test-static`, `make test-all`, `make bench`,
 - [x] `check_env.py` — env completeness
 - [x] `check_interop.py` — interoperability surfaces (SSO, routing, Redis auth)
 - [x] `check_mail_backend.py` — mail backend switch (XOR)
-- [x] `check_mutations.py` — every critical check provably catches its invariant
+- [x] `check_mutations.py` — every wired check has teeth (mutation-flipped red) or a documented shadow-incompat reason; prints `mutation-coverage: N/M` and fails on any uncovered wired check
 - [x] `check_oidc.py` — Zitadel OIDC client registration
 - [x] `check_perf.py` — budgets, limits, log caps, healthchecks
 - [x] `check_platform.py` — platform versions (k3s/docker)

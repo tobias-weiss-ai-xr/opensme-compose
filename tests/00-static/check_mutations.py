@@ -25,6 +25,7 @@ Exit:   0 all mutations detected; 1 a mutation went undetected.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,7 +125,116 @@ MUTATIONS = [
         "check": "tests/00-static/check_interop.py",
         "why": "§1 — every declared IdM needs its idm/<name>.yml swap point",
     },
+    {
+        "name": "agent-one-shot",
+        "file": "monitoring/dev-agent.yml",
+        "old": '    restart: "no"',
+        "new": '    restart: "always"',
+        "check": "tests/00-static/check_agent.py",
+        "why": "dev-maintenance-bot overlay — the acting agent must stay "
+              "one-shot (restart: 'no'), not a long-running daemon",
+    },
+    {
+        "name": "artifacts-ignore-backups",
+        "file": ".gitignore",
+        "old": "backups/",
+        "new": "backups_dropped/",
+        "check": "tests/00-static/check_artifacts.py",
+        "why": "committed-artifact hygiene — the backups/ ignore rule must "
+              "stay so `git add -A` cannot commit runtime dumps",
+    },
+    {
+        "name": "backup-known-volumes",
+        "file": "scripts/backup.sh",
+        "old": "  camunda-data",
+        "new": "  # camunda-data REMOVED (mutation)",
+        "check": "tests/00-static/check_backup.py",
+        "why": "backup drift guard — every stateful fragment volume must stay "
+              "in backup.sh's KNOWN_VOLUMES",
+    },
+    {
+        "name": "restore-applies-postgres",
+        "file": "scripts/restore.sh",
+        "old": 'gunzip -c "$ACTUAL_FILE"',
+        "new": 'gunzip -c "$ACTUAL_FILE_MISSING"',
+        "check": "tests/00-static/check_backup_restore.py",
+        "why": "backup/restore round-trip — restore.sh must APPLY the "
+              "postgres_ artifact, not merely mention it",
+    },
+    {
+        "name": "boot-core-image-pinned",
+        "file": "docker-compose.yml",
+        "old": "image: ${TRAEFIK_IMAGE:-traefik:v3.7.13}",
+        "new": "image: traefik:latest",
+        "check": "tests/00-static/check_boot.py",
+        "why": "boot contracts — core services must stay pinned (a bare "
+              ":latest silently changes the boot/config model)",
+    },
+    {
+        "name": "bootstrap-history-ttl",
+        "file": "bootstrap/bpmn/invoice-approval.bpmn",
+        "old": 'operaton:historyTimeToLive="P180D"',
+        "new": 'operaton:historyTimeToLive=""',
+        "check": "tests/00-static/check_bootstrap.py",
+        "why": "seed BPMN — every Operaton process needs a history TTL "
+              "(ENGINE-12018, deploy would be rejected)",
+    },
+    {
+        "name": "mail-backend-default",
+        "file": ".env.example",
+        "old": "MAIL_BACKEND=stalwart",
+        "new": "MAIL_BACKEND=mailcow",
+        "check": "tests/00-static/check_mail_backend.py",
+        "why": "mail backend XOR — .env.example must keep stalwart as the "
+              "default switch",
+    },
+    {
+        "name": "perf-digest-pin-doc",
+        "file": ".env.example",
+        "old": "TRAEFIK_IMAGE_DIGEST",
+        "new": "TRAEFIK_IMAGE_PIN_DROPPED",
+        "check": "tests/00-static/check_perf.py",
+        "why": "perf budgets — .env.example must keep the digest-pin vars "
+              "documented for pinned images",
+    },
 ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shadow-incompatible checks.
+#
+# A wired check that CANNOT meaningfully prove teeth via a shadow mutation
+# must be declared here with a truthful reason. The coverage self-check at
+# the bottom of this file requires every wired check to be either targeted
+# by at least one MUTATIONS entry or documented in this set — anything in
+# neither is silently dead teeth and fails the meta-test.
+#
+# "Shadow-incompatible" means one of:
+#   * the check reads NO repo file (a mutation cannot affect its exit code —
+#     mutating anything would be a no-op, not a teeth proof);
+#   * the check needs tooling/state the throwaway shadow copy cannot provide
+#     (mutating would still prove nothing because the run cannot be green on
+#     an unmutated baseline).
+#
+# Keys are `tests/00-static/check_*.py` basenames; values are the one-line
+# reason that explains WHY the check cannot be exercised in the shadow.
+# ─────────────────────────────────────────────────────────────────────────────
+SHADOW_INCOMPATIBLE = {
+    "check_platform.py": (
+        "platform versions are read LIVE from kubectl/ssh/docker on the "
+        "orchestration hosts (check_platform.py opens no repo file), so a "
+        "shadow copy changes nothing a mutation could flip red — a shadow "
+        "mutation here would be a no-op, not a teeth proof."
+    ),
+    "check_mutations.py": (
+        "is this very meta-test harness — mutating it would mutate the guard "
+        "under test. Its teeth are proven by (a) every declared MUTATIONS "
+        "entry being required to flip its target check RED, and (b) the "
+        "full-coverage self-check at the bottom of this file, which fails "
+        "whenever any wired check appears in neither MUTATIONS nor "
+        "SHADOW_INCOMPATIBLE."
+    ),
+}
 
 
 SKIP_SUBTREES = {
@@ -214,6 +324,53 @@ def run_check(shadow: Path, check_rel: str) -> int:
     return proc.returncode
 
 
+def _wired_check_names() -> set[str]:
+    """Every tests/00-static/check_*.py registered in tests/run.py Layer 0.
+
+    Same conservative scan check_suite_coverage.py uses: any reference to a
+    `tests/00-static/check_*.py` path in run.py counts as wired. This keeps
+    the meta-test's teeth inventory in lockstep with the runner, so adding a
+    wired check without a mutation (or shadow-incompat reason) goes red here
+    automatically.
+    """
+    run_text = (ROOT / "tests" / "run.py").read_text()
+    return set(re.findall(r"tests/00-static/(check_[A-Za-z0-9_]+\.py)", run_text))
+
+
+def _check_full_coverage(room: Result) -> int:
+    """Prove the mutation suite covers EVERY wired static check.
+
+    A wired check that is neither targeted by a MUTATIONS entry nor declared
+    in SHADOW_INCOMPATIBLE has no provable teeth: the suite would report
+    green even if that check's invariant silently rotted. That is exactly the
+    dead-check failure mode this meta-test exists to prevent, so an uncovered
+    wired check fails the run. Returns the number of uncovered checks.
+    """
+    wired = _wired_check_names()
+    mutated = {Path(m["check"]).name for m in MUTATIONS}
+    covered = mutated | set(SHADOW_INCOMPATIBLE)
+    uncovered = sorted(wired - covered)
+    total = len(wired)
+    count = len(wired & covered)
+    print(
+        f"mutation-coverage: {count}/{total} wired checks have teeth or "
+        "documented shadow-incompat"
+    )
+    if uncovered:
+        room.fail(
+            "wired checks with NO mutation teeth and NO shadow-incompat "
+            f"reason: {', '.join(uncovered)} — add a MUTATIONS entry that "
+            "flips each red, or document a truthful reason in "
+            "SHADOW_INCOMPATIBLE"
+        )
+    else:
+        room.ok(
+            f"all {total} wired checks are mutation-targeted or documented "
+            "shadow-incompatible"
+        )
+    return len(uncovered)
+
+
 def check(room: Result) -> int:
     failures: list[str] = []
     info: list[str] = []
@@ -249,6 +406,11 @@ def check(room: Result) -> int:
         finally:
             if shadow is not None:
                 shutil.rmtree(shadow, ignore_errors=True)
+
+    # Full-teeth coverage: every wired check must be mutation-targeted or
+    # documented shadow-incompatible. This runs AFTER the mutations so its
+    # red output is attributable to coverage, not to an individual mutation.
+    _check_full_coverage(room)
 
     for f in failures:
         room.fail(f)
