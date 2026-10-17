@@ -99,14 +99,11 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
-      - name: Secret scan (Layer 0)
-        # Hardcoded secrets / passwords / API keys, plus RFC1918 & link-local
-        # IPs that must never ship to this public repo. Exit 1 on any hit.
-        run: python3 tests/00-static/scan_secrets.py
-
       - name: Full static suite (Layers 0-2)
         # YAML lint, .env completeness, secret scan, spec compliance,
-        # contract validation. No running stack required.
+        # contract validation. No running stack required. Single entry
+        # point: tests/run.py --static owns the layer-0 list (incl. the
+        # secret scan), so CI must not call tests/00-static/*.py directly.
         run: python3 tests/run.py --static
 
   leak-scan:

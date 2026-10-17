@@ -50,7 +50,7 @@ Run everything locally: `make test-static`, `make test-all`, `make bench`,
 - [x] `check_oidc.py` — Zitadel OIDC client registration
 - [x] `check_perf.py` — budgets, limits, log caps, healthchecks
 - [x] `check_platform.py` — platform versions (k3s/docker)
-- [x] `check_suite_coverage.py` — this inventory's keeper
+- [x] `check_suite_coverage.py` — this inventory's keeper; CI static job must be single-entry (`tests/run.py --static` only — any direct `tests/00-static/*.py` call in ci.yml is a failure)
 - [x] `check_tiles.py` — portal function catalog
 - [x] `compose_config.py` — overlay matrix
 - [x] `scan_secrets.py` — secret scan
