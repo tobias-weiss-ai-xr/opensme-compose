@@ -63,6 +63,7 @@ LAYERS = {
             ("Dev-maintenance-bot agent lint", "tests/00-static/check_agent.py"),
             ("Backup drift guard", "tests/00-static/check_backup.py"),
             ("Test-suite coverage (no dead checks)", "tests/00-static/check_suite_coverage.py"),
+            ("Mutation tests (checks have teeth)", "tests/00-static/check_mutations.py"),
         ],
         "requires_stack": False,
     },

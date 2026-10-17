@@ -253,13 +253,25 @@ def main():
     # redirect_uri makes Zitadel answer redirect_uri_mismatch at the end of a
     # working SSO chain (verified live 2026-10-16: /oidc/callback/ registered,
     # /api/v1.0/callback/ → 400 from the authorize endpoint).
+    # Match the EFFECTIVE base_paths line of the notes app branch — not any
+    # occurrence anywhere in the script. A comment may legally mention
+    # /api/v1.0/callback/ as documentation while the actual registration
+    # still points at /oidc/callback/; the plain `in`-check would pass on
+    # that comment and let the real mismatch through (found by the mutation
+    # meta-test 2026-10-17). We anchor on the branch's base_paths=(...) list.
     oidc_script = (ROOT / "scripts" / "zitadel-client.sh").read_text()
-    if "/api/v1.0/callback/" not in oidc_script:
+    notes_branch = re.search(
+        r"^  notes\)\n(.*?)(?=^  [a-z_]+\)|\Z)",
+        oidc_script, re.M | re.S,
+    )
+    notes_block = notes_branch.group(1) if notes_branch else ""
+    notes_paths = re.findall(r"base_paths=\(([^)]*)\)", notes_block, re.DOTALL)
+    if not notes_block or not any("/api/v1.0/callback/" in p for p in notes_paths):
         failures.append(
             "scripts/zitadel-client.sh notes base_paths must register "
             "/api/v1.0/callback/ — impress uses lasuite.oidc_login under the "
-            "API prefix; /oidc/callback/ alone means Zitadel answers "
-            "redirect_uri_mismatch on every Notes login"
+            "API prefix; /oidc/callback/ alone (or a comment-only mention) "
+            "means Zitadel answers redirect_uri_mismatch on every Notes login"
         )
 
     if failures:
