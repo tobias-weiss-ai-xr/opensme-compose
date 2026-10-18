@@ -268,6 +268,10 @@ jobs:
         # Isolated: proves the generic agent write gate (drafts inert until a
         # human approves; audit at each stage) against its own bot container.
         run: python3 tests/05-e2e/agent_draft_saga.py
+      - name: "Run agent injection saga (AE2 prompt-injection: no commit from hostile input)"
+        # Isolated: proves injection payloads fed to the dev-agent NEVER result
+        # in committed drafts or injected strings in evidence beyond sanitised form.
+        run: python3 tests/05-e2e/agent_injection.py
       - name: Run burst journey (concurrent load, zero 5xx)
         run: python3 tests/05-e2e/burst.py opensme.local
       - name: Run hygiene journey (no default creds, no open writes)

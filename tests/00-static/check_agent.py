@@ -235,8 +235,48 @@ def check_agents_contract() -> list[str]:
     return errors
 
 
+def check_agent_state_durability() -> list[str]:
+    errors = []
+    agents = yaml.safe_load(AGENTS_CONTRACT.read_text()) or {}
+    for a in (agents.get("agents") or []):
+        name = a.get("name")
+        write_mode = a.get("write_mode", "none")
+        compose_file = a.get("compose_file")
+        if write_mode in ("consent", "approved", "draft"):
+            if not compose_file:
+                errors.append(f"{name}: write_mode={write_mode} but no compose_file defined")
+                continue
+            full_path = ROOT / compose_file
+            if not full_path.exists():
+                errors.append(f"{name}: compose_file {compose_file} not found")
+                continue
+            compose = yaml.safe_load(full_path.read_text()) or {}
+            svc = compose.get("services", {}).get(a.get("compose_service"))
+            if not svc:
+                errors.append(f"{name}: compose_service {a.get('compose_service')} not in {compose_file}")
+                continue
+            named_volumes = []
+            for v in (svc.get("volumes") or []):
+                if isinstance(v, dict):
+                    vs = v.get("source") or v.get("target")
+                    if vs and ":" in str(vs):
+                        named_volumes.append(str(vs).split(":")[0])
+                else:
+                    parts = str(v).split(":")
+                    if len(parts) >= 1:
+                        named_volumes.append(parts[0])
+            state_volumes = [v for v in named_volumes if "-state" in v]
+            backup_path = ROOT / "scripts" / "backup.sh"
+            backup_text = backup_path.read_text() if backup_path.exists() else ""
+            for sv in state_volumes:
+                if sv not in backup_text:
+                    errors.append(f"{name}: state volume {sv} not in scripts/backup.sh")
+    return errors
+
+
 def main() -> int:
-    errors = check_compose() + check_knowledge() + check_knowledge_contract() + check_agents_contract()
+    errors = (check_compose() + check_knowledge() + check_knowledge_contract() +
+              check_agents_contract() + check_agent_state_durability())
     if errors:
         for e in errors:
             print(f"  ❌ {e}")
