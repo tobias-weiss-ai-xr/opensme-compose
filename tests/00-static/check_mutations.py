@@ -171,6 +171,22 @@ MUTATIONS = [
               "postgres_ artifact, not merely mention it",
     },
     {
+        "name": "bpmn-ai-boundary-event",
+        "file": "bootstrap/bpmn/invoice-approval.bpmn",
+        "old": '<boundaryEvent id="ai-categorize-error"',
+        "new": '<!-- boundaryEvent id="ai-categorize-error" DISABLED -->',
+        "check": "tests/00-static/check_bpmn_compensation.py",
+        "why": "AF2: BPMN AI ServiceTasks must have boundaryEvent compensation handlers",
+    },
+    {
+        "name": "outbound-secrets-regex",
+        "file": "tests/06-security/llm_outbound.py",
+        "old": 'r"(?:password|passwd',
+        "new": 'r"(?:NEVER_MATCH',
+        "check": "python3 -m py_compile tests/06-security/llm_outbound.py",
+        "why": "AE1: llm_outbound secrets regex must parse; weakening it should fail py_compile (syntax)"
+    },
+    {
         "name": "boot-core-image-pinned",
         "file": "docker-compose.yml",
         "old": "image: ${TRAEFIK_IMAGE:-traefik:v3.7.13}",

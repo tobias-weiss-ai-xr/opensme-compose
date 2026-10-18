@@ -12,7 +12,34 @@
       <documentation>Triggered when a new invoice is uploaded to OpenCloud.</documentation>
     </startEvent>
 
-    <sequenceFlow id="flow-1" sourceRef="invoice-received" targetRef="check-amount" />
+    <sequenceFlow id="flow-start-ai" sourceRef="invoice-received" targetRef="ai-categorize" />
+
+    <!-- AI-Service-Task: categorize invoice using LLM -->
+    <serviceTask id="ai-categorize"
+                 name="AI Categorize Invoice"
+                 operaton:expression="${aiService.categorizeInvoice(execution)}"
+                 operaton:class="ai.InvoiceCategorizer">
+      <documentation>AI categorizes invoice using LLM (vendor, category, tax code).</documentation>
+    </serviceTask>
+
+    <!-- Boundary compensation: if AI fails, compensate with human fallback -->
+    <boundaryEvent id="ai-categorize-error"
+                   name="AI Categorization Failed"
+                   attachedToRef="ai-categorize"
+                   operaton:errorCode="ai.failure">
+      <errorEventDefinition operaton:errorRef="aiError" />
+    </boundaryEvent>
+
+    <!-- Compensation handler: mark as needs human review -->
+    <serviceTask id="ai-categorize-fallback"
+                 name="Fallback: Mark for human review"
+                 operaton:expression="${execution.setVariable('aiCategorizationStatus', 'needs_human_review')}">
+      <documentation>Compensation: when AI categorization fails, flag for human review instead of blocking.</documentation>
+    </serviceTask>
+    <sequenceFlow id="flow-ai-fallback" sourceRef="ai-categorize-error" targetRef="ai-categorize-fallback" />
+    <sequenceFlow id="flow-fallback-amount" sourceRef="ai-categorize-fallback" targetRef="check-amount" />
+
+    <sequenceFlow id="flow-ai-amount" sourceRef="ai-categorize" targetRef="check-amount" />
 
     <!-- Exclusive gateway: route by amount -->
     <exclusiveGateway id="check-amount" name="Amount &gt; 500?" />
@@ -66,6 +93,9 @@
       <documentation>Archives the approved invoice PDF to the File-Cloud (OpenCloud) Rechnungen folder.</documentation>
     </serviceTask>
     <sequenceFlow id="flow-9" sourceRef="archive-invoice" targetRef="invoice-approved" />
+
+    <!-- Error definition (needed for boundary event) -->
+    <error id="aiError" name="AIServiceError" errorCode="ai.failure" />
 
     <!-- End events -->
     <endEvent id="invoice-approved" name="Invoice approved" />
