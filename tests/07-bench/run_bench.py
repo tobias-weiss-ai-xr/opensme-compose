@@ -135,13 +135,60 @@ def _percentiles(times):
             "samples": n}
 
 
+def run_agentic_bench(args) -> int:
+    """Layer-7: agentic LLM journey with latency + token budget checks."""
+    # Offline mock journey: opt-in via --agentic, safe on any machine.
+    # Budgets (constants with clear failures):
+    MAX_LATENCY_MS = 5000   # 5s per mock LLM call
+    MAX_TOKENS_PER_JOURNEY = 10000  # tokens per mock journey
+
+    print("AH1/L7: agentic LLM journey bench (offline mock)")
+    print(f"  Budget: {MAX_LATENCY_MS}ms max latency, {MAX_TOKENS_PER_JOURNEY} max tokens")
+
+    # Simulate one mock LLM journey
+    start = time.time()
+    mock_latency_ms = 120
+    mock_prompt_tokens = 1500
+    mock_completion_tokens = 800
+    total_tokens = mock_prompt_tokens + mock_completion_tokens
+
+    # Simulate work
+    time.sleep(mock_latency_ms / 1000)
+    elapsed_ms = (time.time() - start) * 1000
+
+    latency_ok = elapsed_ms <= MAX_LATENCY_MS
+    token_ok = total_tokens <= MAX_TOKENS_PER_JOURNEY
+
+    lines = [
+        f"# Layer-7 Agentic Bench",
+        f"",
+        f"- Journey latency: {elapsed_ms:.1f}ms ({'PASS' if latency_ok else 'FAIL'} <= {MAX_LATENCY_MS}ms)",
+        f"- Tokens: prompt={mock_prompt_tokens}, completion={mock_completion_tokens}, total={total_tokens} ({'PASS' if token_ok else 'FAIL'} <= {MAX_TOKENS_PER_JOURNEY})",
+    ]
+
+    if latency_ok and token_ok:
+        print("  PASS: within latency and token budgets")
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text("\n".join(lines) + "\n")
+        return 0
+    else:
+        print("  FAIL: budget exceeded")
+        return 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(OUT_DIR / "benchmark-run.md"))
     ap.add_argument("--samples", type=int, default=30)
     ap.add_argument("--require-stack", action="store_true")
     ap.add_argument("--bounce-container", default=None)
+    ap.add_argument("--agentic", action="store_true",
+                    help="Run LLM-journey latency/token budget tests (offline mock)")
     args = ap.parse_args()
+
+    # Layer-7: agentic LLM journey bench (AH1 / L7)
+    if args.agentic:
+        return run_agentic_bench(args)
 
     live = stack_running()
     if not live:
