@@ -20,6 +20,7 @@ Exit codes:
     1 = security issues found
 """
 
+import os
 import sys
 import re
 import yaml
@@ -316,6 +317,13 @@ def main():
 
     result.header("Restart policies")
     check_restart_policy(result, loader)
+
+    result.header("LLM outbound hygiene (AE1)")
+    if "LLM_OUTBOUND" in os.environ or any(a in sys.argv for a in ["--llm-outbound", "--all"]):
+        from llm_outbound import check_llm_outbound_hygiene
+        check_llm_outbound_hygiene(result)
+    else:
+        result.info("skipped (set LLM_OUTBOUND=1 or use --llm-outbound)")
 
     return result.summary()
 

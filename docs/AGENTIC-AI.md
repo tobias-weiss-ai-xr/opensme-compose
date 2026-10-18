@@ -184,3 +184,16 @@ Contract-Zeile.*
    (opt-in, default aus) expiret veraltete *pendings* — sichere Richtung, nie
    Commit, auditiert als `expire`, Legacy-Drafts ohne `created_at` nie. 19/19
    Specs valid.
+
+---
+
+## 8. Completion
+
+| Epic Story | Status | Landed | Artifacts |
+|------------|--------|--------|-----------|
+| AE1 | ✅ **Done** | 2026-03-?? | `tests/06-security/llm_outbound.py`, `audit.py` LLM outbound hygiene |
+| AE2 | ✅ **Done** | 2026-03-?? | `tests/05-e2e/agent_injection.py` + CI registration, 10 injection patterns across 3 classes |
+| AH1 | ✅ **Done** | 2026-03-?? | `internal/api/server.go` `/status` exposes `evidence_counts`, `llm_tokens`; `agent_saga.py` A6 gate |
+| AH2 | ✅ **Done** | 2026-03-?? | `tests/00-static/check_agent.py` `check_agent_state_durability()`, mutation teeth in `check_mutations.py` |
+| Layer-7 | ✅ **Done** | 2026-03-?? | `tests/07-bench/run_bench.py --agentic` (LLM journey latency + token budgets, offline mock) |
+| AF2 | ⏳ **Open** | — | BPMN boundary compensation for Agent-Service-Task failures |
