@@ -39,18 +39,24 @@ MAILCOW = ROOT / ".github" / "workflows" / "mailcow.yml"
 # Explicit allowlist: scripts in tests/05-e2e that may exist without a CI step.
 #   - support modules: imported helpers / mock servers, exercised by journeys
 #     that DO run (ai_mock, cloud_mock, cloud_mock_support, run).
-#   - documented non-CI journeys: intentionally run against local stacks, not
-#     the demo CI stack (logout, saga_smoke, session_lifecycle, webmail).
+#   - documented non-CI journeys: webmail is intentionally run against a local
+#     mail stack, not the demo CI stack (which ships no SOGo/Stalwart); the saga
+#     blueprints run via `make saga` because every one of them needs an overlay
+#     (mail, Operaton, invoice, paperless, notes, ticketing, CMS) that the demo
+#     stack does not boot — in CI they would only ever skip.
 #     Remove an entry to make the strict gate enforce it in CI.
 ALLOWLIST = {
     "ai_mock.py": "support module (mock LLM backend, used by ai_journey)",
     "cloud_mock.py": "support module (mock opencloud, used by journeys)",
     "cloud_mock_support.py": "support module (helpers, no journey entrypoint)",
     "run.py": "test-runner helper, not a journey",
-    "logout.py": "non-CI journey (needs fully-provisioned IDM/portal)",
-    "saga_smoke.py": "non-CI journey (lightweight local smoke)",
-    "session_lifecycle.py": "non-CI journey (needs provisioned session store)",
-    "webmail.py": "non-CI journey (needs mail round-trip)",
+    "webmail.py": "non-CI journey (needs the mail profile: demo stack has no SOGo)",
+    "saga_onboarding.py": "non-CI journey (needs OpenCloud + SOGo; run via `make saga`)",
+    "saga_quote_to_cash.py": "non-CI journey (needs invoice + paperless overlays; run via `make saga`)",
+    "saga_leave_request.py": "non-CI journey (needs Operaton; run via `make saga`)",
+    "saga_support_ticket.py": "non-CI journey (needs ticketing overlay; run via `make saga`)",
+    "saga_publishing.py": "non-CI journey (needs CMS overlay; run via `make saga`)",
+    "saga_team_knowledge.py": "non-CI journey (needs notes overlay; run via `make saga`)",
 }
 
 # Scripts that are pure support / not standalone journeys. A script counts as a

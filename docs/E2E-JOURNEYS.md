@@ -28,10 +28,24 @@ for any overlay subset.
 | A2 | Als Mitarbeiter melde ich mich per Browser-Flow an (authorization-code + PKCE) und erhalte Tokens | `run_auth_code_flow` — real code exchange via v2 Session API |
 | A3 | Als integrierende App vertraue ich dem ID-Token: RS256-Signatur gegen den live JWKS geprüft, iss/aud/exp/iat/nonce/sub stimmen | `verify_id_token` — pure-stdlib RSA verify, openssl-verified |
 | A4 | Als Mitarbeiter lande ich in der zweiten App ohne erneute Passworteingabe | `section_sso_reuse` — second authorize finalized from the existing IdP session |
-| A5 | Als Mitarbeiter beende ich meine Sitzung — und die tote Session wird überall abgewiesen | `section_logout` — DELETE session, then reject reuse |
+| A5 | Als Mitarbeiter beende ich meine Sitzung — und die tote Session wird überall abgewiesen | `section_logout` — DELETE session, then reject reuse; `logout.py` (A5/LO-1) — dieselbe Sitzung stirbt über das Portal-Logout, inklusive Sign-out bei der zweiten App |
 
 **Security invariants covered by A2–A5:** state binding, PKCE S256,
 audience binding, replay rejection after logout.
+
+### Dedizierte SSO-Journeys (laufen in CI)
+
+Zwei Journeys prüfen das Identitätsverhalten über `run.py` hinaus — beide
+brauchen nur den Demo-Stack (Portal + IdP), laufen also im SSO-Flows-Job:
+
+| Journey | Prüft | Checks |
+|---------|-------|--------|
+| `logout.py` | Portal-Logout & Single Log-out: `POST /api/logout` löscht das Session-Cookie und antwortet mit 303 auf den `end_session`-Endpoint (mit `id_token_hint` + Post-Logout-URI), der Browser landet auf `/logged-out`, die geteilte IdP-Session ist tot (Replay abgewiesen), und ein zweiter Relying-Party-Client (Stellvertreter für OpenCloud) ist danach ebenfalls abgemeldet | K1–K4 |
+| `session_lifecycle.py` | Sitzungs-Lebenszyklus: S1 alle Credentials sind zeitlich begrenzt und `expires_in`/`exp`/`iat` stimmen Ende-zu-Ende überein, S2 `offline_access` wird geehrt (Refresh-Grant liefert NEUES Access-Token mit rotiertem Refresh-Token, ohne erneuten Login, live an Userinfo), S3 EINE IdP-Session trägt ZWEI Relying Parties (Portal-App + OpenCloud-Client) | S1–S3 |
+
+Ohne Browser, ohne Wartezeiten auf echte Timeouts: geprüft wird der
+Timeout-*Vertrag* des Stacks (endlich, konsistent, aktuell gültig) — das
+ist, was ein E2E-Test ohne Stunden Schlaf ehrlich zusichern kann.
 
 ## Epic B — Portal: the single entry point
 

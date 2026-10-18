@@ -1079,7 +1079,7 @@ make container            # Layer 3: container health
 make smoke                # Layer 3: HTTP/SSL/port smoke
 make integration          # Layer 4: cross-service integration
 make test                 # Layers 0–4 (static → integration)
-make e2e                  # Layer 5: e2e SSO journeys (needs a running stack)
+make e2e                  # Layer 5: e2e SSO journeys (run.py + logout + session lifecycle)
 make saga                 # Layer 5: saga journey blueprints (needs a running stack)
 make security             # Layer 6: security audit
 make test-all             # Layers 0–6 (test + e2e + security)

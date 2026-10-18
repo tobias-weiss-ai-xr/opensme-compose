@@ -286,6 +286,8 @@ integration:
 e2e:
 	@echo -e "$(BLUE)── layer 5: e2e — SSO flows (requires running stack) ──$(NC)"
 	@$(PYTHON) tests/05-e2e/run.py $(DOMAIN) 2>&1
+	@$(PYTHON) tests/05-e2e/logout.py $(DOMAIN) 2>&1
+	@$(PYTHON) tests/05-e2e/session_lifecycle.py $(DOMAIN) 2>&1
 	@$(MAKE) saga
 
 saga:

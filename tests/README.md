@@ -125,7 +125,7 @@ make test-static   # Layers 0-2 (all static checks)
 make container     # container health table (requires stack)
 make smoke         # Layer 3: HTTP smoke (requires stack)
 make integration   # Layer 4: cross-service wiring (requires stack)
-make e2e           # Layer 5: SSO/OIDC e2e flows (requires stack)
+make e2e           # Layer 5: run.py + logout.py + session_lifecycle.py + `make saga`
 make security      # Layer 6: security audit
 make bench         # Layer 7: live benchmark (optional)
 make test          # Layers 0-4 (static + container + smoke + integration; integration self-skips)
@@ -205,7 +205,8 @@ What is covered (full story catalog with Given/When/Then:
 4. **Single sign-on** — a second authorize is finalized with the existing
    IdP session; no second credential check
 5. **Logout** — the session is terminated (`DELETE /v2/sessions/{id}`) and
-   the dead session must be rejected
+   the dead session must be rejected (portal-driven variant with single
+   sign-out to OpenCloud: `logout.py`, item 33)
 6. **App reachability** — opencloud, synapse, notes, paperless, ticketing,
    cms, store, webmail (when running)
 7. **SSO wiring** — synapse `/_matrix/client/v3/login/sso/redirect` and
@@ -323,6 +324,33 @@ What is covered (full story catalog with Given/When/Then:
    `tests/05-e2e/concurrent_writers.py`: 20 parallel intercom posts
    all land, no lost updates, concurrent readers always see valid
    JSON, the page carries the surviving notes.
+33. **Portal logout & single sign-out (LO-1)** —
+   `tests/05-e2e/logout.py`: signs in through the v2 Session API, plants
+   the ID token in the portal's `OPENSMESESSION` cookie (what an
+   authenticated browser carries) and drives the portal's own logout
+   contract — `POST /api/logout` clears the cookie and answers a 303 to
+   the IdP end-session endpoint with `id_token_hint`, the browser lands
+   on `/logged-out`, the shared IdP session is dead (replay rejected),
+   and a second relying party standing in for OpenCloud is signed out
+   too. CI runs it after the main suite.
+34. **Session lifecycle (Epic S)** —
+   `tests/05-e2e/session_lifecycle.py`: the three properties that make a
+   session a session — S1 every credential is time-bounded and the
+   `expires_in`/`exp`/`iat` bounds agree end to end, S2 `offline_access`
+   is honored (refresh grant mints a NEW access token with a rotated
+   refresh token, no re-login, still live at userinfo), S3 ONE IdP
+   session covers TWO relying parties (portal app + OpenCloud client).
+   CI runs it after the main suite.
+35. **Webmail page contract** — `tests/05-e2e/webmail.py`: SOGo serves
+   200 with login markup and every asset the page references under
+   `/SOGo.woa/WebServerResources/` resolves (a blank page fails even
+   when HTML and the SSO redirect look healthy). Local/operator
+   journey: the demo stack ships no SOGo, so CI never runs it.
+36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
+   portal tile leads to a URL that answers ("no tile to nowhere"),
+   `/api/feeds` degrades to empty columns instead of erroring, and
+   configured-but-undeployed catalog functions skip visibly. CI runs it
+   after the main suite; the full blueprints run via `make saga`.
 17. **Mailcow (full mail server)** — `tests/05-e2e/mailcow_journey.py`
    drives the vendored mailcow-dockerized submodule via
    `scripts/mailcow.sh`: admin UI through the openSME Traefik, SMTP

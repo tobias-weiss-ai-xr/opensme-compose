@@ -248,6 +248,21 @@ jobs:
       - name: Run e2e suite (Layer 5 — SSO flows)
         # Pass --insecure to allow HTTP-only dev endpoints
         run: python3 tests/05-e2e/run.py --insecure opensme.local
+      - name: Run portal logout journey (LO-1 single sign-out reaches OpenCloud)
+        # Same IdP session machinery as run.py's section_logout, driven from the
+        # portal's own POST /api/logout: cookie cleared, 303 to end-session with
+        # id_token_hint, IdP session dead on replay, OpenCloud app signed out.
+        run: python3 tests/05-e2e/logout.py opensme.local
+      - name: Run session lifecycle journey (timeout, refresh, cross-service SSO)
+        # S1 token bounds agree end to end, S2 offline_access refresh rotates
+        # without re-login, S3 one IdP session covers portal + OpenCloud.
+        run: python3 tests/05-e2e/session_lifecycle.py opensme.local
+      - name: Run saga navigation smoke (no tile to nowhere)
+        # Every tile the portal renders must lead to a URL that answers, and
+        # /api/feeds degrades to empty columns instead of erroring. The full
+        # saga blueprints need overlays the demo stack does not ship — they run
+        # via `make saga` against a full stack.
+        run: python3 tests/05-e2e/saga_smoke.py opensme.local
       - name: Run operator broadcast journey (publish → escape check → withdraw)
         run: python3 tests/05-e2e/broadcast.py opensme.local
       - name: Run resilience journey (DB bounce + IdP outage → self-heal)

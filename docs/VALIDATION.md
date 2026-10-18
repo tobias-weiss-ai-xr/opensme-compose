@@ -20,7 +20,7 @@ How the openSME Compose distribution is validated before release.
 | 2 · Contracts | service/contract validation | ✅ |
 | 3 · Smoke | HTTP endpoints + container health (`tests/03-smoke`) | host |
 | 4 · Integration | cross-service wiring: DB provisioning, pgbouncer, SSO issuer, live AI proxy | host |
-| 5 · E2E | real SSO/OIDC journeys over HTTP (Zitadel Session API, no browser) + portal security-header contract | ✅ |
+| 5 · E2E | real SSO/OIDC journeys over HTTP (Zitadel Session API, no browser): `run.py` (Epic A–D), `logout.py` (portal logout + single sign-out to OpenCloud), `session_lifecycle.py` (timeout, refresh rotation, cross-service SSO), `saga_smoke.py`, plus the portal security-header contract | ✅ |
 | 6 · Security | hardening audit: exposed ports, secrets, TLS, privileges | host |
 | 7 · Bench | `tests/07-bench/run_bench.py` — memory + p50/p95/p99 latency | optional (manual) |
 | 8 · K8s | cluster deployment health (`tests/08-k8s`) | host |
@@ -28,6 +28,17 @@ How the openSME Compose distribution is validated before release.
 
 Run everything locally: `make test-static`, `make test-all`, `make bench`,
 `cd portal && cargo test`.
+
+Layer 5 is split by job: the SSO-flows job runs `run.py` and the journeys
+that share its prerequisites, while the heavier operator journeys
+(broadcast, resilience, backup, restore drill, rolling recreate,
+persistence, portability, intercom, …) run as their own steps in the same
+job. Journeys that need an overlay the demo stack does not boot stay
+local: `webmail.py` (SOGo) and the six `saga_*.py` blueprints (Operaton,
+invoice, paperless, notes, ticketing, CMS) — they run via `make saga` or a
+full stack. `tests/00-static/check_agentic.py` enforces that this split is
+explicit: with `AGENTIC_STRICT=1` every `tests/05-e2e` journey must be a
+CI step or on its documented allowlist.
 
 ## Layer-0 check inventory
 
