@@ -35,6 +35,7 @@
 .PHONY: agentic-gate backup backup-db backup-dry-run bench compliance \
         down-volumes fmt lint-code logs-size perf-check \
         provision-demo-users provision-demo-users-clean provision-demo-users-dry \
+        provision-mail-users \
         prune restore restore-from survey-deploy test-run
 
 .DEFAULT_GOAL := help
@@ -301,6 +302,7 @@ saga:
 e2e-mail:
 	@echo -e "$(BLUE)── layer 5: webmail page contract (needs the mail profile) ──$(NC)"
 	@echo -e "   requires Stalwart + SOGo from mail/stalwart.yml + mail/sogo.yml (skips when absent)"
+	@echo -e "   the login leg needs mail users: make provision-mail-users"
 	@$(PYTHON) tests/05-e2e/webmail.py $(DOMAIN) 2>&1
 
 security:
@@ -390,6 +392,11 @@ provision-demo-users-clean:
 provision-demo-users-dry:
 	@bash scripts/provision-demo-users.sh --dry-run
 
+# Mail users live in TWO stores (Stalwart for IMAP/SMTP, Postgres for SOGo's
+# webmail login); this writes both halves from bootstrap/demo-users.json.
+provision-mail-users:
+	@bash scripts/provision-demo-users.sh --component stalwart
+
 compliance:
 	@python3 scripts/compliance.py
 
@@ -460,6 +467,7 @@ help:
 	@echo "    make provision-demo-users    Provision 12 demo users in Zitadel (12 person SME)"
 	@echo "    make provision-demo-users-clean  Delete + re-provision demo users"
 	@echo "    make provision-demo-users-dry    Show demo user config (JSON) without provisioning"
+	@echo "    make provision-mail-users    Provision the 12 demo mail users (Stalwart principals + SOGo mail_users rows)"
 	@echo "    make compliance              Generate compliance reports (JSON + MD)"
 	@echo ""
 	@echo -e "  $(GREEN)Demo Quickstart$(NC)"

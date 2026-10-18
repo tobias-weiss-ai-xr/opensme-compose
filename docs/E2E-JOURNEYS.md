@@ -48,7 +48,24 @@ einem eigenen Job (`mail`), der Stalwart + SOGo dazubootet:
 
 | Journey | Prüft | Checks |
 |---------|-------|--------|
-| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, und SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren) | Seite + Assets + Schema |
+| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren), **und ein echter Login funktioniert**: `POST /SOGo/connect` (JSON) gegen Postgres (`sogo.mail_users`) liefert Session- und XSRF-Cookie, `Mail/mailAccounts` muss eine **nicht-leere** Kontoliste mit der eigenen Adresse zurückgeben (SOGo angemeldet, Stalwart aber nicht → leere Liste), `Mail/0/view` und `Mail/0/folderINBOX/view` müssen 200 liefern | Seite + Assets + Schema + Login + Postfach |
+
+**XSRF-Falle (Ursache einer wochenlangen Fehldiagnose)**: SOGo dispatcht
+keine UI-Action ohne XSRF-Nachweis (`UIxComponent -performActionNamed:`). Der
+Login ist davon ausgenommen — deshalb antworten Seite, Assets und Login
+weiterhin 200, während **jede** Action (Mail, Kalender, Kontakte) mit HTTP 500
+und dem 36-Byte-Body `the called object returned no result` endet, sobald
+eine curl-Probe nur das Session-Cookie (`0xHIGHFLYxSOGo`) mitschickt und den
+Header `X-XSRF-TOKEN` vergisst. Ein Browser sendet den `XSRF-TOKEN`-Cookie aus
+`POST /SOGo/connect` genau als diesen Header; `webmail.py` tut dasselbe —
+sonst ist „Mail-UI kaputt“ nicht von „Probe kaputt“ zu unterscheiden.
+
+Der Login-Teil braucht Nutzer in **beiden** Stores: Stalwart (IMAP, Rolle
+`user`) und `sogo.mail_users` (`{SHA512-CRYPT}`-Hash).
+`make provision-mail-users` bzw. `scripts/provision-demo-users.sh --component
+stalwart` schreibt beide Hälften in einem Aufruf. Ohne provisionierte Nutzer
+überspringt die Journey den Login-Teil; mit Nutzern ist ein fehlgeschlagener
+Login ein Fehler.
 
 Ohne Mail-Profil (Demo-Stack) meldet die Journey `skip` statt `FAIL`; läuft
 ein `opensme-sogo`-Container, der nicht mehr antwortet, ist es ein Fehler —

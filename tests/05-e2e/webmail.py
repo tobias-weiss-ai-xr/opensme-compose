@@ -26,15 +26,39 @@ This journey pins the page contract:
      not percent-encoded into the postgresql:// URL (or the wrong DB user)
      leaves the schema empty and login impossible. Only checked when the
      local engine can reach opensme-postgres.
+  5. An authenticated webmail session — the part a user actually notices.
+     SOGo authenticates against Postgres (sogo.mail_users), Stalwart owns
+     IMAP; a half-provisioned user logs in and then sees an empty mailbox.
+     So: POST /SOGo/connect (JSON), then the account bootstrap the Angular
+     app calls first, GET /SOGo/so/<user>/Mail/mailAccounts, then the mailbox
+     view. The account list must be non-empty JSON carrying the user's own
+     address — that is the difference between "webmail works" and "webmail
+     renders". Skipped when no mail user is provisioned (fresh stack); FAILED
+     when mail_users has rows and the login still does not work.
+
+     Each action URL needs TWO things a browser sends on its own, and a naive
+     curl probe (no header) gets HTTP 500 with the 36-byte body "the called
+     object returned no result" — SOGo's XSRF guard in UIxComponent
+     -performActionNamed: refuses to dispatch without them:
+       * the session cookie from POST /SOGo/connect, and
+       * X-XSRF-TOKEN: <value of the XSRF-TOKEN cookie set by that login>.
+     The login itself is exempt, which is what makes the artefact so
+     confusing: the page, the assets and the login all answer 200 while every
+     single action — Mail, Calendar, Contacts — answers 500.
 
 Usage:
   python3 tests/05-e2e/webmail.py                    # domain from .env
   python3 tests/05-e2e/webmail.py home.opensme.graphwiz.ai
 
+Credentials for step 5 come from bootstrap/demo-users.json (first user — the
+same file scripts/provision-demo-users.sh feeds both stores from), overridable
+with SOGO_E2E_USER / SOGO_E2E_PASSWORD.
+
 Exit codes: 0 = pass, 1 = failed (skips don't fail).
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -125,6 +149,64 @@ def sogo_schema_tables() -> int | None:
         return int(proc.stdout.strip())
     except ValueError:
         return None
+
+
+def sogo_mail_user_rows() -> int | None:
+    """How many webmail users SOGo can authenticate, or None if unknowable.
+
+    sogo.mail_users is the table SOGoUserSources points at (see
+    postgres-init/02-mail-users.sql). Zero rows is a legitimate state — a
+    fresh stack that never ran scripts/provision-demo-users.sh --component
+    stalwart — and then the login leg below cannot be judged. A row count
+    above zero makes a failing login a real defect, not a missing fixture.
+
+    Returns None when the engine or the postgres container is out of reach
+    (remote deployment).
+    """
+    user = "opensme"
+    try:
+        env = subprocess.run(
+            ["docker", "exec", "opensme-postgres", "printenv", "POSTGRES_USER"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if env.returncode == 0 and env.stdout.strip():
+            user = env.stdout.strip()
+        proc = subprocess.run(
+            ["docker", "exec", "opensme-postgres",
+             "psql", "-U", user, "-d", "sogo", "-tAc",
+             "select count(*) from mail_users"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return None
+
+
+def demo_mail_credentials(root: Path) -> tuple[str, str] | None:
+    """Login/password of the first demo user (env overrides for deployments).
+
+    bootstrap/demo-users.json is the single source of truth: the same entry
+    seeds Stalwart AND sogo.mail_users via scripts/provision-demo-users.sh
+    --component stalwart, so a test that reads it cannot drift from the
+    provisioning.
+    """
+    user = os.environ.get("SOGO_E2E_USER", "").strip()
+    password = os.environ.get("SOGO_E2E_PASSWORD", "").strip()
+    if user and password:
+        return user, password
+    try:
+        users = json.loads((root / "bootstrap" / "demo-users.json").read_text())["users"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not users:
+        return None
+    first = users[0]
+    return first.get("username", ""), first.get("password", "")
 
 
 def main() -> bool:
@@ -265,6 +347,101 @@ def main() -> bool:
         )
     elif tables is not None:
         result.ok(f"SOGo owns its database schema ({tables} tables)")
+
+    # 5. a real webmail session: login, then the Angular app's first two calls.
+    #    Everything above passes for a stack where no user can log in at all.
+    creds = demo_mail_credentials(Path(__file__).resolve().parent.parent.parent)
+    rows = sogo_mail_user_rows()
+    if creds is None or not all(creds):
+        result.skip("no demo user known (bootstrap/demo-users.json missing?)")
+    else:
+        login, password = creds
+        s_session = requests.Session()
+        s_session.verify = not localish
+        try:
+            lr = s_session.post(
+                webmail_base + "/SOGo/connect",
+                json={"userName": login, "password": password, "rememberLogin": 0},
+                timeout=T,
+            )
+        except requests.RequestException as e:
+            lr = None
+            login_error = f"{type(e).__name__}: {e}"
+        else:
+            login_error = f"HTTP {lr.status_code}"
+        xsrf = s_session.cookies.get("XSRF-TOKEN", "")
+        if lr is None or lr.status_code != 200 or not xsrf:
+            # No user provisioned → nothing to judge. Users provisioned → the
+            # login is broken, which is a defect (SQL URL, password scheme,
+            # missing role in Stalwart).
+            if rows:
+                result.fail(
+                    f"login as {login} → {login_error} (XSRF cookie: "
+                    f"{'yes' if xsrf else 'no'}) while sogo.mail_users holds "
+                    f"{rows} row(s) — a provisioned user must be able to log in"
+                )
+            else:
+                result.skip(
+                    f"login as {login} → {login_error} and no mail user is "
+                    "provisioned (scripts/provision-demo-users.sh --component "
+                    "stalwart) — nothing to authenticate against"
+                )
+        else:
+            result.ok(f"login as {login} succeeds (session + XSRF cookie)")
+            headers = {"Accept": "application/json", "X-XSRF-TOKEN": xsrf}
+            actions = [
+                (f"/SOGo/so/{login}/Mail/mailAccounts",
+                 "account bootstrap (identities)"),
+                (f"/SOGo/so/{login}/Mail/0/view", "mailbox view"),
+                (f"/SOGo/so/{login}/Mail/0/folderINBOX/view", "INBOX view"),
+            ]
+            for path, label in actions:
+                try:
+                    ar = s_session.get(webmail_base + path, headers=headers, timeout=T)
+                except requests.RequestException as e:
+                    result.fail(f"GET {path} → {type(e).__name__}: {e}")
+                    continue
+                if ar.status_code != 200:
+                    hint = ""
+                    if ar.status_code == 500 and "no result" in ar.text:
+                        hint = (
+                            " — SOGo's XSRF guard rejected the action; the "
+                            "X-XSRF-TOKEN header must carry the XSRF-TOKEN "
+                            "cookie (mailAccounts, Mail/0/view, Calendar … all "
+                            "answer 500 this way)"
+                        )
+                    result.fail(f"GET {path} → {ar.status_code}{hint}")
+                    continue
+                if label.startswith("account"):
+                    try:
+                        accounts = ar.json()
+                    except ValueError:
+                        accounts = None
+                    if not isinstance(accounts, list) or not accounts:
+                        result.fail(
+                            f"{label} → {ar.status_code} but no mail account "
+                            "(empty list: SOGo logged in, IMAP/Stalwart did not "
+                            "— check roles:[\"user\"] on the Stalwart principal "
+                            "and SOGoIMAPServer)"
+                        )
+                        continue
+                    emails = [
+                        i.get("email", "")
+                        for a in accounts if isinstance(a, dict)
+                        for i in (a.get("identities") or []) if isinstance(i, dict)
+                    ]
+                    if not any(login in e for e in emails):
+                        result.fail(
+                            f"{label} → account list carries no identity for "
+                            f"{login} (identities: {emails[:3]})"
+                        )
+                        continue
+                    result.ok(
+                        f"{label}: {len(accounts)} mail account(s), "
+                        f"identity {emails[0]}"
+                    )
+                else:
+                    result.ok(f"{label} serves 200")
 
     return result.summary()
 

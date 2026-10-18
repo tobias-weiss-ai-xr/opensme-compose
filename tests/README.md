@@ -354,8 +354,20 @@ What is covered (full story catalog with Given/When/Then:
    sogo_sessions_folder). The page is rendered from templates, so checks
    1–3 stay green while every SQL query fails — a password that is not
    percent-encoded into the `postgresql://` URL left that schema empty.
-   The CI `mail` job boots Stalwart + SOGo and runs this; locally
-   `make e2e-mail` does the same.
+   And it logs in for real: `POST /SOGo/connect` (JSON) against
+   `sogo.mail_users`, then the two calls the Angular app makes first —
+   `Mail/mailAccounts` must return a NON-EMPTY account list carrying the
+   user's own address (logged in but no IMAP account = empty list), then
+   `Mail/0/view` and `Mail/0/folderINBOX/view` must answer 200. Every
+   action URL carries the `X-XSRF-TOKEN` header from the login's
+   `XSRF-TOKEN` cookie: SOGo's XSRF guard (`UIxComponent
+   -performActionNamed:`) refuses to dispatch without it and answers 500
+   `the called object returned no result` — the login is exempt, so a
+   header-less curl probe sees a healthy page and a 500 on every action.
+   Skipped without provisioned users (`make provision-mail-users`); with
+   users, a failed login is a real failure.
+   The CI `mail` job boots Stalwart + SOGo, provisions one demo mail user
+   and runs this; locally `make e2e-mail` does the same.
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

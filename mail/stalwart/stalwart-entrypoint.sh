@@ -28,6 +28,10 @@ fi
 echo "[stalwart-entrypoint] Listening on $bind_addr:25/143/587/8080 ($bind_why)"
 
 mkdir -p "$OUTDIR"
+# The tracer writes to /var/lib/stalwart/logs, but the image never creates that
+# directory. A missing path means "no log sink" — not "no errors" — so keep the
+# server silent-safe instead of undiagnosable.
+mkdir -p /var/lib/stalwart/logs
 
 if [ -f "$TEMPLATE" ]; then
   echo "[stalwart-entrypoint] Rendering $TEMPLATE -> $OUTPUT"

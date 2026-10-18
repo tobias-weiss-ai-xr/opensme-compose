@@ -10,7 +10,8 @@
 #   operaton   BPM engine — engine-rest identity + admin-webapp setup
 #   synapse    Matrix homeserver — shared-secret admin register API
 #   paperless  document vault — Django user model via manage.py shell
-#   stalwart   mail server — stalwart-cli accounts
+#   stalwart   mail server — Stalwart principals (admin REST API) + the
+#              matching SOGo rows in Postgres (table mail_users)
 #   invoice    Invoice Ninja — NOT wired (users are company-bound; the
 #              demo ships a single admin seeded by its entrypoint)
 #
@@ -30,6 +31,7 @@
 #   SYNAPSE_CONTAINER container name for the register API (default opensme-synapse)
 #   PAPERLESS_CONTAINER container name (default opensme-paperless)
 #   STALWART_CONTAINER  container name (default opensme-stalwart)
+#   POSTGRES_CONTAINER  container name (default opensme-postgres)
 #   ZITADEL_HOST / ZITADEL_EXTERNAL / ZITADEL_singleSignOnDomain / ZITADEL_PAT / E2E_ZITADEL_PAT
 #
 set -euo pipefail
@@ -82,7 +84,7 @@ while [[ $# -gt 0 ]]; do
             echo "  operaton   Operaton/Camunda engine identity + admin-webapp setup"
             echo "  synapse    Matrix homeserver (shared-secret register API)"
             echo "  paperless  Paperless-ngx users (Django manage.py)"
-            echo "  stalwart   Stalwart mail accounts (stalwart-cli)"
+            echo "  stalwart   Stalwart mail accounts + SOGo's mail_users rows"
             echo "  invoice    Invoice Ninja: not wired (company-bound users)"
             exit 0
             ;;
@@ -475,17 +477,41 @@ PY
 }
 
 # ══════════════════════════════════════════════════════════════════════
-# STALWART (mail accounts via the webadmin REST API)
+# STALWART (mail accounts) — two halves, one call
+#
+# Stalwart authenticates IMAP/SMTP against its own store, SOGo authenticates
+# webmail logins against Postgres (mail_users). A demo user therefore has to
+# exist in BOTH, with the same password, or half of the stack answers
+# "login failed" while the other half looks healthy:
+#
+#   1. a Stalwart principal (type=individual) with roles=["user"];
+#      without that role Stalwart refuses the IMAP LOGIN and SOGo's account
+#      list ends up empty even though the webmail login itself succeeded.
+#   2. a mail_users row whose c_password is a {SHA512-CRYPT} hash of the same
+#      password (sogo.conf.template: userPasswordAlgorithm = sha512-crypt,
+#      prependPasswordScheme = YES).
 # ══════════════════════════════════════════════════════════════════════
 STALWART_CONTAINER="${STALWART_CONTAINER:-opensme-stalwart}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-opensme-postgres}"
 STALWART_MAIL_DOMAIN="${STALWART_MAIL_DOMAIN:-$DOMAIN}"
+
+# Permissions of the role every mail user needs: Stalwart refuses IMAP LOGIN
+# (and sending) for a principal without them.
+STALWART_USER_PERMISSIONS='["authenticate","email-receive","email-send","imap-append","imap-authenticate","imap-copy","imap-create","imap-delete","imap-enable","imap-expunge","imap-fetch","imap-id","imap-idle","imap-list","imap-lsub","imap-move","imap-select","imap-status","imap-store"]'
+
+# SOGo password hash: a fresh salt per call means two runs produce different
+# (equally valid) hashes — the row is only rewritten when it is missing.
+sogo_password_hash() {
+    printf '{SHA512-CRYPT}%s' \
+        "$(openssl passwd -6 -salt "$(openssl rand -hex 8)" "$1")"
+}
 
 main_stalwart() {
     load_config || return 1
     info "[stalwart] Creating mail accounts for: $COMPANY (@$STALWART_MAIL_DOMAIN)"
-    $DRY_RUN && { info "[stalwart] would create 12 accounts + domain principal via $STALWART_CONTAINER REST API"; return 0; }
+    $DRY_RUN && { info "[stalwart] would create 12 principals + role 'user' via $STALWART_CONTAINER and 12 rows in $POSTGRES_CONTAINER (sogo.mail_users)"; return 0; }
 
-    local admin_pw ip api
+    local admin_pw ip api pg_user
     admin_pw=$(docker exec "$STALWART_CONTAINER" printenv STALWART_ADMIN_PASSWORD 2>/dev/null || true)
     if [[ -z "$admin_pw" ]]; then
         err "[stalwart] STALWART_ADMIN_PASSWORD not found in container env"
@@ -499,6 +525,17 @@ main_stalwart() {
     api="http://$ip:8080"
     local call=(curl -sf -u "admin:$admin_pw")
 
+    local pg_user
+    pg_user=$(docker exec "$POSTGRES_CONTAINER" printenv POSTGRES_USER 2>/dev/null || true)
+    pg_user="${pg_user:-opensme}"
+    # Fail loudly here rather than after 12 silent per-user errors: without the
+    # table no webmail login can ever succeed (see postgres-init/02-mail-users.sql).
+    if ! docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d sogo -tAc \
+            'select 1 from mail_users limit 1' >/dev/null 2>&1; then
+        err "[stalwart] table sogo.mail_users is not readable — was postgres-init/02-mail-users.sql applied?"
+        return 1
+    fi
+
     # Domain principal must exist before accounts can reference it in emails.
     if "${call[@]}" -X POST -H 'Content-Type: application/json' \
             -d "{\"type\":\"domain\",\"name\":\"$STALWART_MAIL_DOMAIN\"}" "$api/api/principal" 2>/dev/null | grep -q fieldAlreadyExists; then
@@ -507,25 +544,68 @@ main_stalwart() {
         info "  ✓ domain $STALWART_MAIL_DOMAIN"
     fi
 
-    local created=0 skipped=0
+    # Role principal: every mail user carries it (see above).
+    if "${call[@]}" "$api/api/principal?types=role" 2>/dev/null | grep -q '"name":"user"'; then
+        $VERBOSE && info "  - role 'user' exists"
+    elif "${call[@]}" -X POST -H 'Content-Type: application/json' \
+            -d "{\"type\":\"role\",\"name\":\"user\",\"enabledPermissions\":$STALWART_USER_PERMISSIONS}" \
+            "$api/api/principal" 2>/dev/null | grep -q '"data"'; then
+        info "  ✓ role 'user'"
+    else
+        err "[stalwart] could not create role 'user' — IMAP logins will fail"
+        return 1
+    fi
+
+    local created=0 skipped=0 roleless=0 sogo_written=0
     while IFS= read -r user; do
-        local un pw
+        local un pw cn email
         un=$(echo "$user" | jq -r '.username')
         pw=$(echo "$user" | jq -r '.password')
+        cn=$(echo "$user" | jq -r '.displayName')
+        # One address in both stores — Stalwart's principal and SOGo's row must
+        # agree, otherwise the webmail shows an account the server does not own.
+        email="$un@$STALWART_MAIL_DOMAIN"
+
         if "${call[@]}" "$api/api/principal/$un" 2>/dev/null | grep -q '"error"'; then
             if "${call[@]}" -X POST -H 'Content-Type: application/json' \
-                    -d "{\"type\":\"individual\",\"name\":\"$un\",\"emails\":[\"$un@$STALWART_MAIL_DOMAIN\"],\"secrets\":[\"$pw\"]}" \
+                    -d "{\"type\":\"individual\",\"name\":\"$un\",\"emails\":[\"$email\"],\"secrets\":[\"$pw\"],\"roles\":[\"user\"]}" \
                     "$api/api/principal" 2>/dev/null | grep -q '"data"'; then
-                info "  ✓ $un@$STALWART_MAIL_DOMAIN"
+                info "  ✓ $email"
                 created=$((created+1))
             else
-                err "  $un@$STALWART_MAIL_DOMAIN failed"
+                err "  $email failed"
             fi
         else
-            skipped=$((skipped+1)); $VERBOSE && info "  - $un@$STALWART_MAIL_DOMAIN exists"
+            skipped=$((skipped+1))
+            $VERBOSE && info "  - $email exists"
+            # Principals created before the role was part of the payload have
+            # no roles at all; the API cannot patch them (PATCH → notFound),
+            # so report instead of silently leaving a half-working account.
+            if ! "${call[@]}" "$api/api/principal/$un" 2>/dev/null | grep -q '"roles":\["user"\]'; then
+                roleless=$((roleless+1))
+                err "  $email exists WITHOUT roles:[\"user\"] — delete and re-provision it (IMAP login will fail)"
+            fi
+        fi
+
+        # SOGo's half: the same password as a Dovecot-scheme hash. ON CONFLICT
+        # keeps an existing password (a re-run is not a password reset).
+        if docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d sogo -q -v ON_ERROR_STOP=1 \
+                -c "INSERT INTO mail_users (c_uid, c_name, c_cn, c_password, mail)
+                    VALUES ('$un', '$un', '$cn', '$(sogo_password_hash "$pw")', '$email')
+                    ON CONFLICT (c_uid) DO UPDATE
+                       SET c_name = EXCLUDED.c_name,
+                           c_cn   = EXCLUDED.c_cn,
+                           mail   = EXCLUDED.mail" >/dev/null 2>&1; then
+            sogo_written=$((sogo_written+1))
+        else
+            err "  $email: SOGo row (sogo.mail_users) could not be written"
         fi
     done < <(jq -c '.users[]' "$USERS_JSON")
-    info "[stalwart] done: $created created, $skipped skipped"
+    info "[stalwart] done: $created created, $skipped existing, $sogo_written SOGo rows"
+    if [[ $roleless -gt 0 ]]; then
+        err "[stalwart] $roleless account(s) lack roles:[\"user\"] — IMAP/webmail is broken for them"
+        return 1
+    fi
 }
 
 # ── component dispatcher ──────────────────────────────────────────────

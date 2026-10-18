@@ -423,16 +423,26 @@ listeners to IPv4. mailcow boots its own dedicated E2E job in CI
 (`.github/workflows/mailcow.yml`) and the delivery-round-trip journey
 `tests/05-e2e/mailcow_journey.py`.
 
-**Known gap in the Stalwart+SOGo backend: webmail login.** Webmail itself is
-wired — SOGo renders, its assets resolve, and it owns its PostgreSQL database
-(`sogo_user`, tables created on first start) — but *authenticating* a user does
-not work yet: `SOGoUserSources` in `mail/sogo/sogo.conf.template` points at an
-`ldap` host that no compose file deploys. Stalwart keeps its own internal
-directory and Zitadel is the IdP, so a login directory has to be chosen
-deliberately (an LDAP directory that both Stalwart and SOGo read, or SOGo SSO
-against Zitadel). The page contract is enforced by `tests/05-e2e/webmail.py`
-(CI job `mail`); `run.py` reports the SSO precondition as a warning, not a
-pass, so the gap stays visible instead of turning green.
+**Webmail login is SQL-backed, not a directory service.** SOGo authenticates
+against PostgreSQL — `SOGoUserSources` in `mail/sogo/sogo.conf.template` reads
+the `sogo.mail_users` table (created by `postgres-init/02-mail-users.sql`,
+empty until users are provisioned) — while Stalwart keeps its own internal
+directory for IMAP/SMTP. One call writes both halves from
+`bootstrap/demo-users.json`, so the two stores cannot drift:
+
+```bash
+make provision-mail-users   # Stalwart principals (role `user`) + sogo.mail_users rows
+```
+
+For ≤500 users that keeps a directory daemon out of the stack (no LDAP);
+Zitadel stays the IdP for the rest of the stack. The webmail itself still
+shows SOGo's own login form (SQL-authenticated) rather than a Zitadel
+redirect — `run.py`'s `section_sogo_sso` reports exactly that as a warning, so
+federating SOGo to the IdP stays visible as an open item instead of passing
+silently. The login contract is enforced end to end by
+`tests/05-e2e/webmail.py` (CI job `mail`): page + assets + SOGo's own schema,
+then a real login, the account bootstrap (`Mail/mailAccounts`) and the mailbox
+view — through the edge, carrying the browser's XSRF header.
 
 ### Docker Compose file order
 

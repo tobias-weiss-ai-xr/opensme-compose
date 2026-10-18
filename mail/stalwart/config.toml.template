@@ -65,3 +65,36 @@ secret = "${STALWART_ADMIN_PASSWORD}"
 # this the internal relay path (auth -> mail) fails with 550 Invalid EHLO
 [session.ehlo]
 reject-non-fqdn = false
+
+# SOGo's IMAP client (SOPE) connects without STARTTLS (url=...?tls=NO) and
+# refuses Stalwart's self-signed certificate, so the hop stays in clear text on
+# the compose network. Without this, LOGIN is answered with
+# "NO LOGIN is disabled on the clear-text port." and the webmail stays empty.
+[imap.auth]
+allow-plain-text = true
+
+# Settings that are not matched by `local-keys` below live in Stalwart's own
+# store, where the stored value silently wins over the value written in this
+# file (the server logs "Database key defined in local configuration" for
+# every such key). The overlay keeps its auth/session/IMAP switches here on
+# purpose, so they must be listed as local keys.
+[config]
+local-keys = [
+  "store.*",
+  "directory.*",
+  "tracer.*",
+  "!server.blocked-ip.*",
+  "!server.allowed-ip.*",
+  "server.*",
+  "authentication.fallback-admin.*",
+  "cluster.*",
+  "config.local-keys.*",
+  "storage.data",
+  "storage.blob",
+  "storage.lookup",
+  "storage.fts",
+  "storage.directory",
+  "certificate.*",
+  "session.*",
+  "imap.*",
+]

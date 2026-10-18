@@ -1,9 +1,16 @@
 // SOGo Groupware — production config template for up to 500 users
 // Connects to Stalwart via IMAP/SMTP, PostgreSQL via PgBouncer.
 //
-// This file is processed by envsubst at container start.
-// Variables are substituted from Docker environment.
-// See mail/sogo/sogo-entrypoint.sh
+// mail/sogo/sogo-entrypoint.sh renders this file at container start with a
+// plain sed substitution per variable, so only bare ${VAR} placeholders are
+// replaced — ${VAR:-default} is NOT expanded here.
+//
+// Debugging note: SOGo never dispatches a UI action before the XSRF check.
+// Every action URL (e.g. /SOGo/so/<user>/Mail/mailAccounts) needs the
+// X-XSRF-TOKEN header carrying the XSRF-TOKEN cookie set at login; without it
+// SOPE answers HTTP 500 with the 36-byte body "the called object returned no
+// result" (invalidLogin page + assets keep working). See docs/E2E-JOURNEYS.md
+// → webmail, and tests/05-e2e/webmail.py which probes it the browser's way.
 
 {
   // Server
@@ -28,38 +35,52 @@
   // default 127.0.0.1 is not running, which disables the cache after retries.
   SOGoMemcachedHost = "memcached";
 
-  // Authentication via LDAP.
-  // GAP: no LDAP directory is deployed by this stack (Zitadel is the IdP and
-  // Stalwart keeps an internal directory), so hostname "ldap" resolves to
-  // nothing and every login attempt answers 403. Webmail renders and the
-  // database layer works; authenticating users needs a deliberate choice
-  // (LDAP directory read by Stalwart + SOGo, or SOGo SSO against Zitadel).
-  // See README "Mail backend switch" → Known gap.
+  // Authentication: mail users from PostgreSQL (table mail_users).
+  //
+  // No directory service, on purpose: this stack serves <= 500 users, and an
+  // LDAP daemon would be a fourth moving part for one table. Stalwart (Rust)
+  // owns IMAP/SMTP and its admin API provisions accounts; Postgres holds the
+  // same users for SOGo's login, so both read ONE table instead of syncing
+  // two directories. scripts/provision-demo-users.sh --component stalwart
+  // writes both sides in one call.
+  //
+  // The viewURL needs the same percent-encoded password as the OCS URLs
+  // above — a raw '/' in a base64 password invalidates it exactly the same way.
   SOGoUserSources = (
     {
-      type = ldap;
-      CNFieldName = cn;
-      UIDFieldName = uid;
-      IDFieldName = uid;
-      bindDN = "cn=admin,${LDAP_ROOT_DN}";
-      bindFields = (uid, mail);
-      bindPassword = "${LDAP_ADMIN_PASSWORD}";
-      baseDN = "${LDAP_ROOT_DN}";
+      type = sql;
+      id = "opensme-mail-users";
+      viewURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/mail_users";
       canAuthenticate = YES;
-      displayName = "openSME Users";
-      hostname = "ldap";
-      id = "opensme-ldap";
-      port = 389;
-      cacheTimeout = 300;
+      isAddressBook = YES;
+      displayName = "openSME Mail";
+      // Column contract of mail_users (see postgres-init/02-mail-users.sql):
+      // c_uid, c_name, c_password, c_cn, mail — fixed names, SQL sources map
+      // them directly (the LDAP keys CNFieldName/UIDFieldName do not apply).
+      MailFieldNames = (mail);
+      IMAPLoginFieldName = c_uid;
+      // Passwords are stored as {scheme}hash (Dovecot scheme names); the
+      // scheme prefix wins over this default, so the column can hold
+      // {SHA512-CRYPT}$6$… today and a different scheme later without
+      // touching sogo.conf.
+      userPasswordAlgorithm = sha512-crypt;
+      prependPasswordScheme = YES;
     }
   );
 
   // Mail (via Stalwart)
   SOGoDraftsFolderName = Drafts;
-  SOGoSentFolderName = Sent;
-  SOGoTrashFolderName = Trash;
-  SOGoJunkFolderName = Junk;
+  SOGoSentFolderName = "Sent Items";
+  SOGoTrashFolderName = "Deleted Items";
+  SOGoJunkFolderName = "Junk Mail";
   SOGoMailDomain = "${OPENSME_DOMAIN}";
+  // Plain IMAP on 143, inside the compose network only. Stalwart's self-signed
+  // rcgen certificate carries SAN=DNS:localhost, and SOGo's IMAP client
+  // verifies the peer hostname, so the implicit-TLS listener (993) answers
+  // SOGoIMAPServer="stalwart" with "hostname mismatch".
+  // mail/stalwart/config.toml.template therefore enables
+  // [imap.auth] allow-plain-text and mail/stalwart.yml publishes neither 993
+  // nor any other TLS port for IMAP.
   SOGoIMAPServer = "stalwart";
   SOGoSMTPServer = "stalwart";
   SOGoSMTPAuthenticationType = PLAIN;
@@ -74,8 +95,7 @@
   SOGoPendingMailDropBoxSizeLimit = 50;
 
   // General
-  SOGoTimeZone = "${TZ:-Europe/Berlin}";
-  SOGoDefaultUser = "user01";
+  SOGoTimeZone = "${TZ}";
   SOGoLanguage = German;
   SOGoAppointmentSendEMailNotifications = YES;
 
