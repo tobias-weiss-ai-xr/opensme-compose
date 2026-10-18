@@ -231,7 +231,6 @@ def check_llm_outbound_hygiene(result: Result) -> None:
                 result.fail(v)
         else:
             result.ok("AE1: no sensitive data leaks in outbound LLM payloads")
-            result.passed()
     except KeyboardInterrupt:
         result.fail("interrupted")
     except Exception as e:

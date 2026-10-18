@@ -97,14 +97,17 @@ type Server struct {
 	draftSeq int
 
 	// AH1: observability counters for /status
-	llmPromptTokens   int
+	llmPromptTokens     int
 	llmCompletionTokens int
 }
 
 // New wires the server. It loads persisted history/evidence from the state
 // dir if present.
 func New(cfg *config.Config, kb *knowledge.Store, chk *checker.Checker, hl *healer.Healer, llm *LLM) (*Server, error) {
-	s := &Server{cfg: cfg, kb: kb, chk: chk, heal: hl, llm: llm, start: time.Now().UTC(), matches: map[string][]knowledge.Match{}, drafts: map[string]*Draft{}}
+	s := &Server{cfg: cfg, kb: kb, chk: chk, heal: hl, llm: llm, start: time.Now().UTC(), matches: map[string][]knowledge.Match{}, drafts: map[string]*Draft{},
+		// Start with non-nil slices so a fresh agent serializes [] (not null)
+		// for the /history and /evidence list endpoints.
+		history: []healer.Receipt{}, evidence: []EvidenceEntry{}}
 	s.load()
 	return s, nil
 }
@@ -256,9 +259,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"kb_services":  s.kb.Services(),
 		"history_size": len(s.history),
 		// AH1: observability
-		"evidence_counts":      eviCounts,
+		"evidence_counts": eviCounts,
 		"llm_tokens": map[string]int{
-			"prompt":    s.llmPromptTokens,
+			"prompt":     s.llmPromptTokens,
 			"completion": s.llmCompletionTokens,
 		},
 	})
@@ -691,6 +694,14 @@ func (s *Server) load() {
 		return
 	}
 	s.history, s.evidence = p.History, p.Evidence
+	// A state file written before the slices were initialized may carry
+	// null; keep the list endpoints serializing [] instead of null.
+	if s.history == nil {
+		s.history = []healer.Receipt{}
+	}
+	if s.evidence == nil {
+		s.evidence = []EvidenceEntry{}
+	}
 	// Restore drafts and continue the id sequence past the highest restored
 	// id — a fresh draft must never overwrite a restored one.
 	for _, d := range p.Drafts {

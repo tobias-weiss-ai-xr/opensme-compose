@@ -110,7 +110,7 @@ def start_bot() -> bool:
         "DEV_AGENT_STATE_DIR": STATE,
         "DEV_AGENT_LLM_ENABLED": "false",   # no outbound LLM needed for inject tests
     }
-    args = ["docker", "run", "-d", "--name", BOT, "--restart", "no",
+    args = ["run", "-d", "--name", BOT, "--restart", "no",
             "-v", f"{state_dir}:{STATE}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro"]
     for k, v in env.items():
@@ -176,7 +176,7 @@ def main() -> int:
             return 1
         result.ok("bot serving")
 
-        initial_evidence = bot_evidence()
+        initial_evidence = bot_evidence() or []
         draft_kinds_before = [e for e in initial_evidence if e.get("kind") == "draft"]
         commit_kinds_before = [e for e in initial_evidence if e.get("kind") == "commit"]
 
@@ -217,8 +217,7 @@ def main() -> int:
                     return 1
         result.ok("INJ-SAN raw injection strings never appear in non-draft evidence")
 
-        result.passed()
-        return 0
+        return 0 if result.summary() else 1
 
     except KeyboardInterrupt:
         result.fail("interrupted")
