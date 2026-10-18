@@ -95,6 +95,10 @@ type Server struct {
 	// draft gate (agent-saga): drafts are inert until human approval.
 	drafts   map[string]*Draft
 	draftSeq int
+
+	// AH1: observability counters for /status
+	llmPromptTokens   int
+	llmCompletionTokens int
 }
 
 // New wires the server. It loads persisted history/evidence from the state
@@ -237,6 +241,13 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// AH1: compute evidence counts by kind
+	eviCounts := make(map[string]int)
+	for _, e := range s.evidence {
+		eviCounts[e.Kind]++
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"started_at":   s.start,
 		"config":       s.cfg.String(),
@@ -244,6 +255,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"matches":      s.matches,
 		"kb_services":  s.kb.Services(),
 		"history_size": len(s.history),
+		// AH1: observability
+		"evidence_counts":      eviCounts,
+		"llm_tokens": map[string]int{
+			"prompt":    s.llmPromptTokens,
+			"completion": s.llmCompletionTokens,
+		},
 	})
 }
 

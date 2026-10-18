@@ -248,6 +248,26 @@ def main() -> int:
         (result.ok if metric_ok else result.fail)(
             "A5 /metrics exposes dev_agent_heals_total (>=1 heal)"
             if metric_ok else f"A5 metrics: rc={met.returncode} body={met.stdout[:200]}")
+
+        # A6: AH1 observability — /status exposes evidence_counts + llm_tokens
+        st = bot_http("/status")
+        status_ok = False
+        evi_counts_ok = False
+        llm_tokens_ok = False
+        if st.returncode == 0:
+            try:
+                sdata = json.loads(st.stdout)
+                ec = sdata.get("evidence_counts")
+                evi_counts_ok = isinstance(ec, dict) and len(ec) >= 0
+                lt = sdata.get("llm_tokens")
+                llm_tokens_ok = isinstance(lt, dict) and isinstance(lt.get("prompt"), int) and isinstance(lt.get("completion"), int)
+                status_ok = evi_counts_ok and llm_tokens_ok
+            except json.JSONDecodeError:
+                pass
+        (result.ok if status_ok else result.fail)(
+            "A6 /status exposes evidence_counts (dict) and llm_tokens (prompt+completion ints)"
+            if status_ok
+            else f"A6 /status missing fields: evi={evi_counts_ok} tokens={llm_tokens_ok} rc={st.returncode}")
     finally:
         # Teardown: remove saga containers (host-only, never touches the stack).
         subprocess.run(["docker", "rm", "-f", BOT, MOCK],
