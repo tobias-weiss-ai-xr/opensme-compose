@@ -7,9 +7,11 @@
 # Tiers: soho (4c/8G) | small (8c/24G) | medium (16c/48G)
 #
 # Profile mapping:
-#   soho:   core only (Portal, Traefik, PG, Redis, Memcached, Zitadel)
+#   soho:   core only (Portal, Traefik, PG, PgBouncer, Redis, Memcached, Zitadel)
 #   small:  core + office + paperless (+ optional tika)
 #   medium: core + office + paperless + stalwart + sogo + collabora
+#   surveys: opt-in overlay, not in any tier and not in up-all —
+#            docker compose --profile surveys up -d
 #
 # Quick start:
 #   make bootstrap        # install deps
@@ -79,11 +81,11 @@ IDM_FILES  := -f idm/zitadel.yml
 ifeq ($(PROFILE),soho)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f profiles/soho.yml
 COMPOSE_PROFILES :=
-TIER_SERVICES := core (6 containers: Traefik, PG, PgBouncer, Redis, Memcached, Portal, Zitadel)
+TIER_SERVICES := core (7 containers: Traefik, PG, PgBouncer, Redis, Memcached, Portal, Zitadel)
 else ifeq ($(PROFILE),small)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f services/paperless.yml -f profiles/small.yml
 COMPOSE_PROFILES := --profile paperless
-TIER_SERVICES := core + office + paperless (10 containers)
+TIER_SERVICES := core + office + paperless (12 containers)
 else ifeq ($(PROFILE),medium)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f mail/stalwart.yml -f mail/sogo.yml -f services/paperless.yml -f profiles/medium.yml
 COMPOSE_PROFILES := --profile paperless

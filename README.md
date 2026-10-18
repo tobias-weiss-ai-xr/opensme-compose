@@ -25,6 +25,19 @@ and kept that way by a contract-test pyramid.
 
 ---
 
+<details>
+<summary><b>Contents</b></summary>
+
+**Getting started** — [Why openSME?](#why-opensme) · [Integration is the point](#integration-is-the-point) · [Single Sign-On by default](#single-sign-on-by-default) · [What's inside?](#whats-inside) · [Prerequisites](#prerequisites) · [Quick Start](#quick-start) · [Hardware Tiers](#hardware-tiers) · [Overlay System](#overlay-system)
+
+**Reference** — [Architecture](#architecture) · [Performance & Efficiency](#performance--efficiency) · [Project Structure](#project-structure) · [Configuration](#configuration) · [Makefile](#makefile) · [Scripts](#scripts) · [Security](#security) · [DNS Setup](#dns-setup)
+
+**Running it** — [Monitoring & AI Agents](#monitoring--ai-agents) · [Troubleshooting](#troubleshooting) · [Backup & Restore](#backup--restore) · [Upgrading](#upgrading)
+
+**Project** — [Development](#development) · [Contributing](#contributing) · [Documentation](#documentation) · [License](#license) · [Credits](#credits)
+
+</details>
+
 ## Why openSME?
 
 | | Cloud Suite (Google / Microsoft) | Nextcloud | openSME |
@@ -113,6 +126,7 @@ COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml" docker compose up -d
 | **Ticketing** | [Nosdesk](https://nosdesk.com/) — Rust helpdesk: tickets, kanban, knowledge base (optional) |
 | **Website** | [crap-cms](https://github.com/dkluhzeb/crap-cms) — lightweight Rust CMS, HTMX admin, embedded SQLite (optional) |
 | **Store** | [RaisFast](https://raisfast.com/) — Rust e-commerce: products, cart, orders (optional) |
+| **Surveys** | [LimeSurvey](https://www.limesurvey.org/) — multilingual surveys, invitations, CSV/SPSS export (optional) |
 | **Workflow** | [Operaton](https://operaton.org/) — community successor of Camunda 7 CE; BPMN 2.0 process engine, DMN decision tables, REST API (optional) |
 | **AI** | [llama.cpp](https://github.com/ggml-org/llama.cpp) — local OpenAI-compatible inference, CPU-first (optional) |
 | **Database** | PostgreSQL 17 + PgBouncer connection pooling |
@@ -261,9 +275,9 @@ cd openSME-compose
 
 ```bash
 # Via the Makefile (recommended):
-make up PROFILE=soho      # 4c/8G — core only
-make up PROFILE=small     # 8c/24G — core + office + paperless
-make up PROFILE=medium    # 16c/48G — core + all services
+make up PROFILE=soho      # 4c/8G — core + Zitadel (7 containers)
+make up PROFILE=small     # 8c/24G — core + office + paperless (12 containers)
+make up PROFILE=medium    # 16c/48G — core + office + mail + paperless (14 containers)
 
 # Or with plain docker compose:
 docker compose up -d      # Portal + Traefik + PostgreSQL + Redis + Memcached
@@ -288,6 +302,7 @@ docker compose --profile invoice --profile paperless up -d   # Invoicing + docum
 docker compose --profile chat --profile element up -d        # Matrix chat
 docker compose --profile collab up -d                       # CryptPad
 docker compose --profile notes up -d                        # Collaborative notes
+docker compose --profile surveys up -d                      # LimeSurvey surveys
 ```
 
 ## Hardware Tiers
@@ -352,6 +367,8 @@ Each feature is a separate Docker Compose file. Combine via `COMPOSE_FILE`:
 | `services/store.yml` | RaisFast (e-commerce) | `shop.*` | For storefront (`--profile store`) |
 | `services/ai.yml` | llama.cpp server (AI backend) | `ai.*` | For local AI (`--profile ai`) |
 | `services/camunda.yml` | Operaton (BPMN workflow) | `bpm.*` | For process automation (`--profile camunda`) |
+| `services/limesurvey.yml` | LimeSurvey + cloud-sync sidecar | `surveys.*` | For surveys (`--profile surveys`) |
+| `typesetting/typst-render.yml` | Typst PDF render sidecar | — | Manual overlay (not in any profile) — `COMPOSE_FILE=…:typesetting/typst-render.yml` |
 | `profiles/soho.yml` | (resource overrides) | — | SOHO tier (4c/8G) |
 | `profiles/small.yml` | (resource overrides) | — | Small tier (8c/24G) |
 | `profiles/medium.yml` | (resource overrides) | — | Medium tier (16c/48G) |
@@ -435,6 +452,8 @@ openSME-compose/
 ├── docker-compose.yml          # Core: Traefik, PostgreSQL, Redis, Memcached, Portal
 ├── .env.example                # All configuration variables
 ├── Makefile                    # Test pyramid + tier-based deployment
+├── traefik/
+│   └── dynamic.yml             # Static Traefik config (middlewares, dashboard basics)
 ├── idm/
 │   ├── zitadel.yml             # Overlay: Zitadel (IAM/SSO, replaces Keycloak + LDAP)
 │   ├── casdoor.yml             # Overlay: Casdoor (lightweight IAM, 128 MB)
@@ -467,6 +486,8 @@ openSME-compose/
 │   ├── predictive-agent.yml    # Overlay: Predictive health (Kalman/Markov/Bayes)
 │   ├── ollama.yml              # Overlay: Local LLM backend for agents
 │   ├── taskfleet.yml           # Overlay: Parallel LLM task orchestration
+│   ├── grafana/
+│   │   └── opensme-dashboard.json  # Optional Grafana dashboard for your own Grafana
 │   └── nix/                    # Nix image build definitions (flake.nix + 3 images)
 │       ├── flake.nix            # Nix flake: `nix build .#dev-agent .#predictive-agent .#taskfleet`
 │       ├── dev-agent.nix        # dev-agent image (Python 3, Docker CLI)
@@ -489,7 +510,9 @@ openSME-compose/
 │       ├── main.rs            # Axum router, service cards, SSO wiring
 │       ├── app.js             # Frontend (HTMX + hyperscript)
 │       ├── feeds.rs           # RSS feed aggregator
-│       └── intercom.rs        # Internal notes with cloud attachment metadata
+│       ├── intercom.rs        # Internal notes with cloud attachment metadata
+│       ├── polls.rs           # Polls / "Umfragen" tab
+│       └── logout.rs          # OIDC logout + session teardown
 ├── scripts/
 │   ├── init-env.sh           # Generate working .env (random secrets)
 │   ├── start.sh               # Start stack (core + zitadel + opencloud)
@@ -502,12 +525,39 @@ openSME-compose/
 │   ├── verify-backup.sh       # Verify a backup set: structure + AES-encrypted archives
 │   ├── compliance.py          # Runs the static suite, emits timestamped compliance reports
 │   ├── mailcow.sh             # Drive the mailcow mail backend (requires MAIL_BACKEND=mailcow)
+│   ├── upgrade.sh             # Helm-free rolling upgrade with pre-flight checks (make upgrade)
+│   ├── pin-images.sh          # Resolve image tags to sha256 digests → manifests/pinned-images.env
+│   ├── rotate-backups.sh      # Prune old off-site backups via rclone (retention policy)
 │   └── provision-demo-users.sh # Provision 12 demo users across Zitadel, Operaton, Synapse, Paperless, Stalwart (--component, idempotent)
-├── contracts/                  # Integration contracts: tiles, interop, ports, security, health
-├── specs/                      # Per-service compose contracts (checked by test layer 1)
+├── contracts/                  # Integration contracts (parsed by tests/02-contracts/)
+│   ├── README.md               # Contract format + rule types
+│   ├── tiles.yml               # Portal service tiles
+│   ├── interop.yml             # Cross-service integration rules
+│   ├── ports.yml               # No unintended host port exposure
+│   ├── networks.yml            # Everything on opensme-net, no host network
+│   ├── health.yml              # Healthchecks + log caps
+│   ├── security.yml            # Secrets, TLS, Traefik rules, isolation
+│   ├── env.yml                 # Every compose var exists in .env.example
+│   ├── agents.yml              # Agent guardrails (read-only socket, consent)
+│   └── knowledge.yml           # Runbook KB ↔ knowledge spec parity
+├── specs/                      # Per-service compose specs (checked by test layer 1)
+├── manifests/
+│   └── pinned-images.env.example  # Digest pins emitted by scripts/pin-images.sh (the generated file is gitignored)
+├── internal/                   # dev-maintenance-bot (Go): observe → match → act (with consent)
+│   ├── api/                    # HTTP API + LLM budget/privacy guards
+│   ├── checker/                # Container symptom checks (read-only Docker socket)
+│   ├── config/                 # Env-driven configuration
+│   ├── healer/                 # Consent-gated remediation actions
+│   └── knowledge/              # Embedded runbook KB matcher
+├── bootstrap/                  # Seed data + demo content for fresh deployments
+│   ├── bpmn/                   # Deployable BPMN processes (invoice approval, vacation request)
+│   ├── seed-content/           # Readable seed docs (onboarding, charter, decision records)
+│   ├── bpmn-deploy.sh          # Deploy BPMN to Operaton (idempotent; docker exec or BPM_URL)
+│   ├── survey-deploy.sh        # Provision the example LimeSurvey survey (idempotent)
+│   └── demo-users.json         # 12 demo users used by provision-demo-users.sh
 ├── postgres-init/
-│   ├── 00-create-databases.sql # Auto-creates 7 databases on first start
-│   └── 01-create-users.sh      # Per-service database users
+│   ├── 00-create-databases.sql # Auto-creates the per-service databases on first start
+│   └── 01-create-users.sh      # Per-service database roles + grants
 ├── opensme-knowledge/           # Structured knowledge for AI agents (RAG)
 │   ├── CONTRIBUTING.md         # Knowledge contribution guidelines
 │   ├── README.md              # Knowledge base overview
@@ -522,21 +572,15 @@ openSME-compose/
 │   ├── traefik.json           # Traefik reverse proxy knowledge
 │   └── zitadel.json           # Zitadel IdP knowledge
 ├── openspec/                    # OpenSpec spec-driven development
-│   ├── config.yaml             # OpenSpec configuration
-│   └── specs/                  # Service specifications (spec.md per change)
-│       ├── bpm-engine/spec.md
-│       ├── dev-agent-compose/spec.md
-│       ├── dev-agent-extensions/spec.md
-│       ├── dev-agent-knowledge/spec.md
-│       ├── dev-agent-privacy/spec.md
-│       ├── dev-agent/spec.md
-│       ├── perf-bench/spec.md
-│       ├── perf-boot/spec.md
-│       ├── perf-budgets/spec.md
-│       ├── perf-ops/spec.md
-│       ├── perf-tuning/spec.md
-│       ├── portal-catalog/spec.md
-│       └── sme-interoperability/spec.md
+│   ├── config.yaml             # OpenSpec config + project context
+│   ├── specs/                  # Living capability specs (one directory per capability)
+│   │   ├── bpm-engine/spec.md
+│   │   ├── agent-*/spec.md      # assistant, feedback, guardrails, knowledge, saga, self-maintenance
+│   │   ├── dev-agent*/spec.md   # dev-agent, compose, extensions, knowledge, privacy
+│   │   ├── perf-*/spec.md       # bench, boot, budgets, ops, tuning
+│   │   ├── portal-catalog/spec.md
+│   │   └── sme-interoperability/spec.md
+│   └── changes/                # Change proposals; completed ones under changes/archive/
 ├── tests/                       # Automated test pyramid (layers 0-6)
 │   ├── 00-static/              # Layer 0: stack-free contract checks + secrets
 │   ├── 01-specs/               # Layer 1: spec compliance (schema + image pins)
@@ -551,9 +595,23 @@ openSME-compose/
 │   ├── README.md              # Test pyramid documentation
 │   ├── requirements.txt       # Test dependencies
 │   └── run.py                 # layered test runner
-└── docs/
-    └── assets/
-        └── teaser.svg
+└── docs/                       # Operator + architecture docs (index: docs/README.md)
+    ├── README.md               # Documentation index — start here
+    ├── ARC42.md                # Architecture (arc42 outline)
+    ├── PERFORMANCE.md          # Per-tier tuning, budgets, benchmark protocol
+    ├── perf/                   # Measured baselines, benchmark runs, perf README
+    ├── E2E-JOURNEYS.md         # Epics, user stories and the e2e tests that prove them
+    ├── AGENTIC-AI.md           # Sagas → epics → stories → specs → contracts → tests
+    ├── COMPLIANCE.md           # Compliance posture + generated evidence
+    ├── VALIDATION.md           # Test layers, CI gates, release checklist
+    ├── ROADMAP.md              # Current scope, in-flight work, backlog
+    ├── UPGRADE.md              # Helm-free upgrade procedure
+    ├── backup-restore.md       # Encrypted backups, S3 upload, restore
+    ├── rotate-backups.md       # Off-site retention via rclone
+    ├── pin-images.md           # Digest-pinned image manifests
+    ├── audits/                 # Audits of the agentic components
+    ├── superpowers/            # Design notes from the pi superpowers workflow
+    └── assets/teaser.svg
 ```
 
 ## Development
@@ -570,19 +628,15 @@ Environment variables for local development:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORTAL_DOMAIN` | `home.opensme.graphwiz.ai` | Portal hostname |
-| `OPENSME_DOMAIN` | `opensme.graphwiz.ai` | Root domain |
 | `IDP_URL` | *(empty — card hidden)* | Zitadel link on landing page |
 | `OPENCLOUD_URL` | `https://cloud.opensme.graphwiz.ai` | OpenCloud link |
 | `MAIL_URL` | *(empty — card hidden)* | Webmail link |
-| `TICKETING_URL` / `CMS_URL` / `SHOP_URL` | *(empty — cards hidden)* | Support / Website / Shop cards |
-| `BPM_URL` | *(empty — card hidden)* | Workflow (Operaton) card — set to `https://bpm.<domain>` with `--profile camunda` |
-| `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` | *(empty — cards hidden)* | Invoice / Archive / Chat / Notes cards — set to the service's domain with the matching profile |
-| `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON banner array (`info`/`warn`) |
 | `PORTAL_HTTPS_PROXY` | *(empty — direct egress)* | HTTP CONNECT proxy for the portal's outbound feed fetches — only for egress-restricted hosts (e.g. OpenVZ without working MASQUERADE): point at a local proxy reachable from the docker bridges |
-| `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | AI assistant (OpenAI-compatible `/v1/chat/completions`) — `AI_API_URL=http://ai:8080` with `--profile ai` |
 | `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400) |
 | `INTERCOM_ALLOW_HTTP` | `false` | Dev mode: allow http:// attachment URLs — NEVER enable in production (SSRF risk) |
+
+Domain, service-card, announcement and AI variables are documented once, in
+[Configuration](#configuration) — that table is the single source of truth.
 
 ### Code quality
 
@@ -835,6 +889,20 @@ docker compose --profile taskfleet run --rm taskfleet --task DA-06
 
 Set `TF_REPO_DIR` to the repository you want tasks to operate on.
 
+### Agentic AI — how the agents are governed
+
+The agents above are not ad-hoc scripts. Every capability hangs on a saga
+(business arc), is delivered as an epic, written down as a user story, fixed
+as an OpenSpec capability, enforced by a contract and proven by a test —
+[docs/AGENTIC-AI.md](docs/AGENTIC-AI.md) is the map; read it before adding or
+changing an agent. The static layer keeps that chain honest
+(`tests/00-static/check_agent.py`, `contracts/agents.yml`, `check_mutations.py`),
+and `make agentic-gate` runs the opt-in self-maintenance gate.
+
+Operators who already run Grafana can import
+`monitoring/grafana/opensme-dashboard.json` — the stack does not ship a Grafana
+container of its own.
+
 ### Monitoring configuration
 
 | Variable | Default | Description |
@@ -911,13 +979,16 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 | `CMS_IMAGE` | upstream `:latest` | crap-cms image override — pin once upstream tags releases |
 | `TICKETING_URL` / `CMS_URL` / `SHOP_URL` | *(empty — cards hidden)* | Portal cards for ticketing / website / store |
 | `BPM_URL` | *(empty — card hidden)* | Portal card for the BPM/Workflow service (Operaton) |
-| `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` | *(empty — cards hidden)* | Portal cards for invoice / archive / chat / notes (profiles `invoice` / `paperless` / `synapse` / notes service) |
+| `INVOICE_URL` / `PAPERLESS_URL` / `CHAT_URL` / `NOTES_URL` / `SURVEYS_URL` | *(empty — cards hidden)* | Portal cards for invoice / archive / chat / notes / surveys (profiles `invoice` / `paperless` / `synapse` / notes / `surveys`) |
 | `PORTAL_ANNOUNCEMENTS` | *(empty)* | JSON array of portal banners: `[{'level':'info\|warn','text':'…'}]` |
 | `AI_API_URL` / `AI_MODEL` / `AI_API_KEY` | *(empty — card hidden)* | OpenAI-compatible endpoint for the portal AI assistant — set `AI_API_URL=http://ai:8080` with `--profile ai` |
 | `AI_IMAGE` | `…llama.cpp:server-b11223` | llama.cpp image override (build-numbered tags) |
 | `AI_HF_MODEL` | `Qwen/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M` | HuggingFace model auto-downloaded on first boot (~1 GB) |
 | `CAMUNDA_DB_PASSWORD` | `CHANGEME_*` | Operaton BPMN DB password (required for `--profile camunda`) |
 | `CAMUNDA_IMAGE` | `operaton/operaton:2.1.5` | Operaton image override (pin to a specific tag) |
+| `SURVEYS_DOMAIN` | `surveys.<OPENSME_DOMAIN>` | LimeSurvey hostname (required for `--profile surveys`) |
+| `SURVEYS_DB_PASSWORD` | `CHANGEME_*` | LimeSurvey DB password (required for `--profile surveys`) |
+| `LIMESURVEY_TAG` | `6-apache` | LimeSurvey image tag override (data survives version bumps) |
 
 > **Secrets:** `scripts/init-env.sh` (or `make bootstrap`) already replaces every
 > `CHANGEME_*` placeholder with a random value when it generates `.env` — don't copy
@@ -985,34 +1056,50 @@ The `Makefile` provides tier-based deployment and a test pyramid:
 
 ```bash
 # Tier-based deployment
-make up PROFILE=soho      # 4c/8G — core only (6 containers)
-make up PROFILE=small     # 8c/24G — core + office + paperless (10 containers)
-make up PROFILE=medium    # 16c/48G — core + all services (14 containers)
+make up PROFILE=soho      # 4c/8G — core + Zitadel (7 containers)
+make up PROFILE=small     # 8c/24G — core + office + paperless (12 containers)
+make up PROFILE=medium    # 16c/48G — core + office + mail + paperless (14 containers)
 make up PROFILE=custom    # Use COMPOSE_FILE from env
 
 # All optional services
-make up-all               # Everything: invoice, paperless, chat, collab, element, notes
+make up-all               # paperless, tika, invoice, chat, element, collab, notes,
+                          # ticketing, cms, store, ai, camunda
 
 # Operations
 make down                 # Stop stack
 make status               # Show container status
 make logs                 # Tail logs
 make pull                 # Pull images
+make upgrade              # Pre-flight checks + pull + rolling restart
 
-# Testing (layered pyramid)
-make lint                 # Layer 0: YAML, env, secrets, boot contracts, compose matrix, perf gate
-make container            # Layer 2: container health
+# Testing (layered pyramid — see docs/VALIDATION.md)
+make lint                 # Layer 0: YAML, env, secrets, compose matrix, perf gate
+make test-static          # Layer 0 + 1 + 2: lint, specs, contracts
+make container            # Layer 3: container health
 make smoke                # Layer 3: HTTP/SSL/port smoke
-make test                 # Layers 0–3
-make test-all             # Layers 0–6 (full suite incl. e2e SSO + security audit)
+make integration          # Layer 4: cross-service integration
+make test                 # Layers 0–4 (static → integration)
+make e2e                  # Layer 5: e2e SSO journeys (needs a running stack)
+make saga                 # Layer 5: saga journey blueprints (needs a running stack)
+make security             # Layer 6: security audit
+make test-all             # Layers 0–6 (test + e2e + security)
 
 # Backup / Restore
 make backup               # Full backup (PG + Traefik + volumes)
 make backup-db            # PostgreSQL + Traefik only
 make backup-dry-run       # Preview backup
 make restore              # List available backups
-make restore-from BACKUP=<ts>  # Restore from backup
+make restore-from BACKUP=<ts>  # Restore from backup (add PASSPHRASE=<p> for .enc sets)
+
+# Seed data / demo
+make provision-demo-users     # 12 demo users across Zitadel, Operaton, Synapse, …
+make bpm-deploy               # Deploy seed BPMN processes to Operaton
+make survey-deploy            # Seed the example LimeSurvey survey
 ```
+
+> `make up-all` enables every profile the Makefile knows about except `surveys` —
+> start that one explicitly with `docker compose --profile surveys up -d`
+> (or add `services/limesurvey.yml` to `COMPOSE_FILE`).
 
 ## Scripts
 
@@ -1023,12 +1110,18 @@ make restore-from BACKUP=<ts>  # Restore from backup
 | `scripts/init-env.sh` | Generate a working `.env` from `.env.example` (random secrets; refuses to clobber) |
 | `scripts/demo.sh` | Launch minimal demo with random passwords (boots + prints health summary) |
 | `scripts/demo-live.sh` | Deploy to server with Let's Encrypt |
-| `scripts/backup.sh` | Backup PostgreSQL + Traefik + volumes (`--volumes`, `--dry-run`, `--no-stop`, `--services`) |
-| `scripts/restore.sh` | Restore from backup (`--list`, `--dry-run`, `--pg-only`, `--volumes-only`) |
+| `scripts/backup.sh` | Backup PostgreSQL + Traefik + volumes (`--volumes`, `--dry-run`, `--no-stop`, `--services`, `--encrypt`, `--s3`) — see [docs/backup-restore.md](docs/backup-restore.md) |
+| `scripts/restore.sh` | Restore from backup (`--list`, `--dry-run`, `--pg-only`, `--volumes-only`, `--passphrase` for `.enc` sets) |
+| `scripts/verify-backup.sh` | Verify a backup set: artifact presence, `gzip -t`/`tar -tzf`, AES-encrypted archives decrypt cleanly |
+| `scripts/rotate-backups.sh` | Prune old off-site backups via `rclone` (`--retention`, `--prefix`) — see [docs/rotate-backups.md](docs/rotate-backups.md) |
+| `scripts/pin-images.sh` | Resolve image tags to sha256 digests → `manifests/pinned-images.env` — see [docs/pin-images.md](docs/pin-images.md) |
+| `scripts/upgrade.sh` | Helm-free rolling upgrade with pre-flight contract checks (`make upgrade`) — see [docs/UPGRADE.md](docs/UPGRADE.md) |
 | `scripts/mailcow.sh` | Drive the mailcow mail backend (pinned submodule; requires `MAIL_BACKEND=mailcow` — strict XOR with Stalwart) |
 | `scripts/zitadel-client.sh` | Idempotent Zitadel OIDC app provisioning (`--app opencloud\|notes\|synapse`) — registers the client with the correct redirect URIs and persists the minted id/secret to `.env` |
-| `scripts/verify-backup.sh` | Verify a backup set: artifact presence, `gzip -t`/`tar -tzf`, AES-encrypted archives decrypt cleanly |
+| `scripts/provision-demo-users.sh` | Provision the 12 demo users (`make provision-demo-users`; `--component`, `--clean`, `--dry-run`) |
+| `scripts/compliance.py` | Run the static suite and emit timestamped compliance reports (`make compliance`) |
 | `bootstrap/bpmn-deploy.sh` | Deploy sample BPMN processes to the Operaton engine |
+| `bootstrap/survey-deploy.sh` | Provision the seeded example LimeSurvey survey |
 
 ## Backup &amp; Restore
 
@@ -1059,6 +1152,13 @@ Backups are stored in `./backups/` with timestamps:
 > backup is ever staged.
 
 Retention: 7 days (automatic cleanup).
+
+Encrypted sets and off-site copies: `./scripts/backup.sh --volumes --encrypt`
+leaves only AES-256-CBC (`.enc`) artifacts, `--s3` uploads them via rclone, and
+`./scripts/rotate-backups.sh` prunes the remote. Passphrase handling, S3 setup
+and encrypted restores are described in
+[docs/backup-restore.md](docs/backup-restore.md) and
+[docs/rotate-backups.md](docs/rotate-backups.md).
 
 For automated daily backups:
 ```bash
@@ -1102,7 +1202,8 @@ Or use a wildcard: `*.opensme.graphwiz.ai. IN A <your-server-ip>`.
 
 Optional services add more hostnames — `pad.*`, `notes.*`, `matrix.*`,
 `element.*`, `paperless.*`, `invoices.*`, `help.*`, `www.*`, `shop.*`,
-`ai.*` — all covered by the wildcard, otherwise add per-service A records.
+`ai.*`, `surveys.*`, `bpm.*` — all covered by the wildcard, otherwise add
+per-service A records.
 
 For the **live demo** (`home.opensme.graphwiz.ai`), you only need:
 
@@ -1162,6 +1263,11 @@ docker compose up -d
 # If database schema migration is needed:
 docker compose exec postgres psql -U opensme -c '\dt'
 ```
+
+The supported path is `make upgrade` / `scripts/upgrade.sh`: it runs the same
+pre-flight contract checks as CI, pulls, and restarts rolling. Read
+[docs/UPGRADE.md](docs/UPGRADE.md) before a major-version bump — it documents
+image-pin policy, rollback and the per-service migration notes.
 
 ### Version pins
 
@@ -1275,16 +1381,43 @@ Built with:
 - [SeaweedFS](https://github.com/seaweedfs/seaweedfs) — S3-compatible object storage
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) — Local LLM inference
 
+## Contributing
+
+openSME is a project, and contributions are welcome — bug reports, service
+overlays, runbooks, documentation fixes and test teeth alike.
+
+1. Read [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, the test pyramid, the
+   OpenSpec workflow and the documentation conventions.
+2. Run `make test` (layers 0–4) before opening a PR; CI runs the same gates
+   plus `make lint-code`.
+3. The contract pyramid is normative: a new service or integration needs a
+   spec (`specs/`), a contract rule where applicable (`contracts/`) and a test
+   in the matching layer (`tests/`).
+4. Never commit secrets, backups or internal hostnames — the static layer
+   fails the build, and this repository is public.
+
 ## Documentation
 
-- [Architecture (ARC-42)](docs/ARC42.md) — architecture documentation
-- [Performance &amp; efficiency](docs/PERFORMANCE.md) — per-tier tuning, budgets, benchmark protocol
-- [Perf baselines](docs/perf/baselines.md) — measured resource numbers per tier
-- [E2E journeys](docs/E2E-JOURNEYS.md) — the user journeys the e2e suite proves
-- [Compliance](docs/COMPLIANCE.md) — compliance posture &amp; evidence
-- [Roadmap](docs/ROADMAP.md) — current scope, in-flight work, backlog
-- [Validation](docs/VALIDATION.md) — test layers, CI gates, release checklist
-- [Test suite](tests/README.md) — the layered test pyramid, layer by layer
+Start at the [documentation index](docs/README.md). The deep dives:
+
+| Document | Audience | What it covers |
+|---|---|---|
+| [docs/README.md](docs/README.md) | everyone | Index of all documentation, by task |
+| [Architecture (arc42)](docs/ARC42.md) | architects | Building blocks, runtime view, cross-cutting concepts |
+| [Performance &amp; efficiency](docs/PERFORMANCE.md) | operators | Per-tier tuning, reservations-first budgets, benchmark protocol |
+| [Perf baselines](docs/perf/baselines.md) | operators | Measured resource numbers per tier |
+| [E2E journeys](docs/E2E-JOURNEYS.md) | contributors | Epics + user stories, and the e2e tests that prove them |
+| [Agentic AI](docs/AGENTIC-AI.md) | contributors | Sagas → epics → stories → specs → contracts → tests for agents |
+| [Validation](docs/VALIDATION.md) | contributors | Test layers, CI gates, release checklist |
+| [Compliance](docs/COMPLIANCE.md) | operators | Compliance posture and generated evidence |
+| [Upgrades](docs/UPGRADE.md) | operators | Helm-free rolling upgrade procedure |
+| [Backup &amp; restore](docs/backup-restore.md) | operators | Encrypted backups, S3 upload, restore |
+| [Backup rotation](docs/rotate-backups.md) | operators | Off-site retention with rclone |
+| [Image pinning](docs/pin-images.md) | operators | Digest-pinned manifests for reproducible deploys |
+| [Roadmap](docs/ROADMAP.md) | everyone | Current scope, in-flight work, backlog |
+| [Test suite](tests/README.md) | contributors | The layered test pyramid, layer by layer |
+| [Contracts](contracts/README.md) / [Specs](specs/README.md) | contributors | Contract + spec formats and rule types |
+| [OpenSpec](openspec/) | contributors | Capability specs and change proposals |
 
 <div align="center">
 

@@ -19,12 +19,22 @@ Status and direction of the openSME Compose distribution.
 - **Optional business services**: Nosdesk ticketing (`--profile ticketing`),
   Operaton BPMN workflow (`--profile camunda`),
   crap-cms website (`--profile cms`), RaisFast store (`--profile store`),
-  local AI via llama.cpp (`--profile ai`) with a portal AI assistant.
+  LimeSurvey surveys (`--profile surveys`), local AI via llama.cpp
+  (`--profile ai`) with a portal AI assistant.
+- **Seed data** for fresh deployments: BPMN processes (`make bpm-deploy`),
+  human-readable seed documents, an example survey (`make survey-deploy`)
+  and 12 demo users (`make provision-demo-users`).
 - **Monitoring agents**: dev-agent (reactive, LLM root-cause),
   dev-maintenance-bot (consent-gated healing with embedded runbook KB),
   predictive-agent (Kalman/Markov risk scoring), taskfleet orchestration.
 - **SeaweedFS** replaces the dead MinIO community edition behind the same
   S3 API (`--profile`-less production overlay).
+- **Operator tooling**: digest-pinned image manifests (`scripts/pin-images.sh`),
+  off-site backup rotation via rclone (`scripts/rotate-backups.sh`) and
+  helm-free upgrades with pre-flight checks (`scripts/upgrade.sh`).
+- **Agentic governance**: sagas, epics, specs and contracts for the agent
+  components — see `docs/AGENTIC-AI.md`; `contracts/agents.yml` is enforced
+  by Layer-0.
 
 ## In flight
 
@@ -32,17 +42,14 @@ Status and direction of the openSME Compose distribution.
 
 ## Backlog / ideas
 
-- **Agentic AI integration** — blueprint with sagas AS1–AS6, epics AD–AH,
-  specs: see `docs/AGENTIC-AI.md`. `contracts/agents.yml` (guardrails,
-  write modes, consent, privacy) is enforced by Layer-0 since the first
-  step landed.
-- Digest-pinned image manifests for reproducible deploys (operator opt-in).
-- Backup rotation to off-site object storage (rclone).
-- Helm-free upgrades tooling: `docker compose pull` + rolling `up -d` with
-  pre-flight contract checks.
-- Cluster mode (out of scope by design — SME single-node focus).
-- Permanent live benchmark evidence on a reference host per tier
+- **Agentic AI integration** — remaining sagas/epics (AS1–AS6, AD–AH); the
+  blueprint lives in `docs/AGENTIC-AI.md`, the opt-in self-maintenance gate is
+  `make agentic-gate` (`AGENTIC_STRICT=1`).
+- **Cluster mode** (out of scope by design — SME single-node focus).
+- **Permanent live benchmark evidence** on a reference host per tier
   (`make bench`, recorded in `docs/perf/benchmark-run.md`).
+- **Docs-as-contract**: keep `docs/README.md` and the README documentation
+  table in sync with every new doc (review checklist item).
 
 ## Perf budgets (target, enforced in CI)
 
@@ -52,4 +59,4 @@ Status and direction of the openSME Compose distribution.
 | small | ~3.4G | 20G |
 | medium| ~8.0G | 40G |
 
-Numbers: [docs/perf/baselines.md](docs/perf/baselines.md).
+Numbers: [perf/baselines.md](perf/baselines.md).
