@@ -349,8 +349,13 @@ What is covered (full story catalog with Given/When/Then:
    first: no `opensme-sogo` container and no 200 on `/SOGo/` → skip (the
    demo stack boots neither Stalwart nor SOGo); container present but
    `/SOGo/` not answering → FAIL, which is the routing regression the
-   journey exists for. The CI `mail` job boots Stalwart + SOGo and runs
-   this; locally `make e2e-mail` does the same.
+   journey exists for. Finally it proves the login *backend*: SOGo's own
+   database must contain its tables (sogo_folder_info, sogo_user_profile,
+   sogo_sessions_folder). The page is rendered from templates, so checks
+   1–3 stay green while every SQL query fails — a password that is not
+   percent-encoded into the `postgresql://` URL left that schema empty.
+   The CI `mail` job boots Stalwart + SOGo and runs this; locally
+   `make e2e-mail` does the same.
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

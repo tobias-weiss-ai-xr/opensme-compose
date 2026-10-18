@@ -48,7 +48,7 @@ einem eigenen Job (`mail`), der Stalwart + SOGo dazubootet:
 
 | Journey | Prüft | Checks |
 |---------|-------|--------|
-| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, und **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200 | Seite + Assets |
+| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, und SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren) | Seite + Assets + Schema |
 
 Ohne Mail-Profil (Demo-Stack) meldet die Journey `skip` statt `FAIL`; läuft
 ein `opensme-sogo`-Container, der nicht mehr antwortet, ist es ein Fehler —

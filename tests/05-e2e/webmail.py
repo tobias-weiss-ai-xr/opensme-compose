@@ -21,6 +21,11 @@ This journey pins the page contract:
   3. Every asset the page references (css/js/img under WebServerResources)
      must resolve with 200 — a blank page fails here, even when the HTML
      and the SSO redirect look healthy.
+  4. SOGo's own database must contain its tables. The page renders from
+     templates, so 1–3 pass while every SQL query fails: a password that is
+     not percent-encoded into the postgresql:// URL (or the wrong DB user)
+     leaves the schema empty and login impossible. Only checked when the
+     local engine can reach opensme-postgres.
 
 Usage:
   python3 tests/05-e2e/webmail.py                    # domain from .env
@@ -87,6 +92,39 @@ def sogo_container_present() -> bool:
     if proc.returncode != 0:
         return False
     return "opensme-sogo" in proc.stdout.split()
+
+
+def sogo_schema_tables() -> int | None:
+    """How many tables SOGo created in its own database, or None if unknown.
+
+    The page renders from templates; the login backend does not. When SOGo's
+    SQL URLs are wrong (unencoded password, superuser credentials, missing
+    SOGoProfileURL) the page still answers 200 while every query fails and the
+    database stays empty — the state that produced
+      "failed to acquire channel for URL: (null)"
+    for weeks. A working stack always has sogo_folder_info, sogo_user_profile
+    and sogo_sessions_folder after the first start, so "0 tables" is never a
+    timing artefact.
+
+    Returns None when the engine or the postgres container is out of reach
+    (remote deployment) — that is not a verdict about SOGo.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "opensme-postgres",
+             "psql", "-U", "opensme", "-d", "sogo", "-tAc",
+             "select count(*) from information_schema.tables "
+             "where table_schema = 'public'"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return None
 
 
 def main() -> bool:
@@ -216,6 +254,17 @@ def main() -> bool:
                 result.info(f"  {b}")
         else:
             result.ok(f"all {len(assets)} referenced assets serve 200")
+
+    # 4. the login backend's own database (page renders from templates, so 1–3
+    #    pass even when every SQL query fails — cf. the (null) URL defect)
+    tables = sogo_schema_tables()
+    if tables == 0:
+        result.fail(
+            "SOGo created no tables in its database — the SQL layer is dead "
+            "(check the URL-encoded password and sogo_user in sogo.conf)"
+        )
+    elif tables is not None:
+        result.ok(f"SOGo owns its database schema ({tables} tables)")
 
     return result.summary()
 
