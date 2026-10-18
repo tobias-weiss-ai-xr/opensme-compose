@@ -3,6 +3,9 @@
 #   MAIL_DOMAIN              -> mail hostname (informational)
 #   STALWART_ADMIN_PASSWORD  -> initial admin password (fallback-admin)
 #   STALWART_PUBLIC_URL      -> public WebUI/JMAP URL (optional)
+#   STALWART_BIND            -> listener bind address: [::] on a dual-stack
+#                               host, 0.0.0.0 when the container has no IPv6.
+#                               Resolved by the entrypoint, overridable.
 # Listeners are plain (Traefik terminates TLS for web; mail is internal).
 # Store lives on the stalwart-data volume (RocksDB).
 
@@ -14,20 +17,20 @@ hostname = "${MAIL_DOMAIN}"
 # EHLO domain for internal relays like zitadel's notifier).
 
 [server.listener.smtp]
-bind = "[::]:25"
+bind = "${STALWART_BIND}:25"
 protocol = "smtp"
 
 [server.listener.submission]
-bind = "[::]:587"
+bind = "${STALWART_BIND}:587"
 protocol = "smtp"
 
 [server.listener.imap]
-bind = "[::]:143"
+bind = "${STALWART_BIND}:143"
 protocol = "imap"
 
 [server.listener.http]
 protocol = "http"
-bind = "[::]:8080"
+bind = "${STALWART_BIND}:8080"
 
 [storage]
 data = "rocksdb"
