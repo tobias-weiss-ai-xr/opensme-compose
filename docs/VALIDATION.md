@@ -9,6 +9,7 @@ How the openSME Compose distribution is validated before release.
 | 0 · Static | yaml lint, env completeness, secret scan (`tests/00-static/`) | ✅ |
 | 0 · Perf gate | `tests/00-static/check_perf.py` — budgets, limits, log caps, healthchecks | ✅ |
 | 0 · Boot contracts | `tests/00-static/check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries | ✅ |
+| 0 · BPMN compensation | `tests/00-static/check_bpmn_compensation.py` — every AI ServiceTask has a boundary event + compensation handler | ✅ |
 | 0 · Backup coverage | `tests/00-static/check_backup.py` — every stateful volume the fragments ship is in backup.sh (drift guard) | ✅ |
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
 | 0 · Agent lint | `tests/00-static/check_agent.py` — dev-maintenance-bot knowledge/spec parity | ✅ |
@@ -43,6 +44,7 @@ Run everything locally: `make test-static`, `make test-all`, `make bench`,
 - [x] `check_backup_restore.py` — backup/restore contract
 - [x] `check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries
 - [x] `check_bootstrap.py` — bootstrap seed data (BPMN)
+- [x] `check_bpmn_compensation.py` — every AI ServiceTask has a boundary event + compensation handler (Epic AF)
 - [x] `check_env.py` — env completeness
 - [x] `check_interop.py` — interoperability surfaces (SSO, routing, Redis auth)
 - [x] `check_mail_backend.py` — mail backend switch (XOR)
@@ -75,7 +77,7 @@ The inventory fences the full set of `tests/00-static` checks; see the
 ## Perf budgets (current)
 
 SOHO ~0.8G, Small ~3.4G, Medium ~8.0G Σ reservations — see
-[docs/perf/baselines.md](docs/perf/baselines.md).
+[perf/baselines.md](perf/baselines.md).
 
 ## Release checklist
 

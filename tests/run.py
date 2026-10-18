@@ -55,6 +55,7 @@ LAYERS = {
             ("Compose config gate", "tests/00-static/compose_config.py"),
             ("Platform versions (k3s/docker)", "tests/00-static/check_platform.py"),
             ("Bootstrap seed data (BPMN)", "tests/00-static/check_bootstrap.py"),
+            ("BPMN compensation for AI tasks", "tests/00-static/check_bpmn_compensation.py"),
             ("Backup/restore contract", "tests/00-static/check_backup_restore.py"),
             ("Mail backend switch (XOR)", "tests/00-static/check_mail_backend.py"),
             ("Portal function catalog (tiles)", "tests/00-static/check_tiles.py"),

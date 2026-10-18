@@ -205,6 +205,16 @@ MUTATIONS = [
               "(ENGINE-12018, deploy would be rejected)",
     },
     {
+        "name": "bpmn-ai-compensation",
+        "file": "bootstrap/bpmn/invoice-approval.bpmn",
+        "old": 'attachedToRef="ai-categorize"',
+        "new": 'attachedToRef="invoice-received"',
+        "check": "tests/00-static/check_bpmn_compensation.py",
+        "why": "seed BPMN — an AI ServiceTask without an attached boundary "
+              "event loses its compensation path (Epic AF: AI failure must "
+              "fall back to human review, not block the process)",
+    },
+    {
         "name": "mail-backend-default",
         "file": ".env.example",
         "old": "MAIL_BACKEND=stalwart",
