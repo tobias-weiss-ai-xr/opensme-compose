@@ -13,14 +13,28 @@
   SOPidFile = /var/run/sogo/sogo.pid;
   WOWorkersCount = 8;
 
-  // Database via PgBouncer (transaction pooling)
-  OCSFolderInfoURL = "postgresql://opensme:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_folder_info";
-  OCSSessionsFolderURL = "postgresql://opensme:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_sessions_folder";
-  OCSStoreURL = "postgresql://opensme:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_store";
-  OCSACLsURL = "postgresql://opensme:${SOGO_DB_PASSWORD}@postgres:5432/sogo_acl";
-  OCSLanguagesURL = "postgresql://opensme:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_languages";
+  // Database — PostgreSQL as sogo_user (owner of the sogo database, created
+  // by postgres-init/01-create-users.sh). SOGO_DB_PASSWORD is generated
+  // separately from POSTGRES_PASSWORD, so connecting as the superuser fails.
+  // Each URL is db/table; SOGo does not default the profile URL, and without
+  // it login is impossible even though the page renders.
+  SOGoProfileURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_user_profile";
+  OCSFolderInfoURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_folder_info";
+  OCSSessionsFolderURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_sessions_folder";
+  OCSStoreURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_store";
+  OCSACLsURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_acl";
 
-  // Authentication via LDAP
+  // Session cache: the stack memcached (SOGo prefixes its keys). The image
+  // default 127.0.0.1 is not running, which disables the cache after retries.
+  SOGoMemcachedHost = "memcached";
+
+  // Authentication via LDAP.
+  // GAP: no LDAP directory is deployed by this stack (Zitadel is the IdP and
+  // Stalwart keeps an internal directory), so hostname "ldap" resolves to
+  // nothing and every login attempt answers 403. Webmail renders and the
+  // database layer works; authenticating users needs a deliberate choice
+  // (LDAP directory read by Stalwart + SOGo, or SOGo SSO against Zitadel).
+  // See README "Mail backend switch" → Known gap.
   SOGoUserSources = (
     {
       type = ldap;

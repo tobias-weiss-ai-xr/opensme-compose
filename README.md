@@ -423,6 +423,17 @@ listeners to IPv4. mailcow boots its own dedicated E2E job in CI
 (`.github/workflows/mailcow.yml`) and the delivery-round-trip journey
 `tests/05-e2e/mailcow_journey.py`.
 
+**Known gap in the Stalwart+SOGo backend: webmail login.** Webmail itself is
+wired — SOGo renders, its assets resolve, and it owns its PostgreSQL database
+(`sogo_user`, tables created on first start) — but *authenticating* a user does
+not work yet: `SOGoUserSources` in `mail/sogo/sogo.conf.template` points at an
+`ldap` host that no compose file deploys. Stalwart keeps its own internal
+directory and Zitadel is the IdP, so a login directory has to be chosen
+deliberately (an LDAP directory that both Stalwart and SOGo read, or SOGo SSO
+against Zitadel). The page contract is enforced by `tests/05-e2e/webmail.py`
+(CI job `mail`); `run.py` reports the SSO precondition as a warning, not a
+pass, so the gap stays visible instead of turning green.
+
 ### Docker Compose file order
 
 Files are merged left-to-right — **last file wins** for maps. Always order:

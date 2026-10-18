@@ -165,6 +165,9 @@ services:
       NOTES_DB_PASSWORD: ${NOTES_DB_PASSWORD:-changeme}
       NOSDESK_DB_PASSWORD: ${NOSDESK_DB_PASSWORD:-changeme}
       CAMUNDA_DB_PASSWORD: ${CAMUNDA_DB_PASSWORD:-changeme}
+      # SOGo (mail/sogo.yml) connects as sogo_user, not as the superuser —
+      # its DB password is generated separately from POSTGRES_PASSWORD.
+      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-changeme}
     # Production tuning for up to 500 users (via CLI args)
     command:
       - "-c"

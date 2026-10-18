@@ -74,6 +74,18 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     GRANT ALL PRIVILEGES ON DATABASE limesurvey_db TO limesurvey_user;
     ALTER DATABASE limesurvey_db OWNER TO limesurvey_user;
 
+    -- ── SOGo (groupware) — owns its database so it can create its own
+    -- tables (sogo_folder_info, sogo_user_profile, sogo_sessions_folder,
+    -- sogo_acl, sogo_store) on first start
+    DO \$\$
+    BEGIN
+      CREATE USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-changeme}';
+    EXCEPTION WHEN duplicate_object THEN
+      ALTER USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-changeme}';
+    END \$\$;
+    GRANT ALL PRIVILEGES ON DATABASE sogo TO sogo_user;
+    ALTER DATABASE sogo OWNER TO sogo_user;
+
     -- ── Nosdesk (ticketing/helpdesk) ──
     DO \$\$
     BEGIN
@@ -104,4 +116,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     GRANT nosdesk_admin TO nosdesk_user;
 EOSQL
 
-echo "✅ Per-service database users created (casdoor, synapse, paperless, invoiceninja, notes, nosdesk, limesurvey)"
+echo "✅ Per-service database users created (casdoor, synapse, paperless, invoiceninja, notes, nosdesk, limesurvey, sogo)"
