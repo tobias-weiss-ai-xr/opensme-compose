@@ -39,18 +39,18 @@ MAILCOW = ROOT / ".github" / "workflows" / "mailcow.yml"
 # Explicit allowlist: scripts in tests/05-e2e that may exist without a CI step.
 #   - support modules: imported helpers / mock servers, exercised by journeys
 #     that DO run (ai_mock, cloud_mock, cloud_mock_support, run).
-#   - documented non-CI journeys: webmail is intentionally run against a local
-#     mail stack, not the demo CI stack (which ships no SOGo/Stalwart); the saga
-#     blueprints run via `make saga` because every one of them needs an overlay
-#     (mail, Operaton, invoice, paperless, notes, ticketing, CMS) that the demo
-#     stack does not boot — in CI they would only ever skip.
+#   - documented non-CI journeys: the saga blueprints run via `make saga`
+#     because every one of them needs an overlay (Operaton, invoice, paperless,
+#     notes, ticketing, CMS) that the demo stack does not boot — in CI they
+#     would only ever skip. webmail.py used to live here; it now has its own
+#     job (the `mail` job boots Stalwart + SOGo), which is the direction this
+#     list should shrink in.
 #     Remove an entry to make the strict gate enforce it in CI.
 ALLOWLIST = {
     "ai_mock.py": "support module (mock LLM backend, used by ai_journey)",
     "cloud_mock.py": "support module (mock opencloud, used by journeys)",
     "cloud_mock_support.py": "support module (helpers, no journey entrypoint)",
     "run.py": "test-runner helper, not a journey",
-    "webmail.py": "non-CI journey: needs the mail profile (Stalwart + SOGo); the demo stack boots neither, so it skips honestly instead of failing",
     "saga_onboarding.py": "non-CI journey (needs OpenCloud + SOGo; run via `make saga`)",
     "saga_quote_to_cash.py": "non-CI journey (needs invoice + paperless overlays; run via `make saga`)",
     "saga_leave_request.py": "non-CI journey (needs Operaton; run via `make saga`)",

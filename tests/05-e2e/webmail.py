@@ -35,7 +35,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import requests
 import urllib3
@@ -146,18 +146,42 @@ def main() -> bool:
         return result.summary()
 
     # 1. root redirect → /SOGo/
-    try:
-        r = session.get(webmail_base + "/", allow_redirects=False, timeout=T)
-    except requests.RequestException:
-        result.skip("sogo not running")
-        return result.summary()
-    loc = r.headers.get("Location", "")
-    if r.status_code != 301:
-        result.fail(f"GET / → expected 301 to /SOGo/, got {r.status_code} {loc[:60]}")
-    elif not loc.startswith(webmail_base + "/SOGo"):
-        result.fail(f"GET / → Location must stay on the webmail host, got {loc[:80]}")
+    # The edge may answer with a scheme upgrade first (entrypoint-level
+    # http→https redirect fires before any router matches), so walk at most
+    # three hops and require: every hop stays on the webmail host, and the hop
+    # that finally lands on /SOGo/ is a PERMANENT redirect.
+    url = webmail_base + "/"
+    hops: list[tuple[int, str]] = []
+    for _ in range(3):
+        try:
+            r = session.get(url, allow_redirects=False, timeout=T)
+        except requests.RequestException:
+            result.skip("sogo not running")
+            return result.summary()
+        loc = r.headers.get("Location", "")
+        hops.append((r.status_code, loc))
+        if r.status_code not in (301, 302, 303, 307, 308) or not loc:
+            break
+        url = urljoin(url, loc)
+        if url.rstrip("/").endswith("/SOGo"):
+            break
+    trail = " → ".join(f"{code} {loc[:60]}" for code, loc in hops)
+    base_host = urlsplit(webmail_base).netloc
+    # A scheme upgrade (http→https) is legitimate; a hop to another host is not.
+    off_host = [
+        loc for _, loc in hops
+        if loc and urlsplit(urljoin(webmail_base + "/", loc)).netloc != base_host
+    ]
+    landed = hops[-1][1] if hops else ""
+    if off_host:
+        result.fail(f"GET / → a hop left the webmail host: {off_host[0][:80]}")
+    elif not landed.rstrip("/").endswith("/SOGo"):
+        result.fail(f"GET / → expected to land on /SOGo/, trail: {trail}")
+    elif hops[-1][0] != 301:
+        result.fail(f"GET / → the hop to /SOGo/ must be 301 (permanent), got {hops[-1][0]}")
     else:
-        result.ok("root redirects (301) to /SOGo/")
+        via = "" if len(hops) == 1 else f" (via {len(hops) - 1} hop)"
+        result.ok(f"root redirects (301) to /SOGo/{via}")
 
     # 2. login page markup (the precondition probe already fetched it)
     page = probe

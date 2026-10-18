@@ -665,6 +665,26 @@ or use the `profiles/demo.coexist.yml` to piggyback an existing Traefik.
 </details>
 
 <details>
+<summary><b>Stalwart reports unhealthy and serves no port</b></summary>
+
+Stalwart's listeners bind `[::]:PORT` by default, which covers IPv4 and IPv6
+on a dual-stack host. On a host with IPv6 removed (`ipv6.disable=1`, some VPS
+images) every `[::]` bind fails **silently**: the container stays up, logs
+nothing and serves nothing, so Traefik has no backend and SOGo never starts
+(it waits for `stalwart: service_healthy`).
+
+`mail/stalwart/stalwart-entrypoint.sh` detects that case and falls back to
+`0.0.0.0`, logging the decision:
+
+```bash
+docker logs opensme-stalwart | head -1
+# [stalwart-entrypoint] Listening on 0.0.0.0:25/143/587/8080 (no IPv6 in this container)
+```
+
+Force a specific address with `STALWART_BIND` (`[::]` or `0.0.0.0`) in `.env`.
+</details>
+
+<details>
 <summary><b>Let's Encrypt rate limits</b></summary>
 
 Traefik uses Let's Encrypt's HTTP-01 challenge. If you hit rate limits:
@@ -1081,6 +1101,7 @@ make integration          # Layer 4: cross-service integration
 make test                 # Layers 0–4 (static → integration)
 make e2e                  # Layer 5: e2e SSO journeys (run.py + logout + session lifecycle)
 make saga                 # Layer 5: saga journey blueprints (needs a running stack)
+make e2e-mail             # Layer 5: webmail page contract (needs the mail profile)
 make security             # Layer 6: security audit
 make test-all             # Layers 0–6 (test + e2e + security)
 

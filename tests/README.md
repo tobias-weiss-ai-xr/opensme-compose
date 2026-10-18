@@ -126,6 +126,7 @@ make container     # container health table (requires stack)
 make smoke         # Layer 3: HTTP smoke (requires stack)
 make integration   # Layer 4: cross-service wiring (requires stack)
 make e2e           # Layer 5: run.py + logout.py + session_lifecycle.py + `make saga`
+make e2e-mail      # Layer 5: webmail page contract (needs the mail profile; skips without it)
 make security      # Layer 6: security audit
 make bench         # Layer 7: live benchmark (optional)
 make test          # Layers 0-4 (static + container + smoke + integration; integration self-skips)
@@ -348,8 +349,8 @@ What is covered (full story catalog with Given/When/Then:
    first: no `opensme-sogo` container and no 200 on `/SOGo/` → skip (the
    demo stack boots neither Stalwart nor SOGo); container present but
    `/SOGo/` not answering → FAIL, which is the routing regression the
-   journey exists for. Local/operator journey — no CI job boots the mail
-   profile yet.
+   journey exists for. The CI `mail` job boots Stalwart + SOGo and runs
+   this; locally `make e2e-mail` does the same.
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

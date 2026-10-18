@@ -298,6 +298,11 @@ saga:
 		$(PYTHON) tests/05-e2e/$$script.py $(DOMAIN) 2>&1 || exit 1; \
 	done
 
+e2e-mail:
+	@echo -e "$(BLUE)── layer 5: webmail page contract (needs the mail profile) ──$(NC)"
+	@echo -e "   requires Stalwart + SOGo from mail/stalwart.yml + mail/sogo.yml (skips when absent)"
+	@$(PYTHON) tests/05-e2e/webmail.py $(DOMAIN) 2>&1
+
 security:
 	@echo -e "$(BLUE)── layer 6: security audit ──$(NC)"
 	@$(PYTHON) tests/06-security/audit.py 2>&1

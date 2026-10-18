@@ -319,3 +319,78 @@ jobs:
         run: python3 tests/05-e2e/persistence.py opensme.local
       - name: Run restore drill (backup → destroy → restore → verify)
         run: python3 tests/05-e2e/restore_drill.py opensme.local
+
+  mail:
+    name: E2E — mail profile (Stalwart + SOGo webmail)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The demo stack boots no mail service on purpose (scripts/demo.sh skips
+    # Stalwart and SOGo: too heavy for a two-minute evaluation), which left the
+    # webmail page contract with no CI coverage at all. This job pays for the
+    # mail profile — Stalwart + SOGo on top of the demo stack — so the overlay
+    # keeps booting and SOGo keeps serving its own assets.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Provision deploy-time Zitadel artifacts (masterkey + busybox)
+        run: |
+          printf '%s' "$(openssl rand -base64 24)" > idm/secrets/masterkey
+          mkdir -p idm/zitadel
+          sudo apt-get update -qq && sudo apt-get install -y -qq busybox-static
+          cp "$(which busybox)" idm/zitadel/busybox
+          chmod +x idm/zitadel/busybox
+          file idm/zitadel/busybox | grep -q static || { echo "::error::busybox is not static"; exit 1; }
+
+      - name: Boot demo stack (generates .env with random passwords)
+        run: bash scripts/demo.sh
+
+      - name: Boot the mail profile (Stalwart + SOGo)
+        env:
+          MAIL_DOMAIN: mail.opensme.local
+          SOGO_DOMAIN: webmail.opensme.local
+        run: |
+          docker compose \
+            -f docker-compose.yml -f idm/zitadel.yml \
+            -f opencloud/opencloud.yml -f profiles/demo.dev.yml \
+            -f mail/stalwart.yml -f mail/sogo.yml \
+            --profile standalone up -d stalwart sogo
+
+      - name: Wait for Stalwart and SOGo to report healthy
+        # stalwart must bind its listeners before SOGo's depends_on can be
+        # satisfied; SOGo then needs a moment for sogod + apache2. Print the
+        # entrypoint's bind decision on failure — a silent no-bind (IPv6-less
+        # host) is the failure mode that costs an hour to find otherwise.
+        run: |
+          for svc in opensme-stalwart opensme-sogo; do
+            for i in $(seq 1 60); do
+              st=$(docker inspect -f '{{.State.Health.Status}}' "$svc" 2>/dev/null || echo missing)
+              [ "$st" = healthy ] && echo "$svc healthy" && break
+              if [ "$st" = unhealthy ]; then
+                echo "::error::$svc is unhealthy"; docker logs --tail 40 "$svc"; exit 1
+              fi
+              sleep 5
+            done
+            [ "$st" = healthy ] || { echo "::error::$svc never became healthy"; docker logs --tail 40 "$svc"; exit 1; }
+          done
+
+      - name: Run webmail page contract (login markup + every referenced asset)
+        run: python3 tests/05-e2e/webmail.py opensme.local
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose \
+            -f docker-compose.yml -f idm/zitadel.yml \
+            -f opencloud/opencloud.yml -f profiles/demo.dev.yml \
+            -f mail/stalwart.yml -f mail/sogo.yml \
+            --profile standalone down -v || true

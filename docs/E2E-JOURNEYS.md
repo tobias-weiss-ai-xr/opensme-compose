@@ -43,6 +43,18 @@ brauchen nur den Demo-Stack (Portal + IdP), laufen also im SSO-Flows-Job:
 | `logout.py` | Portal-Logout & Single Log-out: `POST /api/logout` löscht das Session-Cookie und antwortet mit 303 auf den `end_session`-Endpoint (mit `id_token_hint` + Post-Logout-URI), der Browser landet auf `/logged-out`, die geteilte IdP-Session ist tot (Replay abgewiesen), und ein zweiter Relying-Party-Client (Stellvertreter für OpenCloud) ist danach ebenfalls abgemeldet | K1–K4 |
 | `session_lifecycle.py` | Sitzungs-Lebenszyklus: S1 alle Credentials sind zeitlich begrenzt und `expires_in`/`exp`/`iat` stimmen Ende-zu-Ende überein, S2 `offline_access` wird geehrt (Refresh-Grant liefert NEUES Access-Token mit rotiertem Refresh-Token, ohne erneuten Login, live an Userinfo), S3 EINE IdP-Session trägt ZWEI Relying Parties (Portal-App + OpenCloud-Client) | S1–S3 |
 
+Eine dritte Journey braucht mehr als den Demo-Stack und läuft deshalb in
+einem eigenen Job (`mail`), der Stalwart + SOGo dazubootet:
+
+| Journey | Prüft | Checks |
+|---------|-------|--------|
+| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, und **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200 | Seite + Assets |
+
+Ohne Mail-Profil (Demo-Stack) meldet die Journey `skip` statt `FAIL`; läuft
+ein `opensme-sogo`-Container, der nicht mehr antwortet, ist es ein Fehler —
+das ist genau die Regression vom 2026-10-12 (stale Container mit alten
+Traefik-Labels, Blank-Page bei intakter SSO-Weiterleitung).
+
 Ohne Browser, ohne Wartezeiten auf echte Timeouts: geprüft wird der
 Timeout-*Vertrag* des Stacks (endlich, konsistent, aktuell gültig) — das
 ist, was ein E2E-Test ohne Stunden Schlaf ehrlich zusichern kann.
