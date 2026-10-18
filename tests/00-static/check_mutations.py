@@ -153,6 +153,15 @@ MUTATIONS = [
               "in backup.sh's KNOWN_VOLUMES",
     },
     {
+        "name": "agent-state-in-backup",
+        "file": "scripts/backup.sh",
+        "old": "dev-maintenance-bot-state ",
+        "new": "# VOLUME_REMOVED ",
+        "check": "tests/00-static/check_agent.py",
+        "why": "AH2 durability — every write-mode agent's state volume must "
+              "remain in scripts/backup.sh",
+    },
+    {
         "name": "restore-applies-postgres",
         "file": "scripts/restore.sh",
         "old": 'gunzip -c "$ACTUAL_FILE"',
