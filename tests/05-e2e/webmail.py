@@ -11,6 +11,11 @@ suite caught it: section_sogo_sso only checks the SSO redirect shape.
 
 This journey pins the page contract:
 
+  0. Precondition: SOGo is deployed. A stack that boots no mail profile
+     (the demo stack — `scripts/demo.sh`) skips here instead of failing;
+     a SOGo container that exists but does not answer /SOGo/ FAILS, which
+     is the regression this journey is for (a container that silently
+     lost its routing).
   1. GET /            → 301 (permanent) to /SOGo/ (root-redirect middleware)
   2. GET /SOGo/       → 200 with SOGo login markup
   3. Every asset the page references (css/js/img under WebServerResources)
@@ -27,6 +32,7 @@ Exit codes: 0 = pass, 1 = failed (skips don't fail).
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urljoin
@@ -57,6 +63,30 @@ def asset_urls(html: str, base: str) -> list[str]:
                 continue
             urls.append(urljoin(base, raw))
     return sorted(set(urls))
+
+
+def sogo_container_present() -> bool:
+    """True when the local engine runs a `opensme-sogo` container.
+
+    Only docker speaks here: the container name is fixed by mail/sogo.yml
+    (`container_name: opensme-sogo`), and every deployment that fronts SOGo
+    with this compose file has it. `docker ps` lists running AND
+    restarting containers — a crash-looping SOGo counts as deployed (it must
+    be caught), a container that was created but never started does not.
+    When the engine is unreachable (or the host uses another runtime) we
+    cannot tell — treat it as "not deployed" so the journey skips instead of
+    inventing a failure.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    return "opensme-sogo" in proc.stdout.split()
 
 
 def main() -> bool:
@@ -90,6 +120,31 @@ def main() -> bool:
     result = Result("webmail-page")
     result.header(f"SOGo webmail page contract — {webmail_base}")
 
+    # 0. Precondition — is SOGo deployed at all?
+    # A deployed SOGo answers /SOGo/ with 200 (check 2 below). When it does not
+    # answer, only the presence of the container distinguishes "no mail profile
+    # booted" (skip — the demo stack ships neither Stalwart nor SOGo) from
+    # "deployed but no longer routed" (fail — the 2026-10-12 regression).
+    try:
+        probe = session.get(webmail_base + "/SOGo/", timeout=T)
+    except requests.RequestException as e:
+        probe = None
+        probe_error = f"{type(e).__name__}: {e}"
+    else:
+        probe_error = f"HTTP {probe.status_code}"
+    if probe is None or probe.status_code != 200:
+        if sogo_container_present():
+            result.fail(
+                f"opensme-sogo container exists but GET /SOGo/ → {probe_error} "
+                "— deployed SOGo must answer (routing/label regression)"
+            )
+        else:
+            result.skip(
+                f"SOGo not deployed ({webmail_base}/SOGo/ → {probe_error}, no "
+                "opensme-sogo container) — boot the mail profile to run this"
+            )
+        return result.summary()
+
     # 1. root redirect → /SOGo/
     try:
         r = session.get(webmail_base + "/", allow_redirects=False, timeout=T)
@@ -104,12 +159,8 @@ def main() -> bool:
     else:
         result.ok("root redirects (301) to /SOGo/")
 
-    # 2. login page markup
-    try:
-        page = session.get(webmail_base + "/SOGo/", timeout=T)
-    except requests.RequestException:
-        result.skip("sogo not running")
-        return result.summary()
+    # 2. login page markup (the precondition probe already fetched it)
+    page = probe
     if page.status_code != 200:
         result.fail(f"GET /SOGo/ → {page.status_code} (expected 200)")
         return result.summary()

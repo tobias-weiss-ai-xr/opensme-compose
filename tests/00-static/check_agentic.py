@@ -50,7 +50,7 @@ ALLOWLIST = {
     "cloud_mock.py": "support module (mock opencloud, used by journeys)",
     "cloud_mock_support.py": "support module (helpers, no journey entrypoint)",
     "run.py": "test-runner helper, not a journey",
-    "webmail.py": "non-CI journey (needs the mail profile: demo stack has no SOGo)",
+    "webmail.py": "non-CI journey: needs the mail profile (Stalwart + SOGo); the demo stack boots neither, so it skips honestly instead of failing",
     "saga_onboarding.py": "non-CI journey (needs OpenCloud + SOGo; run via `make saga`)",
     "saga_quote_to_cash.py": "non-CI journey (needs invoice + paperless overlays; run via `make saga`)",
     "saga_leave_request.py": "non-CI journey (needs Operaton; run via `make saga`)",

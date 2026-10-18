@@ -344,8 +344,12 @@ What is covered (full story catalog with Given/When/Then:
 35. **Webmail page contract** — `tests/05-e2e/webmail.py`: SOGo serves
    200 with login markup and every asset the page references under
    `/SOGo.woa/WebServerResources/` resolves (a blank page fails even
-   when HTML and the SSO redirect look healthy). Local/operator
-   journey: the demo stack ships no SOGo, so CI never runs it.
+   when HTML and the SSO redirect look healthy). It gates on deployment
+   first: no `opensme-sogo` container and no 200 on `/SOGo/` → skip (the
+   demo stack boots neither Stalwart nor SOGo); container present but
+   `/SOGo/` not answering → FAIL, which is the routing regression the
+   journey exists for. Local/operator journey — no CI job boots the mail
+   profile yet.
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

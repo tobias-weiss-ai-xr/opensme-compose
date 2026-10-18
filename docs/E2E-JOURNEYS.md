@@ -69,7 +69,7 @@ ist, was ein E2E-Test ohne Stunden Schlaf ehrlich zusichern kann.
 |---|------------|--------------|
 | C1 | Als Mitarbeiter erreiche ich OpenCloud, Notes, Paperless, Ticketing, Website und Store | `section_apps` — reachability (skips per app) |
 | C2 | Als Chat-Nutzer beginnt der Matrix-Login beim zentralen IdP, nicht bei Synapse | `section_synapse_sso` — SSO redirect targets the IdP |
-| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | `section_sogo_sso` — same contract for the groupware |
+| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | `section_sogo_sso` — same contract for the groupware; `webmail.py` prüft zusätzlich die Seite selbst (Login-Markup + jedes referenzierte Asset), wenn ein SOGo-Container läuft |
 
 ## Epic D — Local AI: there when configured, invisible when not
 
