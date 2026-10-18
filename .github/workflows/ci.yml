@@ -383,6 +383,31 @@ jobs:
             [ "$st" = healthy ] || { echo "::error::$svc never became healthy"; docker logs --tail 40 "$svc"; exit 1; }
           done
 
+      - name: Restart the edge so it re-reads the mail routers
+        # demo.sh documents the cause: the Docker provider does not reliably
+        # pick up containers that join the network AFTER traefik itself, so a
+        # late `up -d stalwart sogo` yields a bare 404 on webmail.* until the
+        # edge re-evaluates. One restart is cheaper than a retry ladder.
+        run: docker restart opensme-traefik
+
+      - name: Wait for the webmail route at the edge
+        # Follow the http→https hop: the scheme redirect is entrypoint-wide and
+        # answers for ANY host, so only a 200 on /SOGo/ proves the router for
+        # webmail.* actually exists (404 = no router, exactly the failure mode).
+        run: |
+          for i in $(seq 1 24); do
+            code=$(curl -skL -o /dev/null -w '%{http_code}' \
+              --resolve webmail.opensme.local:80:127.0.0.1 \
+              --resolve webmail.opensme.local:443:127.0.0.1 \
+              http://webmail.opensme.local/SOGo/ || true)
+            if [ "$code" = "200" ]; then echo "webmail route up (200)"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::webmail.* never answered 200 (last: $code)"
+          docker logs --tail 30 opensme-sogo || true
+          docker logs --tail 30 opensme-traefik || true
+          exit 1
+
       - name: Run webmail page contract (login markup + every referenced asset)
         run: python3 tests/05-e2e/webmail.py opensme.local
 
