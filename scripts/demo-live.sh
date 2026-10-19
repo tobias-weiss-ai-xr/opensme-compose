@@ -106,17 +106,10 @@ ZITADEL_DOMAIN=auth.home.opensme.graphwiz.ai
 IDP_URL=https://"$ZITADEL_DOMAIN"
 OPENCLOUD_DOMAIN=cloud.home.opensme.graphwiz.ai
 
-# ── LDAP ──
-LDAP_ROOT_DN=dc=opensme,dc=graphwiz,dc=ai
-
 # ── Database ──
 POSTGRES_PASSWORD=$(pw)
 ZITADEL_DB_PASSWORD=$(pw)
 SOGO_DB_PASSWORD=$(pw)
-
-# ── LDAP ──
-LDAP_ADMIN_PASSWORD=$(pw)
-LDAP_USER_PASSWORD=$(pw)
 
 # ── Zitadel ──
 ZITADEL_ADMIN=admin

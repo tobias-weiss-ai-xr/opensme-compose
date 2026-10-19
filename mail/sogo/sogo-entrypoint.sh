@@ -25,10 +25,11 @@ if [ -f "$TEMPLATE" ]; then
   db_pw_url=$(printf '%s' "${SOGO_DB_PASSWORD:-CHANGEME_sogo}" \
     | sed -e 's|%|%25|g' -e 's|/|%2F|g' -e 's|+|%2B|g' -e 's|=|%3D|g' \
     | sed -e 's|[&\\]|\\&|g')
+  # The rules below cover exactly the placeholders the template uses —
+  # nothing else is substituted, so a stale rule would silently render a
+  # literal ${...} into sogo.conf (and SOGo would cache the garbage).
   sed \
     -e "s|\${SOGO_DB_PASSWORD}|${db_pw_url}|g" \
-    -e "s|\${LDAP_ROOT_DN}|${LDAP_ROOT_DN:-dc=opensme,dc=graphwiz,dc=ai}|g" \
-    -e "s|\${LDAP_ADMIN_PASSWORD}|${LDAP_ADMIN_PASSWORD:-CHANGEME_ldap}|g" \
     -e "s|\${OPENSME_DOMAIN}|${OPENSME_DOMAIN:-opensme.graphwiz.ai}|g" \
     -e "s|\${TZ}|${TZ:-Europe/Berlin}|g" \
     "$TEMPLATE" > "$OUTPUT"

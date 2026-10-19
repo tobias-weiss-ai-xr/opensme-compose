@@ -15,8 +15,7 @@ x-service-defaults: &service-defaults
 # Webmail, calendar, contacts (connects to Stalwart IMAP/SMTP).
 #
 # Config is rendered from sogo.conf.template at startup.
-# Required env vars: SOGO_DB_PASSWORD, LDAP_ROOT_DN, LDAP_ADMIN_PASSWORD,
-#                    OPENSME_DOMAIN, TZ
+# Required env vars: SOGO_DB_PASSWORD, OPENSME_DOMAIN, TZ
 
 services:
   sogo:
@@ -43,8 +42,6 @@ services:
     environment:
       TZ: ${TZ:-Europe/Berlin}
       SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo}
-      LDAP_ROOT_DN: ${LDAP_ROOT_DN:-dc=opensme,dc=graphwiz,dc=ai}
-      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-CHANGEME_ldap}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]

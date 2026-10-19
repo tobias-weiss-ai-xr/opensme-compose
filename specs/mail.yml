@@ -41,9 +41,6 @@ services:
     env:
       - SOGO_DOMAIN
       - SOGO_DB_PASSWORD
-      - LDAP_ROOT_DN
-      - LDAP_ADMIN_PASSWORD
-      - LDAP_USER_PASSWORD
     traefik_labels: true
     resource_limits:
       memory: 2G
