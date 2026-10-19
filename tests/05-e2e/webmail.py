@@ -46,23 +46,46 @@ This journey pins the page contract:
      confusing: the page, the assets and the login all answer 200 while every
      single action — Mail, Calendar, Contacts — answers 500.
 
+  6. Outbound mail, as the same user: SMTP submission on 587 (the server
+     advertises and REQUIRES STARTTLS — "requiretls", so a client that
+     speaks plaintext is refused) with the credentials that just logged in.
+     A stack where the webmail renders and lists an account can still be
+     unable to send: the Stalwart role `user` carries `email-send` and the
+     `smtp-*` permissions, and a principal without them is refused at 235
+     vs 535. Skips when the port is not reachable from the test host.
+
+  7. Inbound mail, closing the round trip: the message submitted in step 6
+     must appear in the INBOX over IMAP on 143 (Stalwart refuses cleartext
+     LOGIN unless [imap.auth] allow-plain-text is set, which the overlay
+     does set because SOGo's IMAP client cannot verify the self-signed
+     certificate). Only checked when step 6 delivered a message.
+
 Usage:
   python3 tests/05-e2e/webmail.py                    # domain from .env
   python3 tests/05-e2e/webmail.py home.opensme.graphwiz.ai
 
-Credentials for step 5 come from bootstrap/demo-users.json (first user — the
-same file scripts/provision-demo-users.sh feeds both stores from), overridable
-with SOGO_E2E_USER / SOGO_E2E_PASSWORD.
+Credentials for steps 5–7 come from bootstrap/demo-users.json (first user —
+the same file scripts/provision-demo-users.sh feeds both stores from),
+overridable with SOGO_E2E_USER / SOGO_E2E_PASSWORD. Steps 6–7 talk to the
+mail ports the compose stack publishes on the test host (override with
+MAIL_E2E_HOST / MAIL_E2E_SUBMISSION_PORT / MAIL_E2E_IMAP_PORT; the STARTTLS
+certificate is the server's self-signed one, so it is not verified — same
+reason the overlay runs IMAP in clear text on the compose network).
 
 Exit codes: 0 = pass, 1 = failed (skips don't fail).
 """
 
 import argparse
+import imaplib
 import json
 import os
 import re
+import smtplib
+import ssl
 import subprocess
 import sys
+import time
+from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -79,6 +102,12 @@ from run import (  # noqa: E402  (path bootstrap before import)
     is_localish,
     load_env_file,
 )
+
+# Steps 6–7 talk to the mail ports the compose stack publishes on the test host
+# (the webmail itself is probed through the edge, see webmail_base).
+MAIL_HOST = os.environ.get("MAIL_E2E_HOST", "127.0.0.1")
+SUBMISSION_PORT = int(os.environ.get("MAIL_E2E_SUBMISSION_PORT", "587"))
+IMAP_PORT = int(os.environ.get("MAIL_E2E_IMAP_PORT", "143"))
 
 
 def asset_urls(html: str, base: str) -> list[str]:
@@ -116,6 +145,27 @@ def sogo_container_present() -> bool:
     if proc.returncode != 0:
         return False
     return "opensme-sogo" in proc.stdout.split()
+
+
+def stalwart_container_present() -> bool:
+    """True when the local engine runs a `opensme-stalwart` container.
+
+    Steps 6–7 reach the mail ports on the host, not through the edge. When the
+    container runs, mail/stalwart.yml published 25/143/587 — so an unreachable
+    port is a defect (listener unbound, ports dropped from the overlay), not a
+    remote deployment without published ports. Same distinction the SOGo
+    precondition makes: skip only when there is nothing that should answer.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    return "opensme-stalwart" in proc.stdout.split()
 
 
 def sogo_schema_tables() -> int | None:
@@ -209,6 +259,126 @@ def demo_mail_credentials(root: Path) -> tuple[str, str] | None:
     return first.get("username", ""), first.get("password", "")
 
 
+def submission_send(
+    result, login: str, address: str, password: str, strict: bool = False
+) -> str | None:
+    """Submit a uniquely-subjected message to self over 587 + STARTTLS.
+
+    Returns the subject when the server accepted the message, None when the
+    leg was skipped or already reported as failed (the caller then does not
+    judge delivery either).
+    """
+    subject = f"openSME e2e {int(time.time())}"
+    # The listener requires STARTTLS but presents the server's self-signed
+    # certificate (SAN localhost) — verifying it would test rcgen, not mail.
+    tls = ssl.create_default_context()
+    tls.check_hostname = False
+    tls.verify_mode = ssl.CERT_NONE
+    try:
+        server = smtplib.SMTP(MAIL_HOST, SUBMISSION_PORT, timeout=T)
+    except OSError as e:
+        unreachable = f"submission {MAIL_HOST}:{SUBMISSION_PORT} unreachable ({e})"
+        if strict:
+            result.fail(
+                f"{unreachable} while opensme-stalwart runs — mail/stalwart.yml "
+                "publishes 587, so the listener is unbound or the port was dropped"
+            )
+        else:
+            result.skip(f"{unreachable} — sending not judged (mail profile not on this host)")
+        return None
+    try:
+        server.ehlo()
+        if not server.has_extn("starttls"):
+            result.fail(
+                f"submission {MAIL_HOST}:{SUBMISSION_PORT} advertises no STARTTLS "
+                "— credentials would cross the wire in clear text"
+            )
+            return None
+        server.starttls(context=tls)
+        server.ehlo()
+        server.login(login, password)
+    except (smtplib.SMTPException, ssl.SSLError, OSError) as e:
+        result.fail(
+            f"submission login as {login} failed: {type(e).__name__}: {e} "
+            f"(SMTP {getattr(e, 'smtp_code', '-')}) — the role `user` carries "
+            "email-send, a principal without it is refused here"
+        )
+        return None
+    message = EmailMessage()
+    message["From"] = address
+    message["To"] = address
+    message["Subject"] = subject
+    message.set_content(
+        "Round trip sent by tests/05-e2e/webmail.py — step 7 expects this in INBOX."
+    )
+    try:
+        server.send_message(message)
+    except (smtplib.SMTPException, OSError) as e:
+        result.fail(f"submission refused the message from {address}: {type(e).__name__}: {e}")
+        return None
+    finally:
+        try:
+            server.quit()
+        except (smtplib.SMTPException, OSError):
+            pass
+    result.ok(f"submission accepts mail from {address} ({MAIL_HOST}:{SUBMISSION_PORT} + STARTTLS)")
+    return subject
+
+
+def inbox_round_trip(
+    result, login: str, password: str, subject: str, strict: bool = False
+) -> None:
+    """The message from submission_send must land in the user's INBOX.
+
+    Sending and delivering are different code paths in the server (submission
+    vs. the delivery queue/credential for the recipient), so a green send can
+    still leave the mailbox empty. IMAP runs in clear text here on purpose:
+    Stalwart only allows plain-text LOGIN because SOGo's IMAP client cannot
+    verify the self-signed certificate.
+    """
+    try:
+        box = imaplib.IMAP4(MAIL_HOST, IMAP_PORT)
+    except OSError as e:
+        unreachable = f"IMAP {MAIL_HOST}:{IMAP_PORT} unreachable ({e})"
+        if strict:
+            result.fail(
+                f"{unreachable} while opensme-stalwart runs — mail/stalwart.yml "
+                "publishes 143, so the listener is unbound or the port was dropped"
+            )
+        else:
+            result.skip(f"{unreachable} — delivery not judged")
+        return
+    try:
+        box.login(login, password)
+        box.select("INBOX")
+        for _ in range(15):
+            typ, data = box.search(None, "HEADER", "Subject", f'"{subject}"')
+            ids = data[0].split() if typ == "OK" and data and data[0] else []
+            if ids:
+                # Readable before deleting, so the check cannot pass on a
+                # half-stored message, and the probe does not accumulate.
+                box.fetch(ids[-1], "(BODY.PEEK[HEADER])")
+                box.store(ids[-1], "+FLAGS", "\\Deleted")
+                box.expunge()
+                result.ok(
+                    f"the submitted message arrives in the INBOX of {login} "
+                    f"(IMAP {MAIL_HOST}:{IMAP_PORT}, then removed again)"
+                )
+                return
+            time.sleep(2)
+        result.fail(
+            f"message accepted on submission but never appeared in {login}'s "
+            f"INBOX after 30 s (subject {subject}) — sending works, delivery does not"
+        )
+    except imaplib.IMAP4.error as e:
+        result.fail(f"IMAP login/select as {login} failed: {type(e).__name__}: {e}")
+    finally:
+        try:
+            box.logout()
+        except (imaplib.IMAP4.error, OSError):
+            pass
+
+
 def main() -> bool:
     ap = argparse.ArgumentParser(description="openSME webmail page contract")
     ap.add_argument("domain", nargs="?", default=None, help="stack domain")
@@ -238,7 +408,7 @@ def main() -> bool:
     session.verify = not localish
 
     result = Result("webmail-page")
-    result.header(f"SOGo webmail page contract — {webmail_base}")
+    result.header(f"SOGo webmail + mail server journey — {webmail_base}")
 
     # 0. Precondition — is SOGo deployed at all?
     # A deployed SOGo answers /SOGo/ with 200 (check 2 below). When it does not
@@ -389,6 +559,7 @@ def main() -> bool:
         else:
             result.ok(f"login as {login} succeeds (session + XSRF cookie)")
             headers = {"Accept": "application/json", "X-XSRF-TOKEN": xsrf}
+            identity_email = ""
             actions = [
                 (f"/SOGo/so/{login}/Mail/mailAccounts",
                  "account bootstrap (identities)"),
@@ -440,8 +611,23 @@ def main() -> bool:
                         f"{label}: {len(accounts)} mail account(s), "
                         f"identity {emails[0]}"
                     )
+                    identity_email = next(e for e in emails if login in e)
                 else:
                     result.ok(f"{label} serves 200")
+
+            # 6./7. the mail server behind the webmail: send and receive, with
+            #       the same user. Only judgeable once the account bootstrap
+            #       named the user's address.
+            if not identity_email:
+                result.skip(
+                    "account bootstrap returned no address for the user — "
+                    "submission/delivery not judged"
+                )
+            else:
+                strict = stalwart_container_present()
+                subject = submission_send(result, login, identity_email, password, strict)
+                if subject:
+                    inbox_round_trip(result, login, password, subject, strict)
 
     return result.summary()
 

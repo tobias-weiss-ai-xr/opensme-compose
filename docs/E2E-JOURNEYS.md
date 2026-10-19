@@ -48,7 +48,12 @@ einem eigenen Job (`mail`), der Stalwart + SOGo dazubootet:
 
 | Journey | Prüft | Checks |
 |---------|-------|--------|
-| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren), **und ein echter Login funktioniert**: `POST /SOGo/connect` (JSON) gegen Postgres (`sogo.mail_users`) liefert Session- und XSRF-Cookie, `Mail/mailAccounts` muss eine **nicht-leere** Kontoliste mit der eigenen Adresse zurückgeben (SOGo angemeldet, Stalwart aber nicht → leere Liste), `Mail/0/view` und `Mail/0/folderINBOX/view` müssen 200 liefern | Seite + Assets + Schema + Login + Postfach |
+| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren), **ein echter Login funktioniert**: `POST /SOGo/connect` (JSON) gegen Postgres (`sogo.mail_users`) liefert Session- und XSRF-Cookie, `Mail/mailAccounts` muss eine **nicht-leere** Kontoliste mit der eigenen Adresse zurückgeben (SOGo angemeldet, Stalwart aber nicht → leere Liste), `Mail/0/view` und `Mail/0/folderINBOX/view` müssen 200 liefern, **und der Mailserver dahinter funktioniert**: die Submission auf 587 (STARTTLS ist Pflicht, der Server wirbt mit `requiretls`) nimmt eine Nachricht desselben Nutzers an, die über IMAP auf 143 im INBOX ankommt (Senden und Zustellen sind verschiedene Server-Pfade — ein grüner Versand bei stumm leer bleibendem Postfach bleibt sonst unsichtbar) | Seite + Assets + Schema + Login + Postfach + Versand + Zustellung |
+
+Senden und Zustellen laufen über die vom Overlay veröffentlichten Mail-Ports
+auf dem Testhost; sind sie dort nicht erreichbar, überspringt die Journey
+diese beiden Schritte — **außer** `opensme-stalwart` läuft, dann ist ein nicht
+gebundener Port ein Fehler (`mail/stalwart.yml` veröffentlicht 25/143/587).
 
 **XSRF-Falle (Ursache einer wochenlangen Fehldiagnose)**: SOGo dispatcht
 keine UI-Action ohne XSRF-Nachweis (`UIxComponent -performActionNamed:`). Der

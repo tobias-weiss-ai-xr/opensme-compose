@@ -300,8 +300,9 @@ saga:
 	done
 
 e2e-mail:
-	@echo -e "$(BLUE)── layer 5: webmail page contract (needs the mail profile) ──$(NC)"
+	@echo -e "$(BLUE)── layer 5: webmail + mail server (needs the mail profile) ──$(NC)"
 	@echo -e "   requires Stalwart + SOGo from mail/stalwart.yml + mail/sogo.yml (skips when absent)"
+	@echo -e "   checks the page, a real login, submission on 587 and delivery into the INBOX"
 	@echo -e "   the login leg needs mail users: make provision-mail-users"
 	@$(PYTHON) tests/05-e2e/webmail.py $(DOMAIN) 2>&1
 

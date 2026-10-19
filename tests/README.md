@@ -367,7 +367,18 @@ What is covered (full story catalog with Given/When/Then:
    Skipped without provisioned users (`make provision-mail-users`); with
    users, a failed login is a real failure.
    The CI `mail` job boots Stalwart + SOGo, provisions one demo mail user
-   and runs this; locally `make e2e-mail` does the same.
+   and runs this; locally `make e2e-mail` does the same. The journey then
+   exercises the mail server behind the webmail with the same user: SMTP
+   submission on 587 (STARTTLS is advertised as `requiretls`, so a client
+   that speaks plaintext is refused; the server's self-signed certificate
+   is not verified — same reason the overlay runs IMAP in clear text)
+   accepts a uniquely-subjected message from the user, and IMAP on 143 must
+   show it in the INBOX (polled up to 30 s, then deleted again). Sending
+   and delivering are different server paths, so a green send with an
+   silently empty mailbox fails here. These legs skip when the mail ports
+   are not published on the test host — unless `opensme-stalwart` is
+   running, in which case an unreachable port is a failure (the overlay
+   publishes 25/143/587).
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

@@ -442,7 +442,9 @@ federating SOGo to the IdP stays visible as an open item instead of passing
 silently. The login contract is enforced end to end by
 `tests/05-e2e/webmail.py` (CI job `mail`): page + assets + SOGo's own schema,
 then a real login, the account bootstrap (`Mail/mailAccounts`) and the mailbox
-view — through the edge, carrying the browser's XSRF header.
+view — through the edge, carrying the browser's XSRF header — and finally a
+message the user submits on 587 (STARTTLS required) that must arrive in their
+INBOX over IMAP.
 
 ### Docker Compose file order
 
