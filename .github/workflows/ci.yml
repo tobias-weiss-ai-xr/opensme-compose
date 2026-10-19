@@ -416,7 +416,7 @@ jobs:
         # has no mail users) and a broken login could hide behind the skip.
         run: bash scripts/provision-demo-users.sh --component stalwart
 
-      - name: Run webmail + mail-server journey (page, login, submission, delivery)
+      - name: Run groupware journey (page, login, mail round trip, DAV)
         run: python3 tests/05-e2e/webmail.py opensme.local
 
       - name: Teardown

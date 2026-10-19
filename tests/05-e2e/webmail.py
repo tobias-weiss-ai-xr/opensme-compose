@@ -60,6 +60,15 @@ This journey pins the page contract:
      does set because SOGo's IMAP client cannot verify the self-signed
      certificate). Only checked when step 6 delivered a message.
 
+  8. Calendar and contacts over DAV — the rest of what "groupware" means.
+     /SOGo/dav/** accepts only HTTP Basic (it rejects the JSON session
+     cookie), so a stack whose webmail works can still have dead DAV, with
+     no fallback in any calendar/contacts client. The home set must list
+     the user's Calendar/ and Contacts/ collections and each must expose at
+     least one child (SOGo creates the defaults on first access). This step
+     needs only SOGo and its database, so it still runs when the mail store
+     makes steps 6/7 skip.
+
 Usage:
   python3 tests/05-e2e/webmail.py                    # domain from .env
   python3 tests/05-e2e/webmail.py home.opensme.graphwiz.ai
@@ -379,6 +388,75 @@ def inbox_round_trip(
             pass
 
 
+def dav_groupware(result, base: str, verify: bool, login: str, password: str) -> None:
+    """Calendar and contacts over DAV — the other half of the groupware.
+
+    Deliberately a different auth surface: /SOGo/dav/** rejects the JSON
+    session cookie and only accepts HTTP Basic, so a stack whose webmail login
+    works can still have dead DAV — and calendar/contacts clients have no
+    fallback for that. Depth 1 on the home set must list the user's own
+    Calendar/ and Contacts/ collections (SOGo creates the defaults on first
+    access), and each must return at least one child: that is the database
+    layer serving real collections, not a stub 207.
+    """
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<D:propfind xmlns:D="DAV:"><D:prop><D:displayname/>'
+        '<D:resourcetype/></D:prop></D:propfind>'
+    )
+    depth1 = {"Depth": "1", "Content-Type": "application/xml"}
+
+    def propfind(path: str):
+        return requests.request(
+            "PROPFIND",
+            base + path,
+            data=body,
+            auth=(login, password),
+            verify=verify,
+            timeout=T,
+            headers=depth1,
+        )
+
+    home = f"/SOGo/dav/{login}/"
+    try:
+        r = propfind(home)
+    except requests.RequestException as e:
+        result.fail(f"PROPFIND {home} failed: {type(e).__name__}: {e}")
+        return
+    if r.status_code != 207:
+        result.fail(
+            f"PROPFIND {home} → HTTP {r.status_code} (expected 207 Multi-Status; "
+            "DAV takes HTTP Basic, not the webmail session cookie)"
+        )
+        return
+    hrefs = re.findall(r"<(?:\w+:)?href>([^<]+)</(?:\w+:)?href>", r.text)
+    for name in ("Calendar", "Contacts"):
+        if not any(h.rstrip("/").endswith(name) for h in hrefs):
+            result.fail(f"DAV home set {home} lists no {name}/ collection (hrefs: {hrefs[:5]})")
+            return
+    result.ok(f"DAV home set lists the user's collections ({len(hrefs) - 1} entries)")
+
+    for name in ("Calendar", "Contacts"):
+        path = f"{home}{name}/"
+        try:
+            c = propfind(path)
+        except requests.RequestException as e:
+            result.fail(f"PROPFIND {path} failed: {type(e).__name__}: {e}")
+            continue
+        if c.status_code != 207:
+            result.fail(f"PROPFIND {path} → HTTP {c.status_code} (expected 207)")
+            continue
+        kids = [
+            h
+            for h in re.findall(r"<(?:\w+:)?href>([^<]+)</(?:\w+:)?href>", c.text)
+            if h.rstrip("/") != path.rstrip("/")
+        ]
+        if not kids:
+            result.fail(f"{path} exposes no collection — the database layer serves nothing")
+            continue
+        result.ok(f"{name} over DAV: {len(kids)} collection(s) reachable")
+
+
 def main() -> bool:
     ap = argparse.ArgumentParser(description="openSME webmail page contract")
     ap.add_argument("domain", nargs="?", default=None, help="stack domain")
@@ -408,7 +486,7 @@ def main() -> bool:
     session.verify = not localish
 
     result = Result("webmail-page")
-    result.header(f"SOGo webmail + mail server journey — {webmail_base}")
+    result.header(f"SOGo groupware journey (webmail + mail server + DAV) — {webmail_base}")
 
     # 0. Precondition — is SOGo deployed at all?
     # A deployed SOGo answers /SOGo/ with 200 (check 2 below). When it does not
@@ -628,6 +706,11 @@ def main() -> bool:
                 subject = submission_send(result, login, identity_email, password, strict)
                 if subject:
                     inbox_round_trip(result, login, password, subject, strict)
+
+            # 8. the rest of the groupware: calendar + contacts over DAV. Runs
+            #    whenever the login worked — it needs SOGo and its database,
+            #    not the IMAP store steps 6/7 depend on.
+            dav_groupware(result, webmail_base, not localish, login, password)
 
     return result.summary()
 

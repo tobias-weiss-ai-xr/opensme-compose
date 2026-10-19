@@ -383,6 +383,15 @@ What is covered (full story catalog with Given/When/Then:
    are not published on the test host — unless `opensme-stalwart` is
    running, in which case an unreachable port is a failure (the overlay
    publishes 25/143/587).
+
+   The last leg is the other half of "groupware": calendar and contacts over
+   DAV. `/SOGo/dav/**` accepts only HTTP Basic (it rejects the JSON session
+   cookie), so a working webmail can still have dead DAV with no fallback in
+   any calendar client — `PROPFIND` must return 207, list the user's own
+   `Calendar/` and `Contacts/` collections, and each must expose at least one
+   child (SOGo creates the defaults on first access). This needs only SOGo
+   and its database, so it still runs when the mail store makes the two mail
+   legs skip.
 36. **Saga navigation smoke** — `tests/05-e2e/saga_smoke.py`: every
    portal tile leads to a URL that answers ("no tile to nowhere"),
    `/api/feeds` degrades to empty columns instead of erroring, and

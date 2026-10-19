@@ -20,7 +20,7 @@ How the openSME Compose distribution is validated before release.
 | 2 · Contracts | service/contract validation | ✅ |
 | 3 · Smoke | HTTP endpoints + container health (`tests/03-smoke`) | host |
 | 4 · Integration | cross-service wiring: DB provisioning, pgbouncer, SSO issuer, live AI proxy | host |
-| 5 · E2E | real SSO/OIDC journeys over HTTP (Zitadel Session API, no browser): `run.py` (Epic A–D), `logout.py` (portal logout + single sign-out to OpenCloud), `session_lifecycle.py` (timeout, refresh rotation, cross-service SSO), `saga_smoke.py`, `webmail.py` (SOGo page contract + own database schema + a real login → account bootstrap → mailbox view → submission on 587 → delivery into the INBOX over IMAP, own `mail` job), plus the portal security-header contract | ✅ |
+| 5 · E2E | real SSO/OIDC journeys over HTTP (Zitadel Session API, no browser): `run.py` (Epic A–D), `logout.py` (portal logout + single sign-out to OpenCloud), `session_lifecycle.py` (timeout, refresh rotation, cross-service SSO), `saga_smoke.py`, `webmail.py` (SOGo page contract + own database schema + a real login → account bootstrap → mailbox view → submission on 587 → delivery into the INBOX over IMAP → CalDAV/CardDAV reachability (207, own collections, Basic auth), own `mail` job), plus the portal security-header contract | ✅ |
 | 6 · Security | hardening audit: exposed ports, secrets, TLS, privileges | host |
 | 7 · Bench | `tests/07-bench/run_bench.py` — memory + p50/p95/p99 latency | optional (manual) |
 | 8 · K8s | cluster deployment health (`tests/08-k8s`) | host |
@@ -39,7 +39,9 @@ Stalwart + SOGo on top of the demo stack, provisions one demo mail user
 (`scripts/provision-demo-users.sh --component stalwart` — Stalwart principal
 with role `user` + the matching `sogo.mail_users` row) and runs `webmail.py`,
 which then also sends and receives a message as that user (587 + STARTTLS →
-INBOX over IMAP 143). It skips honestly on a stack without the mail profile,
+INBOX over IMAP 143) and checks the calendar/contacts half over DAV
+(`PROPFIND` 207 with the user's own collections — Basic auth, not the
+session cookie). It skips honestly on a stack without the mail profile,
 and fails when a running `opensme-sogo`/`opensme-stalwart` container stops
 answering or its published ports disappear. The six `saga_*.py` blueprints
 stay local (Operaton, invoice, paperless, notes, ticketing, CMS) — they run
