@@ -102,10 +102,10 @@ import requests
 import urllib3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import (  # noqa: E402  (path bootstrap before import)
+from run import (  # (path bootstrap before import)
     T,
     install_dns_fallback,
     is_localish,
@@ -147,7 +147,7 @@ def sogo_container_present() -> bool:
     try:
         proc = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -168,7 +168,7 @@ def stalwart_container_present() -> bool:
     try:
         proc = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -196,9 +196,9 @@ def sogo_schema_tables() -> int | None:
         proc = subprocess.run(
             ["docker", "exec", "opensme-postgres",
              "psql", "-U", "opensme", "-d", "sogo", "-tAc",
-             "select count(*) from information_schema.tables "
-             "where table_schema = 'public'"],
-            capture_output=True, text=True, timeout=30,
+             ("select count(*) from information_schema.tables "
+              "where table_schema = 'public'")],
+            capture_output=True, text=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -226,7 +226,7 @@ def sogo_mail_user_rows() -> int | None:
     try:
         env = subprocess.run(
             ["docker", "exec", "opensme-postgres", "printenv", "POSTGRES_USER"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, check=False,
         )
         if env.returncode == 0 and env.stdout.strip():
             user = env.stdout.strip()
@@ -234,7 +234,7 @@ def sogo_mail_user_rows() -> int | None:
             ["docker", "exec", "opensme-postgres",
              "psql", "-U", user, "-d", "sogo", "-tAc",
              "select count(*) from mail_users"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

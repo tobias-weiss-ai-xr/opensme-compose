@@ -191,16 +191,20 @@ def fetch_seeded(container_path):
             cmd += ["--env-file", ".env"]
         cmd += ["cp", f"zitadel:{container_path}", "-"]
         try:
-            r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, timeout=30)
-        except Exception:
+            # docker may be absent, the set not deployed, or the read times
+            # out — every failure just means "try the next candidate set".
+            r = subprocess.run(
+                cmd, cwd=str(ROOT), capture_output=True, timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
             continue
         if r.returncode != 0:
             continue
         try:
-            tf = tarfile.open(fileobj=io.BytesIO(r.stdout))
-            for member in tf.getmembers():
-                if member.isfile():
-                    return tf.extractfile(member).read().decode().strip()
+            with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+                for member in tf.getmembers():
+                    if member.isfile():
+                        return tf.extractfile(member).read().decode().strip()
         except tarfile.TarError:
             continue
     return None
@@ -770,7 +774,7 @@ def section_opencloud(result: Result, session, cloud_base: str, idp_base: str,
     except requests.RequestException:
         result.skip("opencloud not running")
         return
-    if r.status_code != 200 or not re.search(r"opencloud|owncloud", r.text, re.I):
+    if r.status_code != 200 or not re.search(r"opencloud|owncloud", r.text, re.IGNORECASE):
         result.fail(f"opencloud web UI broken: HTTP {r.status_code}")
         return
     result.ok("opencloud web UI loads")
@@ -926,7 +930,7 @@ def section_user_lifecycle(result: Result, session, disc: dict, client_id: str,
 
     try:
         # 2) that user logs in through the full authorization-code flow
-        authz, verifier, state, nonce = authorize_url(disc, client_id, callback)
+        authz, _verifier, _state, _nonce = authorize_url(disc, client_id, callback)
         qs, _sess = api_login(session, idp_base, lc_pat, client_uid, authz,
                               uid, pw)
         if qs.get("code"):
@@ -1155,11 +1159,11 @@ def main() -> bool:
     if flows_ok and idt:
         verify_id_token(result, session, disc, idt, client_id, nonce)
 
-    if flows_ok and sess:
-        if section_sso_reuse(result, session, disc, client_id, callback, idp_base,
-                             lc_pat, client_uid, sess):
-            section_logout(result, session, idp_base, lc_pat, client_uid, sess,
-                           client_id, callback, disc)
+    if flows_ok and sess and section_sso_reuse(result, session, disc, client_id,
+                                               callback, idp_base, lc_pat,
+                                               client_uid, sess):
+        section_logout(result, session, idp_base, lc_pat, client_uid, sess,
+                       client_id, callback, disc)
 
     # Identity lifecycle (provision → SSO login → delete → dead login
     # rejected) — reuses the throw-away app while it is still alive
@@ -1178,12 +1182,14 @@ def main() -> bool:
         except E2EError as e:
             result.fail(f"session isolation: {e}")
 
-    # Cleanup the throw-away app (best effort)
+    # Cleanup the throw-away app (best effort). Deliberately blind: ANY
+    # failure here (transport, API shape, auth) must degrade to a warn —
+    # an aborted cleanup must never fail an otherwise-passing journey.
     if owned and pat:
         try:
             cleanup_app(session, idp_base, pat, owned[0], owned[1])
             result.ok("removed throw-away OIDC app")
-        except Exception:
+        except Exception:  # noqa: BLE001 — see comment above
             result.warn("could not remove throw-away OIDC app (delete project 'e2e-sso')")
 
     # 6) App reachability
