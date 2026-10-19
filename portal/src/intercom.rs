@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::hash::{BuildHasher, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 pub const MAX_TEXT: usize = 2000;
 pub const MAX_URL: usize = 2048;
@@ -93,7 +93,7 @@ impl IntercomConfig {
 }
 
 pub struct IntercomStore {
-    messages: Mutex<VecDeque<IntercomMessage>>,
+    messages: RwLock<VecDeque<IntercomMessage>>,
     next_id: AtomicU64,
     /// JSON persistence file; None = in-memory only.
     data_path: Option<PathBuf>,
@@ -104,7 +104,7 @@ pub struct IntercomStore {
 impl Default for IntercomStore {
     fn default() -> Self {
         Self {
-            messages: Mutex::new(VecDeque::new()),
+            messages: RwLock::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
             data_path: None,
             attachments_dir: None,
@@ -118,7 +118,7 @@ impl IntercomStore {
     /// file = fresh store; corrupt file = rename aside, start fresh).
     pub fn open(data_path: Option<PathBuf>, attachments_dir: Option<PathBuf>) -> Self {
         let store = Self {
-            messages: Mutex::new(VecDeque::new()),
+            messages: RwLock::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
             data_path,
             attachments_dir,
@@ -132,7 +132,7 @@ impl IntercomStore {
         let Ok(raw) = std::fs::read(path) else { return };
         match serde_json::from_slice::<Vec<IntercomMessage>>(&raw) {
             Ok(msgs) => {
-                let mut messages = self.messages.lock().unwrap_or_else(|e| e.into_inner());
+                let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
                 let next = msgs.iter().map(|m| m.id).max().unwrap_or(0) + 1;
                 self.next_id.store(next, Ordering::Relaxed);
                 *messages = msgs.into_iter().rev().collect();
@@ -215,27 +215,22 @@ impl IntercomStore {
 
     pub fn push(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
         let msg = self.push_internal(text, attachment);
-        let mut messages = self.messages.lock().unwrap_or_else(|e| e.into_inner());
+        // Single write-lock for mutate + snapshot: no second acquisition,
+        // and the persisted snapshot can never race another push.
+        let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
         messages.push_back(msg.clone());
         while messages.len() > MAX_MESSAGES {
             messages.pop_front();
         }
+        let snapshot: Vec<IntercomMessage> = messages.iter().cloned().collect();
         drop(messages);
-        self.persist(
-            &self
-                .messages
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
+        self.persist(&snapshot);
         msg
     }
 
     pub fn list(&self) -> Vec<IntercomMessage> {
         self.messages
-            .lock()
+            .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
             .rev()
