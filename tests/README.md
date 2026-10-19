@@ -210,8 +210,12 @@ What is covered (full story catalog with Given/When/Then:
    sign-out to OpenCloud: `logout.py`, item 33)
 6. **App reachability** — opencloud, synapse, notes, paperless, ticketing,
    cms, store, webmail (when running)
-7. **SSO wiring** — synapse `/_matrix/client/v3/login/sso/redirect` and
-   SOGo webmail must redirect to the IdP, not to their own login pages
+7. **SSO wiring** — synapse `/_matrix/client/v3/login/sso/redirect` must
+   redirect to the IdP. SOGo is the exception: it serves its own
+   SQL-authenticated login form, and `run.py`'s `section_sogo_sso` reports
+   that as a **warning** — federating the webmail to Zitadel is an open
+   backlog item, not a regression guard. The enforced webmail contract is
+   item 35 (`webmail.py`: real login, account bootstrap, mail round trip).
 8. **Identity lifecycle** — a throwaway identity is provisioned via the
    IdP API (create-with-password), completes the full SSO flow, is
    deleted, and the dead login is rejected (idempotent: leftovers are

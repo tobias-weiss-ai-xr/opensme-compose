@@ -48,6 +48,13 @@ Status and direction of the openSME Compose distribution.
 - **Cluster mode** (out of scope by design — SME single-node focus).
 - **Permanent live benchmark evidence** on a reference host per tier
   (`make bench`, recorded in `docs/perf/benchmark-run.md`).
+- **Webmail SSO (Epic C3)** — the groupware still serves SOGo's own
+  SQL-authenticated login form. Federating it to Zitadel needs a Zitadel
+  client plus a Stalwart XOAUTH2 directory (a deploy-wide change), so
+  `run.py`'s `section_sogo_sso` reports it as a warning instead of failing
+  the SSO job. The login contract itself IS enforced — `webmail.py` logs in
+  against `sogo.mail_users`, bootstraps the account and sends/receives a
+  message (CI job `mail`).
 - **Docs-as-contract**: keep `docs/README.md` and the README documentation
   table in sync with every new doc (review checklist item).
 

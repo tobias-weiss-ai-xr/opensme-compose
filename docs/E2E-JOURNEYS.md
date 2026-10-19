@@ -103,7 +103,7 @@ ist, was ein E2E-Test ohne Stunden Schlaf ehrlich zusichern kann.
 |---|------------|--------------|
 | C1 | Als Mitarbeiter erreiche ich OpenCloud, Notes, Paperless, Ticketing, Website und Store | `section_apps` — reachability (skips per app) |
 | C2 | Als Chat-Nutzer beginnt der Matrix-Login beim zentralen IdP, nicht bei Synapse | `section_synapse_sso` — SSO redirect targets the IdP |
-| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | `section_sogo_sso` — same contract for the groupware; `webmail.py` prüft zusätzlich die Seite selbst (Login-Markup + jedes referenzierte Asset), wenn ein SOGo-Container läuft |
+| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | `section_sogo_sso` prüft die SSO-Form: landet der Webmail-Einstieg beim IdP, ist die Story erfüllt. Liefert SOGo dagegen seine **eigene** Login-Seite, meldet die Journey das als **warn** (nicht FAIL) und prüft stattdessen die Assets — die Anbindung an Zitadel (Zitadel-Client + Stalwart-XOAUTH2-Directory) ist ein offener Punkt (Backlog), kein Regressionsschutz. Der **erzwungene** Login-Vertrag liegt in `webmail.py`: SQL-Login gegen `sogo.mail_users`, Session- + XSRF-Cookie, nicht-leere Kontoliste, Postfach-Ansicht, Versand und Zustellung (siehe Mail-Zeile oben) |
 
 ## Epic D — Local AI: there when configured, invisible when not
 
