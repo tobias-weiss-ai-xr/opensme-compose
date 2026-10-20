@@ -448,6 +448,19 @@ jobs:
             | grep -iE 'auth|oidc|directory|error|warn' | tail -40 || true
           echo "── idpplain chain probe (inside the compose network) ──"
           net=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' opensme-stalwart)
+          echo "stalwart networks: $net"
+          echo "A. entrypoint+router live? (inside the traefik container)"
+          docker exec opensme-traefik wget -S --header='Host: auth.opensme.local' \
+            -O /dev/null 'http://127.0.0.1:8081/oidc/v1/userinfo' 2>&1 | head -4 || true
+          echo "B. does the IdP alias resolve from the network?"
+          docker run --rm --network "$net" curlimages/curl:8.10.1 \
+            nslookup auth.opensme.local 2>&1 | tail -4 || true
+          echo "C. router reachable via the plain service name?"
+          docker run --rm --network "$net" curlimages/curl:8.10.1 \
+            -s -o /dev/null -w 'userinfo via service name: %{http_code}\n' \
+            -H 'Host: auth.opensme.local' \
+            'http://traefik:8081/oidc/v1/userinfo' || true
+          echo "D. userinfo probe exactly as Stalwart dials it:"
           docker run --rm --network "$net" curlimages/curl:8.10.1 \
             -s -o /dev/null -w 'userinfo probe: %{http_code}\n' \
             -H 'Host: auth.opensme.local' \
