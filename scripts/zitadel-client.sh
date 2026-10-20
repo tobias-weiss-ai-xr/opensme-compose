@@ -16,6 +16,8 @@
 #              → SYNAPSE_OIDC_CLIENT_ID/SECRET
 #   ticketing  help.<domain>/auth/oidc/callback (Nosdesk)
 #              → NOSDESK_OIDC_CLIENT_ID/SECRET
+#   sogo       webmail.<domain>/SOGo[/] (webmail SSO, code lands on
+#              /SOGo/?code=...) → SOGO_OIDC_CLIENT_ID/SECRET
 #
 # SECRET-DRIVEN: Zitadel's Management API takes no client_id / client_secret
 # input — it mints both and returns them (verified against the v4.19 proto;
@@ -76,8 +78,8 @@ instance. Idempotent — safe to run on every boot.
 
 Options:
   --app NAME         which client to ensure: opencloud (default), notes,
-                     synapse or ticketing — selects the redirect URIs and
-                     the .env keys the Zitadel-issued credentials are
+                     synapse, ticketing or sogo — selects the redirect URIs
+                     and the .env keys the Zitadel-issued credentials are
                      persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
@@ -102,7 +104,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run)  DRY_RUN=true; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|notes|synapse)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|notes|synapse|ticketing|sogo)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -205,8 +207,23 @@ case "$APP_KIND" in
     CLIENT_ID_LABEL="$(env_get NOSDESK_OIDC_CLIENT_ID opensme-ticketing)"
     base_paths=("/auth/oidc/callback")
     ;;
+  sogo)
+    APP_PROJECT="opensme"
+    APP_NAME="sogo-webmail"
+    CLIENT_ID_KEY="SOGO_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="SOGO_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    app_domain="$(env_get SOGO_DOMAIN "webmail.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get SOGO_OIDC_CLIENT_ID sogo-webmail)"
+    # SOGo 5.12's OpenID flow sends the browser back to the SOGo app root
+    # with the code as a query parameter (GET /SOGo/?code=...). SOGo builds
+    # the redirect_uri from the request host, and Zitadel matches redirect
+    # URIs as exact strings — so both the slash and no-slash form of the app
+    # root are registered for both protocol faces.
+    base_paths=("/SOGo" "/SOGo/")
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo)"
     exit 1
     ;;
 esac

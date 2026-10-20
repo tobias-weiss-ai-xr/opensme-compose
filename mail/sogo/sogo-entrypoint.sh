@@ -28,10 +28,17 @@ if [ -f "$TEMPLATE" ]; then
   # The rules below cover exactly the placeholders the template uses —
   # nothing else is substituted, so a stale rule would silently render a
   # literal ${...} into sogo.conf (and SOGo would cache the garbage).
+  # SOGO_OIDC_CLIENT_ID/SECRET are minted by scripts/zitadel-client.sh
+  # --app sogo into .env (secret-driven, never a fixed default); if the
+  # keys are missing the placeholders render verbatim and SOGo's OIDC
+  # flow fails loudly at the IdP instead of half-working.
   sed \
     -e "s|\${SOGO_DB_PASSWORD}|${db_pw_url}|g" \
     -e "s|\${OPENSME_DOMAIN}|${OPENSME_DOMAIN:-opensme.graphwiz.ai}|g" \
     -e "s|\${TZ}|${TZ:-Europe/Berlin}|g" \
+    -e "s|\${ZITADEL_DOMAIN}|${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}|g" \
+    -e "s|\${SOGO_OIDC_CLIENT_ID}|${SOGO_OIDC_CLIENT_ID:-}|g" \
+    -e "s|\${SOGO_OIDC_CLIENT_SECRET}|${SOGO_OIDC_CLIENT_SECRET:-}|g" \
     "$TEMPLATE" > "$OUTPUT"
   chown sogo:sogo "$OUTPUT"
   echo "[sogo-entrypoint] Done."

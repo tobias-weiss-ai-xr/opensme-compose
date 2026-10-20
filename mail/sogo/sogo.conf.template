@@ -35,14 +35,23 @@
   // default 127.0.0.1 is not running, which disables the cache after retries.
   SOGoMemcachedHost = "memcached";
 
-  // Authentication: mail users from PostgreSQL (table mail_users).
+  // Authentication: mail users from PostgreSQL (table mail_users), with the
+  // password check delegated to Zitadel via OpenID Connect (webmail SSO,
+  // docs/ROADMAP.md Epic C3).
   //
   // No directory service, on purpose: this stack serves <= 500 users, and an
   // LDAP daemon would be a fourth moving part for one table. Stalwart (Rust)
-  // owns IMAP/SMTP and its admin API provisions accounts; Postgres holds the
-  // same users for SOGo's login, so both read ONE table instead of syncing
-  // two directories. scripts/provision-demo-users.sh --component stalwart
-  // writes both sides in one call.
+  // owns IMAP/SMTP; Postgres holds the same users as SOGo's LOOKUP source —
+  // under OpenID auth the SQL source only maps the IdP identity onto a mail
+  // account (canAuthenticate stays YES for that; SOGo never checks
+  // c_password itself, the IdP owns the password).
+  //
+  // Identity contract (must stay aligned across Zitadel, mail_users and
+  // Stalwart): the IdP's email claim is <user>@${OPENSME_DOMAIN}; the
+  // provisioner writes exactly that value into mail_users.c_uid, and
+  // Stalwart's OIDC directory names principals after the same claim. SOGo
+  // logs in to Stalwart with IMAPLoginFieldName (= c_uid) over XOAUTH2, so
+  // all three names are the same string.
   //
   // The viewURL needs the same percent-encoded password as the OCS URLs
   // above — a raw '/' in a base64 password invalidates it exactly the same way.
@@ -68,6 +77,32 @@
     }
   );
 
+  // OpenID Connect (webmail SSO): SOGo 5.12's native OIDC support. The
+  // browser is redirected to Zitadel's authorize endpoint and comes back to
+  // /SOGo/?code=..., where sogod exchanges the code server-side. The client
+  // pair is minted by scripts/zitadel-client.sh --app sogo (redirect URIs
+  // registered there must match this deployment's SOGO_DOMAIN).
+  //
+  // OCSOpenIdURL is SOGo's OIDC session store (table sogo_openid; SOGo
+  // creates the table itself, so the schema floor assertions in tests
+  // tolerate extra tables). SOGoXSRFValidationEnabled = NO is REQUIRED for
+  // the openid flow — the IdP redirect chain cannot carry the XSRF token
+  // the SQL-login form posts. Session-level XSRF for UI actions stays on.
+  SOGoAuthenticationType = openid;
+  SOGoXSRFValidationEnabled = NO;
+  OCSOpenIdURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_openid";
+  SOGoOpenIdConfigUrl = "https://${ZITADEL_DOMAIN}/.well-known/openid-configuration";
+  SOGoOpenIdClient = "${SOGO_OIDC_CLIENT_ID}";
+  SOGoOpenIdClientSecret = "${SOGO_OIDC_CLIENT_SECRET}";
+  SOGoOpenIdScope = "openid profile email offline_access";
+  // The userinfo claim whose value must equal the SQL source's c_uid (see
+  // the identity contract above). Zitadel's email claim is exactly
+  // <user>@${OPENSME_DOMAIN}.
+  SOGoOpenIdEmailParam = "email";
+  SOGoOpenIdEnableRefreshToken = YES;
+  SOGoOpenIdTokenCheckInterval = 300;
+  SOGoOpenIdLogoutEnabled = YES;
+
   // Mail (via Stalwart)
   SOGoDraftsFolderName = Drafts;
   SOGoSentFolderName = "Sent Items";
@@ -83,7 +118,12 @@
   // nor any other TLS port for IMAP.
   SOGoIMAPServer = "stalwart";
   SOGoSMTPServer = "stalwart";
-  SOGoSMTPAuthenticationType = PLAIN;
+  // With the password owned by the IdP, SOGo never has a plaintext secret
+  // for the mail hop — it presents the OIDC access token as an XOAUTH2
+  // SASL credential, which Stalwart validates against Zitadel's userinfo
+  // endpoint (see mail/stalwart/config.toml.template [directory.oidc]).
+  SOGoSMTPAuthenticationType = xoauth2;
+  NGImap4AuthMechanism = xoauth2;
   SOGoForceExternalLoginWithEmail = NO;
   SOGoMailSpoolPath = "/tmp";
 

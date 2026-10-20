@@ -40,6 +40,7 @@ if [ -f "$TEMPLATE" ]; then
     -e "s|\${STALWART_ADMIN_PASSWORD}|${STALWART_ADMIN_PASSWORD:-CHANGEME_stalwart_admin}|g" \
     -e "s|\${STALWART_BIND}|${bind_addr}|g" \
     -e "s|\${STALWART_PUBLIC_URL}|${STALWART_PUBLIC_URL:-https://mail.opensme.graphwiz.ai}|g" \
+    -e "s|\${ZITADEL_DOMAIN}|${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}|g" \
     "$TEMPLATE" > "$OUTPUT"
   echo "[stalwart-entrypoint] Done."
 else

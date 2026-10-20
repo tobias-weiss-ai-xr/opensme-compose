@@ -37,16 +37,43 @@ data = "rocksdb"
 fts = "rocksdb"
 blob = "rocksdb"
 lookup = "rocksdb"
-directory = "internal"
+# Mail users authenticate against the IdP: the default directory validates
+# OIDC access tokens (IMAP/SMTP XOAUTH2/OAUTHBEARER from SOGo) against
+# Zitadel's userinfo endpoint and auto-provisions the principal on first
+# login. Plain password logins now verify APP passwords only (upstream
+# contract of an oidc-type directory) — regular clients mint app passwords,
+# webmail users just sign in via SSO. The pre-provisioned principals
+# (scripts/provision-demo-users.sh) still carry their seeded secrets; they
+# are inert while this directory is oidc.
+directory = "oidc"
 
 [store.rocksdb]
 type = "rocksdb"
 path = "/var/lib/stalwart/data"
 compression = "lz4"
 
-[directory.internal]
-type = "internal"
+# Webmail SSO: validate the IdP's access tokens (SASL XOAUTH2/OAUTHBEARER).
+# Zitadel's userinfo endpoint is reached on the compose network over plain
+# HTTP — the endpoint URL is used as-is (no discovery, no issuer check in
+# v0.15), and the edge's self-signed dev certificate would fail reqwest's
+# default TLS verification. The principal name comes from the email claim
+# (fields.username unset → falls back to fields.email), which is the same
+# <user>@<OPENSME_DOMAIN> string SOGo maps through mail_users.c_uid.
+[directory.oidc]
+type = "oidc"
 store = "rocksdb"
+endpoint.method = "userinfo"
+# The userinfo URL MUST carry the external IdP host — Zitadel rejects requests
+# whose Host header differs from its configured ExternalDomain (404), so the
+# container name does not work. It must ALSO be plain HTTP: the edge terminates
+# TLS with a per-boot self-signed certificate that cannot be pinned, and the
+# release build of Stalwart verifies TLS unconditionally (no config knob).
+# The fix is traefik's internal-only `idpplain` entrypoint (:8081, never
+# published): same external hostname → right Host header, no TLS hop.
+# Traefik's network alias for ${ZITADEL_DOMAIN} makes the name resolvable here.
+endpoint.url = "http://${ZITADEL_DOMAIN}:8081/oidc/v1/userinfo"
+fields.email = "email"
+timeout = "30s"
 
 [tracer.log]
 type = "log"
@@ -97,4 +124,5 @@ local-keys = [
   "certificate.*",
   "session.*",
   "imap.*",
+  "smtp.*",
 ]

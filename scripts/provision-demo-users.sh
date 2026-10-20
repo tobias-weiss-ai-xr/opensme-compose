@@ -107,6 +107,35 @@ BASE_URL="https://$EXTERNAL_HOST"
 # Inside docker network, use the container name directly
 CURL_HOST="$HOST"
 
+# ── resolution mode ───────────────────────────────────────────────────
+# The Zitadel container is distroless (no shell, no cat) and its :8080 is
+# not published — the API is reachable either from inside the compose
+# network (container DNS, how CI's in-stack callers reach it) or through
+# the Traefik edge (how tests/05-e2e and scripts/zitadel-client.sh reach
+# it from a bare host: https + --resolve for *.local-style demo hosts).
+if [[ "$IN_DOCKER" == "true" ]]; then
+    ZT_MODE="in-docker"
+elif getent hosts "${HOST%%:*}" >/dev/null 2>&1; then
+    ZT_MODE="docker-net"
+else
+    ZT_MODE="edge"
+fi
+zt_scheme="http"; zt_base="$CURL_HOST"; zt_extra=()
+if [[ "$ZT_MODE" == "edge" ]]; then
+    # The container-internal host is unresolvable from here — go through the
+    # Traefik edge instead, like tests/05-e2e and scripts/zitadel-client.sh.
+    # EXTERNAL_HOST defaults to the container name, so fall back to the
+    # ZITADEL_DOMAIN from .env (the same host demo.sh registers at the edge).
+    edge_host="${EXTERNAL_HOST%%:*}"
+    if ! getent hosts "$edge_host" >/dev/null 2>&1 && [[ -f .env ]] \
+            && grep -q '^ZITADEL_DOMAIN=' .env; then
+        edge_host="$(grep -m1 '^ZITADEL_DOMAIN=' .env | cut -d= -f2- | tr -d '\r')"
+    fi
+    zt_scheme="https"; zt_base="$edge_host"
+    zt_extra=(--resolve "$edge_host:443:127.0.0.1" --resolve "$edge_host:80:127.0.0.1")
+    BASE_URL="https://$edge_host"
+fi
+
 log() { $VERBOSE && echo "[provision] $*"; }
 info() { echo "[provision] $*"; }
 err() { echo "[provision] ERROR: $*" >&2; }
@@ -115,15 +144,15 @@ err() { echo "[provision] ERROR: $*" >&2; }
 ztcurl() {
     local extra=()
     [[ "$IN_DOCKER" == "true" ]] && extra+=("-H" "Host: $EXTERNAL_HOST")
-    curl -s -f -S --retry 3 --max-time 30 "${extra[@]}" "$@"
+    curl -s -f -S --retry 3 --max-time 30 "${zt_extra[@]}" "${extra[@]}" "$@"
 }
 
 # ── wait for Zitadel ──────────────────────────────────────────────────
 wait_zitadel() {
     if ! $WAIT; then return 0; fi
-    info "Waiting for Zitadel at http://$CURL_HOST..."
+    info "Waiting for Zitadel at $zt_scheme://$zt_base..."
     for _ in $(seq 1 60); do
-        if ztcurl -k "http://$CURL_HOST/healthz" >/dev/null 2>&1; then
+        if ztcurl -k "$zt_scheme://$zt_base/healthz" >/dev/null 2>&1; then
             info "Zitadel is ready"
             return 0
         fi
@@ -142,21 +171,36 @@ get_pat() {
         return 0
     fi
     
-    # Try docker exec: /machinekey/pat is where zitadel setup writes it
     if command -v docker &>/dev/null; then
+        # The zitadel image is distroless: no shell, no cat — docker exec
+        # cannot read the seeded PAT. `docker compose cp` streams the file
+        # out (the same pattern tests/05-e2e/run.py::fetch_seeded and
+        # scripts/zitadel-client.sh::locate_pat use); the compose file set
+        # must define a `zitadel` service, so try the usual overlays.
+        local -a sets args
+        local files f
+        sets=()
+        if [[ -n "${COMPOSE_FILE:-}" ]]; then
+            sets+=("$COMPOSE_FILE")
+        fi
+        sets+=("docker-compose.yml idm/zitadel.yml")
+        for files in "${sets[@]}"; do
+            args=()
+            for f in $files; do
+                [[ -f "$f" ]] && args+=(-f "$f")
+            done
+            [[ -f .env ]] && args+=(--env-file .env)
+            if pat=$(docker compose "${args[@]}" cp zitadel:/machinekey/pat - 2>/dev/null \
+                    | tar -xOf - 2>/dev/null | tr -d '\r\n') && [[ -n "$pat" ]]; then
+                echo "$pat"
+                return 0
+            fi
+        done
+        # Fallback: shell+cat (only for images that have them)
         local cname="opensme-zitadel"
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^opensme-zitadel"; then
             pat=$(docker exec "$cname" cat /machinekey/pat 2>/dev/null || true)
-            if [[ -n "$pat" ]]; then
-                echo "$pat"
-                return 0
-            fi
-            # Fallback: /run/secrets/... path
-            pat=$(docker exec "$cname" cat /run/secrets/zitadel/pat/machine 2>/dev/null || true)
-            if [[ -n "$pat" ]]; then
-                echo "$pat"
-                return 0
-            fi
+            [[ -n "$pat" ]] && { echo "$pat"; return 0; }
         fi
     fi
     
@@ -174,7 +218,7 @@ api() {
     local data="${3:-}"
     shift 3
     
-    local url="http://$CURL_HOST$path"
+    local url="$zt_scheme://$zt_base$path"
     local token="$1"
     
     local extra=("-H" "Authorization: Bearer $token")
@@ -188,67 +232,46 @@ api() {
 }
 
 # ── check if user exists by username ──────────────────────────────────
+# ── Zitadel identity API (v4) ─────────────────────────────────────────
+# Endpoints verified against Zitadel v4.19 — the same calls tests/05-e2e
+# uses: POST /v2/users/human to provision (the initial password rides
+# along; the separate /password endpoint is self-service and needs
+# verification), POST /management/v1/users/_search to resolve. Zitadel
+# has NO groups — the demo groups in bootstrap/demo-users.json feed the
+# operaton/synapse components; this component skips them.
+
 user_exists() {
-    local username="$1"
-    local token="$2"
-    local res
-    res=$(api GET "/admin/v1/users/by_query?query=$username" "$token" 2>/dev/null) || true
-    [[ -n "$res" && "$res" != "null" && "$res" != "{}" ]]
+    [[ -n "$(get_user_id "$1" "$2")" ]]
 }
 
-# ── get user ID by username ──────────────────────────────────────────
+# Human users in Zitadel carry org-domain-suffixed login names
+# (tweiss@<org-domain>), so a suffix-free equals-query would miss them —
+# compare on the '@'-stem, the same way tests/05-e2e/run.py does.
 get_user_id() {
     local username="$1"
     local token="$2"
     local res
-    res=$(api GET "/admin/v1/users/by_query?query=$username" "$token" 2>/dev/null) || true
-    echo "$res" | jq -r '.[0].id // empty' 2>/dev/null || true
+    res=$(api POST "/management/v1/users/_search" "{\"userName\":\"$username\"}" "$token" 2>/dev/null) || true
+    printf '%s' "$res" | jq -r --arg u "$username" \
+        '[.result[]? | select((.userName // "") | ascii_downcase | split("@")[0] == ($u | ascii_downcase))][0].id // empty' 2>/dev/null
 }
 
-# ── delete user by ID ────────────────────────────────────────────────
 delete_user() {
     local user_id="$1"
     local token="$2"
-    api DELETE "/admin/v1/users/$user_id" "" "$token" >/dev/null 2>&1
+    api DELETE "/v2/users/$user_id" "" "$token" >/dev/null 2>&1
 }
 
-# ── create user ──────────────────────────────────────────────────────
 create_user() {
     local json="$1"
     local token="$2"
-    api POST "/admin/v1/users" "$json" "$token"
+    api POST "/v2/users/human" "$json" "$token"
 }
 
-# ── list all users matching a query ──────────────────────────────────
 list_users() {
     local query="$1"
     local token="$2"
-    api GET "/admin/v1/users/by_query?query=$query" "" "$token"
-}
-
-# ── create group ─────────────────────────────────────────────────────
-create_group() {
-    local json="$1"
-    local token="$2"
-    api POST "/admin/v1/groups" "$json" "$token"
-}
-
-# ── get group ID by name ──────────────────────────────────────────────
-get_group_id() {
-    local name="$1"
-    local token="$2"
-    local res
-    res=$(api GET "/admin/v1/groups/by_query?query=$name" "$token" 2>/dev/null) || true
-    echo "$res" | jq -r '.[0].id // empty' 2>/dev/null || true
-}
-
-# ─ add user to group ─────────────────────────────────────────────────
-add_user_to_group() {
-    local group_id="$1"
-    local user_id="$2"
-    local token="$3"
-    api POST "/admin/v1/groups/$group_id/members" \
-        "{\"userIds\": [\"$user_id\"]}" "$token" >/dev/null 2>&1
+    api POST "/management/v1/users/_search" "{\"userName\":\"$query\"}" "$token"
 }
 
 # ── shared config loading ─────────────────────────────────────────────
@@ -508,104 +531,95 @@ sogo_password_hash() {
 
 main_stalwart() {
     load_config || return 1
-    info "[stalwart] Creating mail accounts for: $COMPANY (@$STALWART_MAIL_DOMAIN)"
-    $DRY_RUN && { info "[stalwart] would create 12 principals + role 'user' via $STALWART_CONTAINER and 12 rows in $POSTGRES_CONTAINER (sogo.mail_users)"; return 0; }
-
-    local admin_pw ip api pg_user
-    admin_pw=$(docker exec "$STALWART_CONTAINER" printenv STALWART_ADMIN_PASSWORD 2>/dev/null || true)
-    if [[ -z "$admin_pw" ]]; then
-        err "[stalwart] STALWART_ADMIN_PASSWORD not found in container env"
-        return 1
-    fi
-    ip=$(docker inspect "$STALWART_CONTAINER" 2>/dev/null | jq -r '.[0].NetworkSettings.Networks[]?.IPAddress' | head -1)
-    if [[ -z "$ip" || "$ip" == "null" ]]; then
-        err "[stalwart] cannot determine container IP of $STALWART_CONTAINER"
-        return 1
-    fi
-    api="http://$ip:8080"
-    local call=(curl -sf -u "admin:$admin_pw")
+    info "[stalwart] Provisioning mail accounts for: $COMPANY (@$STALWART_MAIL_DOMAIN)"
+    $DRY_RUN && { info "[stalwart] would write 12 rows in $POSTGRES_CONTAINER (sogo.mail_users); Stalwart principals auto-provision on first SSO login"; return 0; }
 
     local pg_user
-    pg_user=$(docker exec "$POSTGRES_CONTAINER" printenv POSTGRES_USER 2>/dev/null || true)
-    pg_user="${pg_user:-opensme}"
     # Fail loudly here rather than after 12 silent per-user errors: without the
     # table no webmail login can ever succeed (see postgres-init/02-mail-users.sql).
+    pg_user=$(docker exec "$POSTGRES_CONTAINER" printenv POSTGRES_USER 2>/dev/null || true)
+    pg_user="${pg_user:-opensme}"
     if ! docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d sogo -tAc \
             'select 1 from mail_users limit 1' >/dev/null 2>&1; then
         err "[stalwart] table sogo.mail_users is not readable — was postgres-init/02-mail-users.sql applied?"
         return 1
     fi
 
-    # Domain principal must exist before accounts can reference it in emails.
-    if "${call[@]}" -X POST -H 'Content-Type: application/json' \
-            -d "{\"type\":\"domain\",\"name\":\"$STALWART_MAIL_DOMAIN\"}" "$api/api/principal" 2>/dev/null | grep -q fieldAlreadyExists; then
-        $VERBOSE && info "  - domain $STALWART_MAIL_DOMAIN exists"
+    # ── Stalwart half: NO eager principal writes ──
+    # Since the webmail SSO (Epic C3) the default directory is type "oidc"
+    # (mail/stalwart/config.toml.template [directory.oidc]): access tokens are
+    # validated against Zitadel's userinfo endpoint and the principal is
+    # AUTO-PROVISIONED on first login with the built-in role `user`
+    # (upstream v0.15: OpenIdResponse::build_principal pushes PrincipalData::
+    # Role(ROLE_USER)). The management API refuses INSERT/UPDATE against an
+    # oidc directory ("Only internal directories support inserts and update
+    # operations") — but DELETE passes, so the only provisioning duty left is
+    # removing pre-SSO principals whose bare names ("tweiss") collide with
+    # the auto-provision's unique email index (their emails already carry the
+    # SSO uid). Without this the first SSO login dies with "Already exists".
+    local admin_pw ip api
+    admin_pw=$(docker exec "$STALWART_CONTAINER" printenv STALWART_ADMIN_PASSWORD 2>/dev/null || true)
+    ip=$(docker inspect "$STALWART_CONTAINER" 2>/dev/null | jq -r '.[0].NetworkSettings.Networks[]?.IPAddress' | head -1)
+    if [[ -n "$admin_pw" && -n "$ip" && "$ip" != "null" ]]; then
+        api="http://$ip:8080"
     else
-        info "  ✓ domain $STALWART_MAIL_DOMAIN"
+        api=""
+        info "[stalwart] no admin API reachable — skipping legacy principal cleanup"
     fi
 
-    # Role principal: every mail user carries it (see above).
-    if "${call[@]}" "$api/api/principal?types=role" 2>/dev/null | grep -q '"name":"user"'; then
-        $VERBOSE && info "  - role 'user' exists"
-    elif "${call[@]}" -X POST -H 'Content-Type: application/json' \
-            -d "{\"type\":\"role\",\"name\":\"user\",\"enabledPermissions\":$STALWART_USER_PERMISSIONS}" \
-            "$api/api/principal" 2>/dev/null | grep -q '"data"'; then
-        info "  ✓ role 'user'"
-    else
-        err "[stalwart] could not create role 'user' — IMAP logins will fail"
-        return 1
-    fi
-
-    local created=0 skipped=0 roleless=0 sogo_written=0
+    local sogo_written=0 failures=0
     while IFS= read -r user; do
-        local un pw cn email
+        local un pw cn email sso_uid
         un=$(echo "$user" | jq -r '.username')
         pw=$(echo "$user" | jq -r '.password')
         cn=$(echo "$user" | jq -r '.displayName')
-        # One address in both stores — Stalwart's principal and SOGo's row must
-        # agree, otherwise the webmail shows an account the server does not own.
-        email="$un@$STALWART_MAIL_DOMAIN"
+        # Identity contract (webmail SSO, Epic C3): the SSO uid is
+        #   <user>@$DOMAIN
+        # — exactly Zitadel's email claim (main_zitadel normalizes to the
+        # same shape), which SOGo matches against mail_users.c_uid
+        # (SOGoOpenIdEmailParam="email") and presents as the IMAP/XOAUTH2
+        # login. Stalwart names auto-provisioned principals after that same
+        # claim, so all three identities are one string; the routing address
+        # (mail column) is the same @<OPENSME_DOMAIN> shape.
+        email="$un@$DOMAIN"
+        sso_uid="$email"
 
-        if "${call[@]}" "$api/api/principal/$un" 2>/dev/null | grep -q '"error"'; then
-            if "${call[@]}" -X POST -H 'Content-Type: application/json' \
-                    -d "{\"type\":\"individual\",\"name\":\"$un\",\"emails\":[\"$email\"],\"secrets\":[\"$pw\"],\"roles\":[\"user\"]}" \
-                    "$api/api/principal" 2>/dev/null | grep -q '"data"'; then
-                info "  ✓ $email"
-                created=$((created+1))
+        # Legacy principal from the pre-SSO era (bare name, emails already on
+        # the SSO uid)? Delete it — see the note above. DELETE is the one
+        # write the oidc-directory guard permits. Re-created automatically on
+        # first login with the SSO uid as its name.
+        if [[ -n "$api" ]] && ! curl -sf -u "admin:$admin_pw" "$api/api/principal/$sso_uid" 2>/dev/null | grep -q '"data"' \
+                && curl -sf -u "admin:$admin_pw" "$api/api/principal/$un" 2>/dev/null | grep -q '"data"'; then
+            if curl -sf -u "admin:$admin_pw" -X DELETE "$api/api/principal/$un" >/dev/null 2>&1; then
+                info "  ✓ removed legacy principal '$un' (re-created as '$sso_uid' on first login)"
             else
-                err "  $email failed"
-            fi
-        else
-            skipped=$((skipped+1))
-            $VERBOSE && info "  - $email exists"
-            # Principals created before the role was part of the payload have
-            # no roles at all; the API cannot patch them (PATCH → notFound),
-            # so report instead of silently leaving a half-working account.
-            if ! "${call[@]}" "$api/api/principal/$un" 2>/dev/null | grep -q '"roles":\["user"\]'; then
-                roleless=$((roleless+1))
-                err "  $email exists WITHOUT roles:[\"user\"] — delete and re-provision it (IMAP login will fail)"
+                info "  ! legacy principal '$un' could not be deleted — first SSO login may fail"
             fi
         fi
 
-        # SOGo's half: the same password as a Dovecot-scheme hash. ON CONFLICT
-        # keeps an existing password (a re-run is not a password reset).
+        # SOGo's half: the password as a Dovecot-scheme hash, keyed by the
+        # SSO uid. The hash is the DAV/Basic credential only — IMAP/SMTP
+        # authenticate via XOAUTH2 tokens against the IdP. ON CONFLICT keeps
+        # an existing password (a re-run is not a password reset); rows from
+        # the pre-SSO identity form (bare-username c_uid) are removed so SOGo
+        # has exactly one mapping per user.
         if docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d sogo -q -v ON_ERROR_STOP=1 \
+                -c "DELETE FROM mail_users WHERE c_uid = '$un';" \
                 -c "INSERT INTO mail_users (c_uid, c_name, c_cn, c_password, mail)
-                    VALUES ('$un', '$un', '$cn', '$(sogo_password_hash "$pw")', '$email')
+                    VALUES ('$sso_uid', '$un', '$cn', '$(sogo_password_hash "$pw")', '$email')
                     ON CONFLICT (c_uid) DO UPDATE
                        SET c_name = EXCLUDED.c_name,
                            c_cn   = EXCLUDED.c_cn,
                            mail   = EXCLUDED.mail" >/dev/null 2>&1; then
             sogo_written=$((sogo_written+1))
+            $VERBOSE && info "  ✓ $sso_uid"
         else
-            err "  $email: SOGo row (sogo.mail_users) could not be written"
+            err "  $sso_uid: SOGo row (sogo.mail_users) could not be written"
+            failures=$((failures+1))
         fi
     done < <(jq -c '.users[]' "$USERS_JSON")
-    info "[stalwart] done: $created created, $skipped existing, $sogo_written SOGo rows"
-    if [[ $roleless -gt 0 ]]; then
-        err "[stalwart] $roleless account(s) lack roles:[\"user\"] — IMAP/webmail is broken for them"
-        return 1
-    fi
+    info "[stalwart] done: $sogo_written SOGo rows (Stalwart principals auto-provision on first login)"
+    [[ $failures -eq 0 ]]
 }
 
 # ── component dispatcher ──────────────────────────────────────────────
@@ -665,29 +679,9 @@ main_zitadel() {
     info "Domain: $DOMAIN"
     info "Host: $BASE_URL"
     
-    # ── Create groups first ────────────────────────────────────────────
-    info "Creating groups..."
-    while IFS= read -r group_json; do
-        [[ -z "$group_json" ]] && continue
-        local gname group_id
-        gname=$(echo "$group_json" | jq -r '.name')
-        
-        # Check if group exists
-        group_id=$(get_group_id "$gname" "$PAT")
-        if [[ -z "$group_id" ]]; then
-            # Create group
-            local res
-            res=$(create_group "$group_json" "$PAT") || { err "Failed to create group $gname"; continue; }
-            group_id=$(echo "$res" | jq -r '.id')
-            info "  ✓ Created group: $gname ($group_id)"
-        else
-            log "  - Group $gname already exists ($group_id)"
-        fi
-        
-        # Store group ID for later
-        declare "group_${gname}=$group_id"
-    done < <(echo "$groups" | jq -c '.[]')
-    
+    # ── Groups: not a Zitadel concept (see the API notes above) ────────
+    info "Skipping demo groups — Zitadel has no group concept (the operaton/synapse components own them)"
+
     # ── Clean existing demo users if requested ─────────────────────────
     if $CLEAN; then
         info "Cleaning existing demo users..."
@@ -730,7 +724,9 @@ main_zitadel() {
             log "  - User $username already exists ($uid)"
             skipped=$((skipped + 1))
         else
-            # Create user
+            # Zitadel v2 human-user shape (verified on v4.19): profile +
+            # email nested, password wrapped, isVerified so no invite mail
+            # is generated (the stack ships no SMTP relay for the IdP).
             local user_payload
             user_payload=$(jq -n \
                 --arg un "$username" \
@@ -741,12 +737,9 @@ main_zitadel() {
                 --arg pw "$pwd" \
                 '{
                     userName: $un,
-                    firstName: $fn,
-                    lastName: $ln,
-                    displayName: $dn,
-                    email: $em,
-                    password: $pw,
-                    passwordChangeRequired: false
+                    profile: { givenName: $fn, familyName: $ln, displayName: $dn },
+                    email:   { email: $em, isVerified: true },
+                    password: { password: $pw, changeRequired: false }
                 }')
             
             local res
@@ -756,27 +749,7 @@ main_zitadel() {
             created=$((created + 1))
         fi
         
-        # ── Add user to groups ────────────────────────────────────────
-        local member_of
-        member_of=$(echo "$user_json" | jq -r '.memberOf // .groups // [] | .[]')
-        if [[ -z "$member_of" ]]; then
-            # Use department-based groups from the JSON structure
-            member_of=$(echo "$user_json" | jq -r '[.department, (.roles[])] | flatten | unique | .[]')
-        fi
-        
-        while IFS= read -r gname; do
-            [[ -z "$gname" ]] && continue
-            local gid
-            gid=$(get_group_id "$gname" "$PAT") || true
-            if [[ -n "$gid" ]]; then
-                add_user_to_group "$gid" "$uid" "$PAT"
-                log "    + Added to group: $gname"
-            else
-                log "    ! Group not found: $gname"
-            fi
-        done < <(echo "$member_of" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
-        
-    done < <(echo "$users" | jq -c '.[]')
+    done < <(printf '%s\n' "$users")  # one compact object per line; a 2nd '.[]' would iterate values
     
     info ""
     info "Provisioning complete: $created created, $updated updated, $skipped skipped"
@@ -795,7 +768,7 @@ main_zitadel() {
             echo "  ✓ $dn (@$un)"
             count=$((count + 1))
         fi
-    done < <(echo "$users" | jq -c '.[]')
+    done < <(printf '%s\n' "$users")
     
     info ""
     info "Total active demo users: $count / 12"

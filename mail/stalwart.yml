@@ -37,6 +37,9 @@ services:
       MAIL_DOMAIN: ${MAIL_DOMAIN:-mail.opensme.graphwiz.ai}
       STALWART_PUBLIC_URL: https://${MAIL_DOMAIN:-mail.opensme.graphwiz.ai}
       STALWART_ADMIN_PASSWORD: ${STALWART_ADMIN_PASSWORD:-CHANGEME_stalwart_admin}
+      # OIDC token validation target (webmail SSO): rendered into the
+      # userinfo endpoint URL, see config.toml.template [directory.oidc]
+      ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
     volumes:
       - stalwart-etc:/opt/stalwart/etc
       - stalwart-data:/var/lib/stalwart

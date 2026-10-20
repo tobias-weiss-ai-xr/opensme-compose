@@ -52,6 +52,12 @@ services:
       - "--providers.docker.network=opensme-net"
       - "--entryPoints.web.address=:80"
       - "--entryPoints.websecure.address=:443"
+      # Internal-only IdP path for the mail server's OIDC token validation:
+      # same external hostname as websecure (so Zitadel's Host check passes)
+      # but plain HTTP and NOT published — no client can reach it from outside.
+      # See mail/stalwart/config.toml.template [directory.oidc] for why the
+      # TLS entrypoint cannot serve this call.
+      - "--entryPoints.idpplain.address=:8081"
       - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
       - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
       - "--entryPoints.websecure.http3=true"

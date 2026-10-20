@@ -15,7 +15,9 @@ x-service-defaults: &service-defaults
 # Webmail, calendar, contacts (connects to Stalwart IMAP/SMTP).
 #
 # Config is rendered from sogo.conf.template at startup.
-# Required env vars: SOGO_DB_PASSWORD, OPENSME_DOMAIN, TZ
+# Required env vars: SOGO_DB_PASSWORD, OPENSME_DOMAIN, TZ,
+# ZITADEL_DOMAIN + SOGO_OIDC_CLIENT_ID/SECRET (webmail SSO; minted by
+# scripts/zitadel-client.sh --app sogo).
 
 services:
   sogo:
@@ -43,6 +45,13 @@ services:
       TZ: ${TZ:-Europe/Berlin}
       SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      # Webmail SSO (docs/ROADMAP.md Epic C3): the OIDC client pair is minted
+      # by scripts/zitadel-client.sh --app sogo into .env. Until it runs, the
+      # empty defaults render an empty client id and SSO fails loudly at the
+      # IdP — by design (no fixed default secret is ever shipped).
+      ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
+      SOGO_OIDC_CLIENT_ID: ${SOGO_OIDC_CLIENT_ID:-}
+      SOGO_OIDC_CLIENT_SECRET: ${SOGO_OIDC_CLIENT_SECRET:-}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:

@@ -127,6 +127,17 @@ services:
       - "traefik.http.routers.zitadel.rule=Host(`${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}`)"
       - "traefik.http.routers.zitadel.tls=true"
       - "traefik.http.routers.zitadel.entrypoints=websecure"
+      # Plain-HTTP twin of the websecure router, internal-only: serves the
+      # OIDC userinfo/introspection calls the mail server (Stalwart) makes
+      # for webmail SSO token validation. Not published, so nothing outside
+      # the compose network can reach :8081.
+      - "traefik.http.routers.zitadel-idp.rule=Host(`${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.zitadel-idp.entrypoints=idpplain"
+      # Stalwart dials http://<ZITADEL_DOMAIN>:8081 — the Host header carries
+      # the :8081 port, which trips Zitadel's ExternalDomain check (404).
+      # Rewrite it to the bare external hostname.
+      - "traefik.http.routers.zitadel-idp.middlewares=zitadel-idp-host"
+      - "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders.Host=${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}"
       - "traefik.http.services.zitadel.loadbalancer.server.port=8080"
     deploy:
       resources:
