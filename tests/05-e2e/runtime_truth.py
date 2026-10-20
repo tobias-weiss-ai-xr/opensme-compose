@@ -63,6 +63,16 @@ def main() -> int:
         result.fail(f"compose config failed: {cfg.stderr[:200]}")
         return 1
     declared = json.loads(cfg.stdout).get("services", {})
+    # demo.sh starts some never-profiled (`donotstart`) services EXPLICITLY
+    # after setup gates pass — zitadel-login rides the PAT `zitadel setup`
+    # seeds. Compose skips named services' profiles, so render each by name
+    # and merge; otherwise they show up as "running but not declared".
+    for svc in ("zitadel-login",):
+        cfg2 = subprocess.run(
+            ["docker", "compose"] + compose_args() + ["config", "--format", "json", svc],
+            env=env, capture_output=True, text=True, timeout=120)
+        if cfg2.returncode == 0:
+            declared.update(json.loads(cfg2.stdout).get("services", {}))
 
     # what actually runs: container (service label) → image(+digest)
     ps = subprocess.run(
