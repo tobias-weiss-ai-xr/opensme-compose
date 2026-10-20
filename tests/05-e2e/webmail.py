@@ -450,7 +450,17 @@ def submission_send(
         # XOAUTH2 with the SSO access token: since the webmail SSO (Epic C3)
         # the OIDC directory is the default, and PLAIN credentials verify app
         # passwords only — the demo password is deliberately refused here.
-        typ, resp = server.docmd("AUTH", "XOAUTH2 " + base64.b64encode(oauth_sasl(token).encode()).decode())
+        # A cold chain (runner under load, first userinfo fetch) answers 454
+        # "Temporary authentication failure" — that is a RETRYABLE code, not
+        # a contract break; the persistent case is judged by the final code.
+        typ, resp = 0, b""
+        for attempt in range(3):
+            typ, resp = server.docmd(
+                "AUTH", "XOAUTH2 " + base64.b64encode(oauth_sasl(token).encode()).decode()
+            )
+            if typ == 235 or typ not in (454, 421):
+                break
+            time.sleep(3 * (attempt + 1))
         if typ != 235:
             raise smtplib.SMTPAuthenticationError(typ, resp)
     except (smtplib.SMTPException, ssl.SSLError, OSError) as e:
@@ -506,7 +516,16 @@ def inbox_round_trip(
         return
     try:
         sasl = oauth_sasl(token).encode()
-        box.authenticate("XOAUTH2", lambda _: sasl)
+        for attempt in range(3):
+            try:
+                box.authenticate("XOAUTH2", lambda _: sasl)
+                break
+            except imaplib.IMAP4.error as e:
+                # 454-class temporaries surface as an error carrying the
+                # server's text; only "Temporary" failures are retried.
+                if attempt == 2 or "temporary" not in str(e).lower():
+                    raise
+                time.sleep(3 * (attempt + 1))
         box.select("INBOX")
         for _ in range(15):
             typ, data = box.search(None, "HEADER", "Subject", f'"{subject}"')
@@ -790,6 +809,13 @@ def main() -> bool:
                 for path, label in actions:
                     try:
                         ar = web.get(webmail_base + path, headers=headers, timeout=T)
+                        for attempt in range(2):
+                            if ar.status_code != 500:
+                                break
+                            # SOGo opens an IMAP XOAUTH2 session per view; a
+                            # cold Stalwart→IdP chain can time it out once.
+                            time.sleep(3 * (attempt + 1))
+                            ar = web.get(webmail_base + path, headers=headers, timeout=T)
                     except requests.RequestException as e:
                         result.fail(f"GET {path} → {type(e).__name__}: {e}")
                         continue
