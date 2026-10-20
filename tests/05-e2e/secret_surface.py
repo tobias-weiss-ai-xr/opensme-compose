@@ -81,7 +81,7 @@ def inspect_all() -> dict[str, dict]:
             capture_output=True, text=True).stdout
         env_json, mounts_json, labels_json = raw.split("|", 2)
         env = [e.split("=", 1)[0] for e in json.loads(env_json)]
-        mounts = [m.get("Source") or m.get("Name") or ""
+        mounts = [(m.get("Source") or m.get("Name") or "", bool(m.get("RW", True)))
                   for m in json.loads(mounts_json)]
         containers[name] = {"env": env, "mounts": mounts,
                             "labels": json.loads(labels_json)}
@@ -139,21 +139,32 @@ def main() -> int:
         else f"portal sees DB secrets: {db_leak[:3]}"
     )
 
-    # ── AF3: machinekey mounted by exactly one container ────────────
-    mk_holders = [n for n, c in containers.items()
-                  if any("machinekey" in (m or "").lower()
-                         for m in c["mounts"])]
-    single = len(mk_holders) == 1 and "zitadel" in mk_holders[0]
-    (result.ok if single else result.fail)(
-        f"zitadel machinekey mounted by exactly one container: {mk_holders}"
-        if single
-        else f"machinekey surface too wide: {mk_holders}"
+    # ── AF3: machinekey mounted by zitadel (rw) + the login UI (ro) ──
+    # The login v2 UI authenticates to the Zitadel API with the seeded
+    # IAM_LOGIN_CLIENT PAT — that PAT IS its credential, mounted read-only
+    # from the shared machinekey volume. Anything beyond those two holders,
+    # or a writable mount outside zitadel itself, widens the surface.
+    mk_holders = sorted(
+        n for n, c in containers.items()
+        if any("machinekey" in (m or "").lower() for m, _rw in c["mounts"]))
+    rw_holders = [n for n, c in containers.items()
+                  if any(rw and "machinekey" in (m or "").lower()
+                         for m, rw in c["mounts"])]
+    ok = (
+        set(mk_holders) <= {"opensme-zitadel", "opensme-zitadel-login"}
+        and "opensme-zitadel" in mk_holders
+        and rw_holders == ["opensme-zitadel"]
+    )
+    (result.ok if ok else result.fail)(
+        f"zitadel machinekey mounted by zitadel (rw) + login UI (ro only): {sorted(mk_holders)}"
+        if ok
+        else f"machinekey surface too wide or writable outside zitadel: {sorted(mk_holders)} (rw: {rw_holders})"
     )
 
     # ── AF4: no container mounts the repo's .env ────────────────────
     env_mounts = [n for n, c in containers.items()
                   if any(re.search(r"/\.env$|/\.env\b", (m or ""))
-                         for m in c["mounts"])]
+                         for m, _rw in c["mounts"])]
     (result.ok if not env_mounts else result.fail)(
         ".env is mounted into no container"
         if not env_mounts
