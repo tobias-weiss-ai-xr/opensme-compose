@@ -48,7 +48,7 @@ einem eigenen Job (`mail`), der Stalwart + SOGo dazubootet:
 
 | Journey | Prüft | Checks |
 |---------|-------|--------|
-| `webmail.py` | Der Webmail-Einstieg liefert keine leere Seite: `/` leitet dauerhaft (301) auf `/SOGo/` (ein http→https-Hop am Edge ist erlaubt, ein Hostwechsel nicht), `/SOGo/` liefert Login-Markup, **jedes** referenzierte Asset unter `/SOGo.woa/WebServerResources/` antwortet 200, SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren), **ein echter Login funktioniert**: `POST /SOGo/connect` (JSON) gegen Postgres (`sogo.mail_users`) liefert Session- und XSRF-Cookie, `Mail/mailAccounts` muss eine **nicht-leere** Kontoliste mit der eigenen Adresse zurückgeben (SOGo angemeldet, Stalwart aber nicht → leere Liste), `Mail/0/view` und `Mail/0/folderINBOX/view` müssen 200 liefern, **und der Mailserver dahinter funktioniert**: die Submission auf 587 (STARTTLS ist Pflicht, der Server wirbt mit `requiretls`) nimmt eine Nachricht desselben Nutzers an, die über IMAP auf 143 im INBOX ankommt (Senden und Zustellen sind verschiedene Server-Pfade — ein grüner Versand bei stumm leer bleibendem Postfach bleibt sonst unsichtbar); **und das übrige Groupware erreichbar ist**: ein `PROPFIND` (Depth 1) auf `/SOGo/dav/<user>/` liefert 207 und listet die eigenen `Calendar/`- und `Contacts/`-Sammlungen, und jede davon muss mindestens eine Sammlung preisgeben (SOGo legt die Standard-Sammlungen beim ersten Zugriff an) — DAV akzeptiert **nur HTTP Basic** und weist das Webmail-Session-Cookie ab, also ist das ein eigener Fehlerpfad, für den Kalender-/Kontakte-Clients keinen Ersatz haben | Seite + Assets + Schema + Login + Postfach + Versand + Zustellung + Kalender/Kontakte (DAV) |
+| `webmail.py` | Der Webmail-Einstieg delegiert die Anmeldung an den IdP: ein unauthentifiziertes `/SOGo/` leitet auf den Authorize-Endpunkt von Zitadel weiter (inkl. `client_id`; nur http→https-Hop und Webmail-Host-Hops werden gefolgt — die Login-**seite** des IdP wird nie geladen, die Session-API spielt das Login), SOGo hat sein Datenbank-Schema angelegt (die Seite rendert aus Templates, auch wenn jede SQL-Abfrage scheitert — ein nicht percent-encodiertes Passwort in der `postgresql://`-URL ließ genau das passieren), **ein echter SSO-Login funktioniert**: die Session-API (User-Check, Passwort-Check, Finalize) spielt das Anmeldeformular, der Callback läuft gegen den Webmail-Host (Server-seitiger Code-Austausch) — **der ganze Tanz auf einem Cookie-Jar**, SOGo bindet den OIDC-State an die Session aus dem Redirect; danach müssen `Mail/mailAccounts` eine Kontoliste mit der SSO-UID `<user>@<domain>` liefern (Identitätsvertrag: Zitadel-Email = `sogo.mail_users.c_uid` = Stalwart-Principal = IMAP/SMTP-Login), `Mail/0/view` und `Mail/0/folderINBOX/view` müssen 200 liefern, **die authentifizierte App-Shell** mit allen Assets laden (SSO-Ära-Äquivalent der Blank-Page-Regression), **und der Mailserver dahinter funktioniert** — per **XOAUTH2**: die Submission auf 587 (STARTTLS ist Pflicht, der Server wirbt mit `requiretls`) nimmt eine Nachricht mit einem Access-Token aus einem zweiten Authorize-Dance an (das Demo-Passwort wird an den Mail-Ports bewusst **verweigert** — nur ein vom IdP validiertes Token gilt), die über IMAP XOAUTH2 auf 143 im INBOX ankommt (Senden und Zustellen sind verschiedene Server-Pfade — ein grüner Versand bei stumm leer bleibendem Postfach bleibt sonst unsichtbar); **und das übrige Groupware erreichbar ist**: ein `PROPFIND` (Depth 1) auf `/SOGo/dav/<uid>/` liefert 207 und listet die eigenen `Calendar/`- und `Contacts/`-Sammlungen — DAV akzeptiert **nur HTTP Basic** (mit der SSO-UID gegen den `{SHA512-CRYPT}`-Hash der SQL-Quelle — der eine Ort, an dem das Password noch gilt) und weist das SSO-Session-Cookie ab | Redirect + Schema + SSO-Login + Shell/Assets + Postfach + XOAUTH2-Versand + -Zustellung + Kalender/Kontakte (DAV) |
 
 Senden und Zustellen laufen über die vom Overlay veröffentlichten Mail-Ports
 auf dem Testhost; sind sie dort nicht erreichbar, überspringt die Journey
@@ -61,16 +61,12 @@ Login ist davon ausgenommen — deshalb antworten Seite, Assets und Login
 weiterhin 200, während **jede** Action (Mail, Kalender, Kontakte) mit HTTP 500
 und dem 36-Byte-Body `the called object returned no result` endet, sobald
 eine curl-Probe nur das Session-Cookie (`0xHIGHFLYxSOGo`) mitschickt und den
-Header `X-XSRF-TOKEN` vergisst. Ein Browser sendet den `XSRF-TOKEN`-Cookie aus
-`POST /SOGo/connect` genau als diesen Header; `webmail.py` tut dasselbe —
+Header `X-XSRF-TOKEN` vergisst. Ein Browser sendet den `XSRF-TOKEN`-Cookie
+aus der Callback-Antwort genau als diesen Header; `webmail.py` tut dasselbe —
 sonst ist „Mail-UI kaputt“ nicht von „Probe kaputt“ zu unterscheiden.
 
-Der Login-Teil braucht Nutzer in **beiden** Stores: Stalwart (IMAP, Rolle
-`user`) und `sogo.mail_users` (`{SHA512-CRYPT}`-Hash).
-`make provision-mail-users` bzw. `scripts/provision-demo-users.sh --component
-stalwart` schreibt beide Hälften in einem Aufruf. Ohne provisionierte Nutzer
-überspringt die Journey den Login-Teil; mit Nutzern ist ein fehlgeschlagener
-Login ein Fehler.
+Der SSO-Teil braucht den Nutzer im **IdP** (verifizierter Human-Account,
+Zitadel) und die `sogo.mail_users`-Zeile (`{SHA512-CRYPT}`-Hash) für den DAV-Teil.
 
 Ohne Mail-Profil (Demo-Stack) meldet die Journey `skip` statt `FAIL`; läuft
 ein `opensme-sogo`-Container, der nicht mehr antwortet, ist es ein Fehler —
@@ -103,7 +99,7 @@ ist, was ein E2E-Test ohne Stunden Schlaf ehrlich zusichern kann.
 |---|------------|--------------|
 | C1 | Als Mitarbeiter erreiche ich OpenCloud, Notes, Paperless, Ticketing, Website und Store | `section_apps` — reachability (skips per app) |
 | C2 | Als Chat-Nutzer beginnt der Matrix-Login beim zentralen IdP, nicht bei Synapse | `section_synapse_sso` — SSO redirect targets the IdP |
-| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | `section_sogo_sso` prüft die SSO-Form: landet der Webmail-Einstieg beim IdP, ist die Story erfüllt. Liefert SOGo dagegen seine **eigene** Login-Seite, meldet die Journey das als **warn** (nicht FAIL) und prüft stattdessen die Assets — die Anbindung an Zitadel (Zitadel-Client + Stalwart-XOAUTH2-Directory) ist ein offener Punkt (Backlog), kein Regressionsschutz. Der **erzwungene** Login-Vertrag liegt in `webmail.py`: SQL-Login gegen `sogo.mail_users`, Session- + XSRF-Cookie, nicht-leere Kontoliste, Postfach-Ansicht, Versand und Zustellung (siehe Mail-Zeile oben) |
+| C3 | Als Webmail-Nutzer lande ich beim zentralen IdP, nicht bei einer SOGo-Own-Login-Seite | **erfüllt und erzwungen**: `section_sogo_sso` (FAIL bei eigener Login-Seite) und `webmail.py` führen den kompletten OIDC-Flow aus — Session-API-Login, Callback mit Cookie-Jar, Identitätsvertrag `<user>@<domain>`, XOAUTH2-Versand/Zustellung, DAV mit Basic (siehe Mail-Zeile oben). Die Anbindung: `sogo-webmail`-OIDC-Client (Zitadel, `scripts/zitadel-client.sh --app sogo`) + Stalwart-Default-Directory `oidc` (XOAUTH2 für IMAP/SMTP); der Stalwart-Principal wird beim ersten Login auto-provisioniert |
 
 ## Epic D — Local AI: there when configured, invisible when not
 

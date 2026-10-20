@@ -423,28 +423,32 @@ listeners to IPv4. mailcow boots its own dedicated E2E job in CI
 (`.github/workflows/mailcow.yml`) and the delivery-round-trip journey
 `tests/05-e2e/mailcow_journey.py`.
 
-**Webmail login is SQL-backed, not a directory service.** SOGo authenticates
-against PostgreSQL — `SOGoUserSources` in `mail/sogo/sogo.conf.template` reads
-the `sogo.mail_users` table (created by `postgres-init/02-mail-users.sql`,
-empty until users are provisioned) — while Stalwart keeps its own internal
-directory for IMAP/SMTP. One call writes both halves from
-`bootstrap/demo-users.json`, so the two stores cannot drift:
+**Webmail login is federated to the IdP (webmail SSO).** SOGo runs
+`SOGoAuthenticationType = openid` (see `mail/sogo/sogo.conf.template`): an
+unauthenticated `/SOGo/` redirects to Zitadel's authorize endpoint, the
+session comes back through the OIDC callback, and mail itself authenticates
+per-request with XOAUTH2 — Stalwart's default directory is the OIDC one, so
+the demo password is refused on the mail ports and only an access token the
+IdP validated works. Stalwart auto-provisions the principal on first login
+(role `user`); the only thing provisioning writes is the `sogo.mail_users`
+row for the DAV/Basic surface (plus deleting legacy principals whose bare
+names would collide with the auto-provision unique index):
 
 ```bash
-make provision-mail-users   # Stalwart principals (role `user`) + sogo.mail_users rows
+make provision-mail-users   # IdP accounts + sogo.mail_users rows (DAV/Basic)
 ```
 
 For ≤500 users that keeps a directory daemon out of the stack (no LDAP);
-Zitadel stays the IdP for the rest of the stack. The webmail itself still
-shows SOGo's own login form (SQL-authenticated) rather than a Zitadel
-redirect — `run.py`'s `section_sogo_sso` reports exactly that as a warning, so
-federating SOGo to the IdP stays visible as an open item instead of passing
-silently. The login contract is enforced end to end by
-`tests/05-e2e/webmail.py` (CI job `mail`): page + assets + SOGo's own schema,
-then a real login, the account bootstrap (`Mail/mailAccounts`) and the mailbox
-view — through the edge, carrying the browser's XSRF header — and finally a
-message the user submits on 587 (STARTTLS required) that must arrive in their
-INBOX over IMAP.
+Zitadel stays the IdP for the whole stack. The contract is enforced end to
+end by `tests/05-e2e/webmail.py` (CI job `mail`) and `run.py`'s
+`section_sogo_sso` (FAIL on a local login): the SSO redirect shape, the
+Session-API login + callback (one cookie jar — SOGo binds the OIDC state to
+the redirect session), the identity contract `<user>@<domain>` (Zitadel
+email claim = `sogo.mail_users.c_uid` = Stalwart principal = IMAP/SMTP
+login), the authenticated app shell with all its assets, then a message
+submitted on 587 with an XOAUTH2 access token (STARTTLS required) that must
+arrive in the INBOX over IMAP XOAUTH2 — and DAV calendar/contacts over HTTP
+Basic, the one place the provisioned password still authenticates.
 
 ### Docker Compose file order
 

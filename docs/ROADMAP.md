@@ -48,13 +48,13 @@ Status and direction of the openSME Compose distribution.
 - **Cluster mode** (out of scope by design — SME single-node focus).
 - **Permanent live benchmark evidence** on a reference host per tier
   (`make bench`, recorded in `docs/perf/benchmark-run.md`).
-- **Webmail SSO (Epic C3)** — the groupware still serves SOGo's own
-  SQL-authenticated login form. Federating it to Zitadel needs a Zitadel
-  client plus a Stalwart XOAUTH2 directory (a deploy-wide change), so
-  `run.py`'s `section_sogo_sso` reports it as a warning instead of failing
-  the SSO job. The login contract itself IS enforced — `webmail.py` logs in
-  against `sogo.mail_users`, bootstraps the account and sends/receives a
-  message (CI job `mail`).
+- **Browser login page at the IdP** — Zitadel runs with the `loginV2`
+  instance feature REQUIRED, but the separate Login-UI app is not deployed:
+  `authorize` redirects to `/ui/v2/login/...`, which the Zitadel binary does
+  not serve (404). Humans clicking a service tile hit that 404; every
+  journey logs in programmatically via the Session API and is unaffected.
+  Deploying the Login-UI container (or flipping the feature off) is the
+  remaining work; until then the demo is headless-tested by design.
 - **Docs-as-contract**: keep `docs/README.md` and the README documentation
   table in sync with every new doc (review checklist item).
 

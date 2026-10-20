@@ -35,13 +35,17 @@ that share its prerequisites, while the heavier operator journeys
 persistence, portability, intercom, …) run as their own steps in the same
 job. Journeys that need an overlay the demo stack does not boot get their
 own job when the overlay can be booted in CI: the `mail` job brings up
-Stalwart + SOGo on top of the demo stack, provisions one demo mail user
-(`scripts/provision-demo-users.sh --component stalwart` — Stalwart principal
-with role `user` + the matching `sogo.mail_users` row) and runs `webmail.py`,
-which then also sends and receives a message as that user (587 + STARTTLS →
-INBOX over IMAP 143) and checks the calendar/contacts half over DAV
-(`PROPFIND` 207 with the user's own collections — Basic auth, not the
-session cookie). It skips honestly on a stack without the mail profile,
+Stalwart + SOGo on top of the demo stack, registers the `sogo-webmail` OIDC
+client in Zitadel (`scripts/zitadel-client.sh --app sogo`) and provisions
+the demo users (`scripts/provision-demo-users.sh` with `--component
+zitadel` for the IdP accounts, `--component stalwart` for the
+`sogo.mail_users` rows — the Stalwart principal auto-provisions on first
+login) and runs `webmail.py`, which walks the real SSO flow (Session-API
+login, OIDC callback with one cookie jar) and then also sends and receives
+a message as that user via XOAUTH2 (587 + STARTTLS → INBOX over IMAP 143)
+and checks the calendar/contacts half over DAV (`PROPFIND` 207 with the
+user's own collections — Basic auth, not the session cookie). It skips
+honestly on a stack without the mail profile,
 and fails when a running `opensme-sogo`/`opensme-stalwart` container stops
 answering or its published ports disappear. The six `saga_*.py` blueprints
 stay local (Operaton, invoice, paperless, notes, ticketing, CMS) — they run
