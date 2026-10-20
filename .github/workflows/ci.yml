@@ -354,6 +354,13 @@ jobs:
       - name: Boot demo stack (generates .env with random passwords)
         run: bash scripts/demo.sh
 
+      - name: Register the webmail OIDC client in Zitadel
+        # sogo.conf.template always runs SOGoAuthenticationType=openid and
+        # interpolates SOGO_OIDC_CLIENT_ID — the app must exist before the
+        # mail profile boots or SOGo redirects to an empty client. Writes
+        # SOGO_OIDC_CLIENT_ID/SECRET into .env; idempotent via label lookup.
+        run: bash scripts/zitadel-client.sh --app sogo
+
       - name: Boot the mail profile (Stalwart + SOGo)
         env:
           MAIL_DOMAIN: mail.opensme.local
@@ -392,29 +399,40 @@ jobs:
 
       - name: Wait for the webmail route at the edge
         # Follow the http→https hop: the scheme redirect is entrypoint-wide and
-        # answers for ANY host, so only a 200 on /SOGo/ proves the router for
-        # webmail.* actually exists (404 = no router, exactly the failure mode).
+        # answers for ANY host. The router for webmail.* exists when /SOGo/
+        # answers 302 → the IdP's authorize endpoint (the SSO contract, Epic
+        # C3); the login page itself lives on the IdP and is out of scope here.
         run: |
           for i in $(seq 1 24); do
-            code=$(curl -skL -o /dev/null -w '%{http_code}' \
+            code=$(curl -sk -o /dev/null -w '%{http_code}' \
               --resolve webmail.opensme.local:80:127.0.0.1 \
               --resolve webmail.opensme.local:443:127.0.0.1 \
-              http://webmail.opensme.local/SOGo/ || true)
+              https://webmail.opensme.local/SOGo/ || true)
+            loc=$(curl -sk -o /dev/null -w '%{redirect_url}' \
+              --resolve webmail.opensme.local:80:127.0.0.1 \
+              --resolve webmail.opensme.local:443:127.0.0.1 \
+              https://webmail.opensme.local/SOGo/ || true)
+            if [ "$code" = "302" ] && printf '%s' "$loc" | grep -q 'oauth/v2/authorize'; then
+              echo "webmail route up (302 → authorize)"; exit 0
+            fi
             if [ "$code" = "200" ]; then echo "webmail route up (200)"; exit 0; fi
             sleep 5
           done
-          echo "::error::webmail.* never answered 200 (last: $code)"
+          echo "::error::webmail.* never answered with the SSO redirect (last: $code $loc)"
           docker logs --tail 30 opensme-sogo || true
           docker logs --tail 30 opensme-traefik || true
           exit 1
 
-      - name: Provision a demo mail user (Stalwart principal + SOGo mail_users row)
-        # webmail.py logs in for real, which needs a user in BOTH stores:
-        # Stalwart (IMAP, role `user`) and sogo.mail_users (SHA512-CRYPT hash).
-        # The script writes both halves from bootstrap/demo-users.json and is
-        # idempotent; without it the journey's login leg skips (a fresh stack
-        # has no mail users) and a broken login could hide behind the skip.
-        run: bash scripts/provision-demo-users.sh --component stalwart
+      - name: Provision demo users (Zitadel accounts + SOGo mail_users rows)
+        # webmail.py walks the real SSO flow, which needs (a) the demo user
+        # as a verified Zitadel human account (the OIDC directory auto-
+        # provisions the Stalwart principal on first login) and (b) the
+        # sogo.mail_users row for the DAV/Basic leg. The script is idempotent;
+        # without it the journey's login leg skips and a broken SSO could
+        # hide behind the skip.
+        run: |
+          bash scripts/provision-demo-users.sh --component zitadel
+          bash scripts/provision-demo-users.sh --component stalwart
 
       - name: Run groupware journey (page, login, mail round trip, DAV)
         run: python3 tests/05-e2e/webmail.py opensme.local

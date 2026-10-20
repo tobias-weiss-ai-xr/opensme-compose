@@ -308,7 +308,7 @@ e2e-mail:
 	@echo -e "$(BLUE)── layer 5: webmail + mail server (needs the mail profile) ──$(NC)"
 	@echo -e "   requires Stalwart + SOGo from mail/stalwart.yml + mail/sogo.yml (skips when absent)"
 	@echo -e "   checks the page, a real login, submission on 587 and delivery into the INBOX"
-	@echo -e "   the login leg needs mail users: make provision-mail-users"
+	@echo -e "   the SSO legs need provisioned users: make provision-mail-users"
 	@$(PYTHON) tests/05-e2e/webmail.py $(DOMAIN) 2>&1
 
 security:
@@ -398,9 +398,11 @@ provision-demo-users-clean:
 provision-demo-users-dry:
 	@bash scripts/provision-demo-users.sh --dry-run
 
-# Mail users live in TWO stores (Stalwart for IMAP/SMTP, Postgres for SOGo's
-# webmail login); this writes both halves from bootstrap/demo-users.json.
+# Webmail SSO: users live in the IdP (Zitadel) and Postgres (sogo.mail_users
+# for DAV/Basic); Stalwart auto-provisions its principal on first login, so
+# provisioning writes the two rows that DON'T auto-appear.
 provision-mail-users:
+	@bash scripts/provision-demo-users.sh --component zitadel
 	@bash scripts/provision-demo-users.sh --component stalwart
 
 compliance:
@@ -473,7 +475,7 @@ help:
 	@echo "    make provision-demo-users    Provision 12 demo users in Zitadel (12 person SME)"
 	@echo "    make provision-demo-users-clean  Delete + re-provision demo users"
 	@echo "    make provision-demo-users-dry    Show demo user config (JSON) without provisioning"
-	@echo "    make provision-mail-users    Provision the 12 demo mail users (Stalwart principals + SOGo mail_users rows)"
+	@echo "    make provision-mail-users    Provision the 12 demo users (IdP accounts + SOGo mail_users rows)"
 	@echo "    make compliance              Generate compliance reports (JSON + MD)"
 	@echo ""
 	@echo -e "  $(GREEN)Demo Quickstart$(NC)"

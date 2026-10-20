@@ -811,12 +811,13 @@ def section_opencloud(result: Result, session, cloud_base: str, idp_base: str,
         result.warn(f"opencloud OIDC probe failed: {e.__class__.__name__}")
 
 
-def section_sogo_sso(result, session, webmail_base, idp_base):
-    """Groupware journey: opening the webmail app must land on the central
-    SSO (same contract as the synapse check), and the login page must fully
-    render — every referenced asset must serve 200 (a blank page renders
-    healthy HTML with broken assets; cf. tests/05-e2e/webmail.py)."""
-    for path in ("/sogo/", "/"):
+def section_sogo_sso(result, session, webmail_base, idp_base, client_id=None):
+    """Groupware journey: the webmail SSO contract (Epic C3). SOGo must
+    delegate authentication to the IdP: an unauthenticated /SOGo/ REDIRECTS
+    to the authorize endpoint (carrying the configured client_id) — a local
+    login form is a failure, not a warning. The login page's asset contract
+    lives in tests/05-e2e/webmail.py (which walks the whole flow)."""
+    for path in ("/sogo/", "/SOGo/", "/"):
         try:
             r = session.get(webmail_base + path, allow_redirects=False, timeout=T)
         except requests.RequestException:
@@ -825,53 +826,32 @@ def section_sogo_sso(result, session, webmail_base, idp_base):
         if r.status_code == 404:
             continue  # wrong path — try root
         loc = r.headers.get("Location", "")
+        if r.status_code in REDIRECTS and "/oauth" in loc and "client_id=" in loc:
+            az = parse_qs(urlparse(loc).query)
+            if client_id and az.get("client_id", [""])[0] != client_id:
+                result.fail(
+                    f"sogo SSO redirect targets client "
+                    f"{az.get('client_id', ['?'])[0]} but .env configures "
+                    f"{client_id} — SOGo and the registered OIDC app drifted apart"
+                )
+            else:
+                result.ok("sogo SSO redirect targets the IdP's authorize endpoint")
+            return
         if r.status_code in REDIRECTS and loc.startswith(idp_base):
-            result.ok("sogo SSO redirect targets the IdP")
+            result.fail(
+                f"sogo SSO redirect lands on {loc[:60]} — not the authorize "
+                "endpoint (no client_id): SOGo must start the OIDC dance"
+            )
             return
         if r.status_code == 200:
-            result.warn("sogo reachable but serves a local login (SSO not enforced)")
-            _webmail_assets(result, session, webmail_base)
+            result.fail(
+                "sogo reachable but serves a local login — the webmail SSO "
+                "(Epic C3) requires SOGo to delegate authentication to the IdP"
+            )
             return
-        result.warn(f"sogo probe: HTTP {r.status_code} {loc[:60]}")
+        result.fail(f"sogo probe: HTTP {r.status_code} {loc[:60]}")
         return
     result.skip("sogo not running")
-
-
-def _webmail_assets(result, session, webmail_base):
-    """Every css/js/img asset referenced by the SOGo login page must load.
-    Traefik pointing at sogod (:20000) instead of the apache front (:80)
-    renders HTML but 404s /SOGo.woa/WebServerResources/* — blank page."""
-    from urllib.parse import urljoin
-
-    page = session.get(webmail_base + "/SOGo/", timeout=T)
-    if page.status_code != 200:
-        result.fail(f"webmail /SOGo/ → {page.status_code}")
-        return
-    urls = sorted({
-        urljoin(webmail_base, raw)
-        for attr in ("href", "src")
-        for raw in re.findall(rf'{attr}="([^"]+)"', page.text)
-        if re.search(r"\.(css|js|ico|png|svg|woff2?)(\?|$)", raw)
-        and not raw.startswith(("http://", "https://", "data:", "mailto:"))
-    })
-    if not urls:
-        result.fail("webmail login page references no assets (blank page?)")
-        return
-    broken = []
-    for url in urls:
-        try:
-            ar = session.get(url, timeout=T)
-        except requests.RequestException as e:
-            broken.append(f"{url} ({e.__class__.__name__})")
-            continue
-        if ar.status_code != 200:
-            broken.append(f"{url} → {ar.status_code}")
-    if broken:
-        result.fail(f"{len(broken)}/{len(urls)} webmail page assets broken:")
-        for b in broken:
-            result.info(f"  {b}")
-    else:
-        result.ok(f"all {len(urls)} webmail page assets serve 200")
 
 
 def _purge_user(session, idp_base: str, pat: str, uname: str) -> None:
@@ -1208,7 +1188,8 @@ def main() -> bool:
     # 7) Synapse + SOGo SSO wiring
     if not args.skip_apps:
         section_synapse_sso(result, session, matrix_base, idp_base)
-        section_sogo_sso(result, session, webmail_base, idp_base)
+        section_sogo_sso(result, session, webmail_base, idp_base,
+                         client_id=cfg("SOGO_OIDC_CLIENT_ID") or None)
 
     # 8) Files & collaboration — auth wall + OIDC wiring of the cloud
     if not args.skip_apps:
