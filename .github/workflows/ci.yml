@@ -480,6 +480,11 @@ jobs:
           echo "── rendered stalwart OIDC directory config ──"
           docker exec opensme-stalwart cat /opt/stalwart/etc/config.toml 2>/dev/null \
             | grep -A10 '^\[directory.oidc\]' || true
+          echo "E. traefik's own view: args + entrypoint logs"
+          docker inspect opensme-traefik --format '{{json .Args}}' | tr ',' '\n' \
+            | grep -i entrypoint || true
+          docker logs opensme-traefik 2>&1 \
+            | grep -iE 'entrypoint|error|warn' | head -20 || true
           echo "── opensme-zitadel log tail ──"
           docker logs --tail 60 opensme-zitadel 2>&1 | tail -25 || true
 
