@@ -138,6 +138,9 @@ NOSDESK_DB_PASSWORD=$(pw)
 NOSDESK_JWT_SECRET=$(pw)
 NOSDESK_MFA_KEK=$(openssl rand -hex 32)
 
+# Zitadel login v2 UI session-cookie signer (>= 32 chars enforced upstream)
+LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
+
 # Traefik dashboard
 TRAEFIK_USERS=${TRAEFIK_HASH_ESC}
 
@@ -188,6 +191,13 @@ if [[ "$TU_VAL" != *:* ]]; then
   awk -v line="TRAEFIK_USERS=admin:${HASH}" '/^TRAEFIK_USERS=/{print line; next} {print}' .env > .env.tmp \
     && mv .env.tmp .env
   ok "Regenerated TRAEFIK_USERS with user:hash prefix (dashboard auth fixed)"
+fi
+
+# Zitadel login v2 UI: older .env files predate the cookie signer — append
+# one so upgrading a demo does not fall back to the PAT-derived key.
+if ! grep -q '^LOGIN_SESSION_COOKIE_SECRET=' .env; then
+  printf '\nLOGIN_SESSION_COOKIE_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
+  ok "Appended LOGIN_SESSION_COOKIE_SECRET to existing .env (login v2 UI)"
 fi
 
 # Provision deploy-time Zitadel artifacts via apt (no Docker Hub pulls).
@@ -251,6 +261,11 @@ fi
 # and cheap: on revisits the script reports "already registered" and exits 0.
 info "Starting the IdP (Zitadel) ahead of the rest of the stack..."
 docker compose "${CF[@]}" up -d traefik zitadel
+# The login v2 UI (the page authorize redirects humans to) rides the
+# login-client PAT that `zitadel setup` seeded into the machinekey volume
+# above; started explicitly because its `donotstart` profile keeps it out
+# of every generic `up -d` (see idm/zitadel.yml).
+docker compose "${CF[@]}" up -d zitadel-login
 IDP_READY="no"
 for _ in $(seq 1 60); do
   # container-health == the /debug/ready healthcheck passing inside the image

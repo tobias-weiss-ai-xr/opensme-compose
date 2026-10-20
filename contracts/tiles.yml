@@ -124,6 +124,7 @@ excluded:
   - id: portal       # the catalog itself
   - id: traefik      # edge router (dashboard)
   - id: zitadel      # IdP — transparent SSO, never a tile
+  - id: zitadel-login # the IdP's login page (path-routed on the same host)
   - id: casdoor      # IdP swap point — same rule
   - id: stalwart     # mail backend admin — users read mail via SOGo
   - id: collabora    # embedded editor inside OpenCloud — never a tile

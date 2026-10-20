@@ -9,7 +9,8 @@ The user-facing truth of openSME is not the compose files — it is whether a
 person can log in once and get their work done. Layer 5
 ([tests/05-e2e/](../tests/05-e2e/run.py)) verifies exactly those journeys
 over real HTTP against a running stack: no mocks, no form scraping — logins
-go through the Zitadel v2 Session API, the same API the hosted Login UI uses.
+go through the Zitadel v2 Session API, the same API the bundled Login v2
+UI (`zitadel-login`, served at `auth.*/ui/v2/login`) uses.
 
 Every story below maps 1:1 to a check in the runner. Checks **skip** (not
 fail) when the participating app isn't running, so the suite is meaningful

@@ -6,9 +6,9 @@ Merged `docker compose` models (pure-YAML, no engine needed). Budgets are **rese
 
 | Tier | Host | Σlimits | Σreservations | Budget (res) | Status |
 |------|------|---------|---------------|--------------|--------|
-| soho | 4c/8G | 1.69G | 0.78G | ≤ 6G | ✓ |
-| small | 8c/24G | 7.78G | 3.33G | ≤ 20G | ✓ |
-| medium | 16c/48G | 25.41G | 8.10G | ≤ 40G | ✓ |
+| soho | 4c/8G | 2.07G | 0.91G | ≤ 6G | ✓ |
+| small | 8c/24G | 8.16G | 3.46G | ≤ 20G | ✓ |
+| medium | 16c/48G | 25.79G | 8.23G | ≤ 40G | ✓ |
 
 ## Per-tier services
 
@@ -22,6 +22,7 @@ Merged `docker compose` models (pure-YAML, no engine needed). Budgets are **rese
 | redis | `${REDIS_IMAGE:-redis:7-alpine}` | 0.25c/192M | 0.1c/96M |
 | traefik | `${TRAEFIK_IMAGE:-traefik:v3.3}` | 1c/256M | 0.25c/128M |
 | zitadel | `ghcr.io/zitadel/zitadel:latest` | 1c/512M | 0.5c/256M |
+| zitadel-login | `ghcr.io/zitadel/zitadel-login:v4.19.3` | 0.5c/384M | 0.1c/128M |
 
 ### small
 
@@ -39,6 +40,7 @@ Merged `docker compose` models (pure-YAML, no engine needed). Budgets are **rese
 | redis | `${REDIS_IMAGE:-redis:7-alpine}` | 1c/1.5G | 0.5c/768M |
 | traefik | `${TRAEFIK_IMAGE:-traefik:v3.3}` | 1c/256M | 0.25c/128M |
 | zitadel | `ghcr.io/zitadel/zitadel:latest` | 1c/1G | 0.5c/512M |
+| zitadel-login | `ghcr.io/zitadel/zitadel-login:v4.19.3` | 0.5c/384M | 0.1c/128M |
 
 ### medium
 
@@ -64,3 +66,4 @@ Merged `docker compose` models (pure-YAML, no engine needed). Budgets are **rese
 | synapse | `element-hq/synapse:v1.144.0` | 0.50c/384M | 0.25c/64M |
 | traefik | `${TRAEFIK_IMAGE:-traefik:v3.3}` | 1c/256M | 0.25c/128M |
 | zitadel | `ghcr.io/zitadel/zitadel:latest` | 2c/1G | 1c/512M |
+| zitadel-login | `ghcr.io/zitadel/zitadel-login:v4.19.3` | 0.5c/384M | 0.1c/128M |

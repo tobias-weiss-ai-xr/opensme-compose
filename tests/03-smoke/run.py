@@ -114,6 +114,10 @@ def endpoint_checks(domain: str) -> list[tuple[str, list[int], str]]:
     return [
         (f"{s}{portal}/", [200, 301, 302, 307], "Portal landing page"),
         (f"{s}{zitadel}/healthz", [200], "Zitadel health"),
+        # The login v2 UI is path-routed on the IdP origin (zitadel-login
+        # service). Container health alone would not catch a lost edge
+        # route — the idpplain lesson — so probe the page itself.
+        (f"{s}{zitadel}/ui/v2/login/", [200], "IdP login page (login v2 UI)"),
         (f"{s}{cloud}/healthz", [200], "OpenCloud health"),
         # api.insecure is disabled; the dashboard is served ONLY through the
         # authenticated api@internal router on traefik.<domain>. Without

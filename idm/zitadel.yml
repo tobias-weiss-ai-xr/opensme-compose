@@ -148,5 +148,76 @@ services:
           cpus: "0.25"
           memory: 128M
 
+# ── Zitadel Login UI v2 ───────────────────────────────
+# The separate Next.js login app that serves /ui/v2/login — the page
+# `authorize` redirects humans to when loginV2.required is on (it is).
+# Without it, every browser login dead-ends in Zitadel's 404; the
+# headless journeys are unaffected (they drive the Session API).
+#
+# `donotstart`: like the SOGo pattern, the profile is never activated, so
+# plain `up -d` cannot start it half-configured. demo.sh starts it
+# explicitly AFTER `zitadel setup` has seeded the login-client PAT.
+#
+# Auth to the Zitadel API rides the seeded IAM_LOGIN_CLIENT service user
+# (idm/zitadel/steps.yaml): the PAT file lives on the shared
+# zitadel-machinekey volume and is mounted read-only — no extra
+# provisioning step, idempotent across re-boots.
+  zitadel-login:
+    <<: *service-defaults
+    image: ${ZITADEL_LOGIN_IMAGE:-ghcr.io/zitadel/zitadel-login:v4.19.3}
+    container_name: opensme-zitadel-login
+    profiles: ["donotstart"]
+    restart: unless-stopped
+    environment:
+      # The image defaults HOSTNAME="::" (IPv6 wildcard) which crashes on
+      # hosts and CI runners without IPv6 (EAFNOSUPPORT) — bind IPv4.
+      HOSTNAME: 0.0.0.0
+      # Server-side API calls go container-to-container, plain HTTP.
+      ZITADEL_API_URL: http://zitadel:8080
+      # The app serves (and builds links) under the edge path.
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      # Machine PAT of the seeded IAM_LOGIN_CLIENT service user.
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /machinekey/login-client.pat
+      # Signs the login session cookie. Falls back to deriving the key from
+      # the PAT when unset (deprecated upstream); demo.sh writes a random
+      # one so rotating the PAT cannot silently log everyone out.
+      ZITADEL_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:-insecure-demo-cookie-secret-change-me-0123456789}
+      # Zitadel routes instances by Host — the same ExternalDomain check the
+      # mail server's idpplain hop works around. Without these headers the
+      # login app's API calls arrive as `Host: zitadel` and 404.
+      CUSTOM_REQUEST_HEADERS: Host:${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai},X-Forwarded-Proto:https
+    volumes:
+      - zitadel-machinekey:/machinekey:ro
+    depends_on:
+      zitadel:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "/app/healthcheck.mjs", "http://127.0.0.1:3000/ui/v2/login/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - opensme-net
+    labels:
+      - "traefik.enable=true"
+      - "com.centurylinklabs.watchtower.enable=false"
+      # Same public origin as the IdP, path-routed to the login app.
+      - "traefik.http.routers.zitadel-login.rule=Host(`${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}`) && PathPrefix(`/ui/v2/login`)"
+      - "traefik.http.routers.zitadel-login.tls=true"
+      - "traefik.http.routers.zitadel-login.entrypoints=websecure"
+      # Must beat the Host-only zitadel router.
+      - "traefik.http.routers.zitadel-login.priority=250"
+      - "traefik.http.services.zitadel-login.loadbalancer.server.port=3000"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
 volumes:
   zitadel-machinekey:
+

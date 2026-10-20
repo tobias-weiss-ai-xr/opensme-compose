@@ -24,6 +24,13 @@ Status and direction of the openSME Compose distribution.
 - **Seed data** for fresh deployments: BPMN processes (`make bpm-deploy`),
   human-readable seed documents, an example survey (`make survey-deploy`)
   and 12 demo users (`make provision-demo-users`).
+- **Browser login page at the IdP**: the Zitadel Login v2 UI
+  (`zitadel-login`, `ghcr.io/zitadel/zitadel-login`) is deployed and
+  path-routed at `https://auth.<domain>/ui/v2/login`, so humans can click
+  through OIDC logins; `authorize` hands off to it and the smoke layer
+  probes the page. Authentication to the Zitadel API rides the seeded
+  `IAM_LOGIN_CLIENT` service user's PAT (shared machinekey volume) — no
+  extra provisioning step.
 - **Monitoring agents**: dev-agent (reactive, LLM root-cause),
   dev-maintenance-bot (consent-gated healing with embedded runbook KB),
   predictive-agent (Kalman/Markov risk scoring), taskfleet orchestration.
@@ -48,13 +55,6 @@ Status and direction of the openSME Compose distribution.
 - **Cluster mode** (out of scope by design — SME single-node focus).
 - **Permanent live benchmark evidence** on a reference host per tier
   (`make bench`, recorded in `docs/perf/benchmark-run.md`).
-- **Browser login page at the IdP** — Zitadel runs with the `loginV2`
-  instance feature REQUIRED, but the separate Login-UI app is not deployed:
-  `authorize` redirects to `/ui/v2/login/...`, which the Zitadel binary does
-  not serve (404). Humans clicking a service tile hit that 404; every
-  journey logs in programmatically via the Session API and is unaffected.
-  Deploying the Login-UI container (or flipping the feature off) is the
-  remaining work; until then the demo is headless-tested by design.
 - **Docs-as-contract**: keep `docs/README.md` and the README documentation
   table in sync with every new doc (review checklist item).
 
@@ -62,8 +62,8 @@ Status and direction of the openSME Compose distribution.
 
 | Tier | Σ reservations | Budget |
 |------|---------------|--------|
-| soho  | ~0.8G | 6G  |
-| small | ~3.4G | 20G |
-| medium| ~8.0G | 40G |
+| soho  | ~0.9G | 6G  |
+| small | ~3.5G | 20G |
+| medium| ~8.2G | 40G |
 
 Numbers: [perf/baselines.md](perf/baselines.md).
