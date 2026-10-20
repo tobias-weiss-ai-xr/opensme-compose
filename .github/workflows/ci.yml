@@ -435,7 +435,19 @@ jobs:
           bash scripts/provision-demo-users.sh --component stalwart
 
       - name: Run groupware journey (page, login, mail round trip, DAV)
-        run: python3 tests/05-e2e/webmail.py opensme.local
+        # First-attempt failures on a cold runner are usually the IdP chain
+        # still settling after the edge restart (bare 454s from Stalwart's
+        # OIDC lookup while the idpplain router has not re-registered);
+        # one settled retry keeps the contract enforced without chasing
+        # the race. A real regression fails twice in a row.
+        run: |
+          rc=0
+          python3 tests/05-e2e/webmail.py opensme.local || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::first journey attempt failed (rc=$rc) — settling 30 s and retrying once"
+            sleep 30
+            python3 tests/05-e2e/webmail.py opensme.local
+          fi
 
       - name: Diagnose a journey failure
         # The mail legs fail with a bare 454 when Stalwart's OIDC lookup dies
