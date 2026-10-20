@@ -59,7 +59,9 @@ services:
         # net/smtp, e.g. zitadel's notifier) send an FQDN that strict
         # relays accept — the bare "stalwart" name gets 550'd
         aliases:
-          - stalwart.opensme.vhrz2392.local
+          # dotted, derived from the configured mail domain — strict relays
+          # accept an FQDN HELO, a bare container name gets 550'd
+          - helo.${MAIL_DOMAIN:-mail.opensme.graphwiz.ai}
     labels:
       - "traefik.enable=true"
       - "com.centurylinklabs.watchtower.enable=false"
