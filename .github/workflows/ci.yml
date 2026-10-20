@@ -437,6 +437,27 @@ jobs:
       - name: Run groupware journey (page, login, mail round trip, DAV)
         run: python3 tests/05-e2e/webmail.py opensme.local
 
+      - name: Diagnose a journey failure
+        # The mail legs fail with a bare 454 when Stalwart's OIDC lookup dies
+        # (userinfo unreachable, wrong status, missing email claim) — without
+        # the IdP-side evidence that is undiagnosable from CI logs alone.
+        if: failure()
+        run: |
+          echo "── opensme-stalwart log tail (auth/oidc/directory) ──"
+          docker logs --tail 200 opensme-stalwart 2>&1 \
+            | grep -iE 'auth|oidc|directory|error|warn' | tail -40 || true
+          echo "── idpplain chain probe (inside the compose network) ──"
+          net=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' opensme-stalwart)
+          docker run --rm --network "$net" curlimages/curl:8.10.1 \
+            -s -o /dev/null -w 'userinfo probe: %{http_code}\n' \
+            -H 'Host: auth.opensme.local' \
+            'http://auth.opensme.local:8081/oidc/v1/userinfo' || true
+          echo "── rendered stalwart OIDC directory config ──"
+          docker exec opensme-stalwart cat /opt/stalwart/etc/config.toml 2>/dev/null \
+            | grep -A10 '^\[directory.oidc\]' || true
+          echo "── opensme-zitadel log tail ──"
+          docker logs --tail 60 opensme-zitadel 2>&1 | tail -25 || true
+
       - name: Teardown
         if: always()
         run: |
