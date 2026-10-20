@@ -192,39 +192,13 @@ services:
       - donotstart
 
   # ── Traefik (HTTP-only for .local demo domains) ─
-  # The base command redirects the web entrypoint to websecure (HTTPS).
-  # .local hosts cannot get Let's Encrypt certs (no public DNS), so the
-  # demo serves plain HTTP on :80 only. This override removes the two
-  # redirect args; MUST stay in sync with the command in docker-compose.yml.
-  traefik:
-    command:
-      - "--providers.docker=true"
-      - "--providers.docker.exposedByDefault=false"
-      - "--providers.docker.network=opensme-net"
-      - "--entryPoints.web.address=:80"
-      # Restore the edge redirect (http→https) the journey contract
-      # transport.Z1 pins; the CI Wait follows it with -L -k and requires a
-      # final 200, so a returning 3xx can no longer fake readiness.
-      - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
-      - "--entryPoints.web.http.redirections.entryPoint.permanent=true"
-      - "--entryPoints.web.http.middlewares=ratelimit@file"
-      - "--entryPoints.websecure.address=:443"
-      - "--entryPoints.websecure.http3=true"
-      - "--ping=true"
-      - "--ping.entryPoint=web"
-      - "--certificatesResolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL:-admin@opensme.graphwiz.ai}"
-      - "--certificatesResolvers.letsencrypt.acme.caServer=${TRAEFIK_ACME_CA_SERVER:-https://acme-staging-v02.api.letsencrypt.org/directory}"
-      - "--certificatesResolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
-      - "--certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=web"
-      - "--api.dashboard=true"
-      - "--api.insecure=false"
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
-      # TLS edge for the journey contracts (tls_contract/…): the demo routes
-      # plain HTTP on :80 AND self-signed TLS on :443 (LE cannot issue for
-      # .local, so no certResolver — Traefik serves its default cert). HSTS
-      # and the rate limiter run on the websecure entrypoint.
-      - "--entryPoints.websecure.http.middlewares=hsts@file,ratelimit@file"
+  # The traefik command deliberately has NO override here: compose merges
+  # `command:` by REPLACEMENT, so any copy here silently drops whatever the
+  # base later grows — that is exactly how the internal-only idpplain
+  # entrypoint (Stalwart's OIDC userinfo path) vanished from every
+  # demo.sh-booted stack and turned the CI mail journey red with bare 454s.
+  # docker-compose.yml stays the single source of truth for the edge.
+  traefik: {}
 
   # ── SOGo (skip for demo/dev) ─────────────────
   sogo:
