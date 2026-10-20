@@ -33,7 +33,7 @@ yaml.SafeLoader.add_constructor('!reset', lambda loader, node: None)
 yaml.SafeLoader.add_constructor('!override', lambda loader, node: loader.construct_scalar(node))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import (
+from conftest import (  # noqa: E402 (compose tags registered first)
     ComposeLoader, ContractLoader, EnvLoader, Result, ROOT,
     extract_host_ports, has_healthcheck, has_resource_limits,
     get_networks, is_host_network, extract_env_vars_from_compose,
@@ -55,7 +55,7 @@ def check_env_defined(result, rule, loader):
         if not path.exists():
             result.skip(f"{cf} not found")
             continue
-        vars_in_file = extract_env_vars_from_compose({"_file": path})
+        _vars_in_file = extract_env_vars_from_compose({"_file": path})
         # Actually parse the file directly
         try:
             with open(path) as f:

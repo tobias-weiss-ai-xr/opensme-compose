@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 # Mock LLM server: binds to host.docker.internal so the bot container can reach it
 MOCK_LLM_PORT = 11808
@@ -143,7 +143,7 @@ def start_bot(mock_llm_url: str) -> bool:
             "-v", f"{state_dir}:{STATE}",
             "-v", f"{DOCKER_SOCK}:{DOCKER_SOCK}:ro",
             "-e", f"DEV_AGENT_LLM_URL={mock_llm_url}",
-            "--add-host", f"host.docker.internal:host-gateway"]
+            "--add-host", "host.docker.internal:host-gateway"]
     for k, v in env.items():
         args += ["-e", f"{k}={v}"]
     args += [IMAGE, "-serve"]

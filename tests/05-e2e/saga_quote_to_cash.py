@@ -23,11 +23,11 @@ import requests
 import urllib3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import T, install_dns_fallback, is_localish, load_env_file  # noqa: E402
-from saga_common import probe_portal, service_deployed, service_url, probe_endpoint  # noqa: E402
+from run import install_dns_fallback, is_localish, load_env_file
+from saga_common import probe_portal, service_deployed, service_url, probe_endpoint
 
 
 def main() -> bool:

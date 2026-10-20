@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 BOT = "opensme-injection-bot"
 IMAGE = "opensme-dev-maintenance-bot:latest"
@@ -177,7 +177,7 @@ def main() -> int:
         result.ok("bot serving")
 
         initial_evidence = bot_evidence() or []
-        draft_kinds_before = [e for e in initial_evidence if e.get("kind") == "draft"]
+        _draft_kinds_before = [e for e in initial_evidence if e.get("kind") == "draft"]
         commit_kinds_before = [e for e in initial_evidence if e.get("kind") == "commit"]
 
         # I1: Each injection produces a DRAFT evidence only — NEVER commit.

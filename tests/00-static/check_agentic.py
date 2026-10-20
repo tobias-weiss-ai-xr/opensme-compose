@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 ROOT = Path(__file__).resolve().parents[2]
 E2E = ROOT / "tests" / "05-e2e"
@@ -108,9 +108,9 @@ def check(room):
             if j in rendered:
                 room.ok(f"{j}: registered in CI")
     else:
-        allowlisted = sorted(ALLOWLIST)
-        room.info(f"informational mode (AGENTIC_STRICT=0): exit is always 0; "
-                  f"set AGENTIC_STRICT=1 to enforce")
+        _allowlisted = sorted(ALLOWLIST)
+        room.info("informational mode (AGENTIC_STRICT=0): exit is always 0; "
+                  "set AGENTIC_STRICT=1 to enforce")
         for j in journeys:
             if j in rendered:
                 room.ok(f"{j}: registered in CI")

@@ -34,7 +34,7 @@ from pathlib import Path
 
 # Add parent to path for conftest import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result
 
 # ─── Defaults (overridable via CLI) ────────────────────────────────
 KUBECTL_MIN = "1.30.0"      # minimum k3s Kubernetes version

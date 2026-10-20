@@ -30,7 +30,8 @@ is; [docs/README.md](docs/README.md) is the documentation index.
 ## Development setup
 
 Requirements: Linux, Docker 24+ with Compose v2.20+, Python 3.11+, Rust (portal),
-Go 1.22+ (dev-maintenance-bot), `shellcheck`.
+Go 1.22+ (dev-maintenance-bot), `shellcheck`, `ruff` (>= 0.16, Python lint —
+`make lint` enforces it over `tests/` via `ruff.toml`).
 
 ```bash
 git clone https://github.com/tobias-weiss-ai-xr/openSME-compose.git

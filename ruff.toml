@@ -1,0 +1,24 @@
+# Lint contract for the Python test pyramid (tests/).
+#
+# Scope: correctness only. The journeys and static checks are also run by
+# CI through their exit codes, so anything that could change behaviour is
+# out of scope — most notably import sorting (I001): ruff would hoist the
+# `from conftest import …` lines above the sys.path bootstrap those files
+# exist to perform. Rule families that mostly fire on deliberate test
+# idioms (BLE001 blind-except in best-effort teardowns, PLW1510 probe
+# subprocess.run calls that inspect the returncode, S110 teardown-pass)
+# are deliberately not selected.
+#
+# Enforced locally via `make lint`; CI consumes the journeys' exit codes.
+line-length = 100
+
+[lint]
+select = [
+    "E4",    # pycodestyle imports/indentation block (incl. E402)
+    "E7",    # pycodestyle statement errors (E713, E741, ...)
+    "E9",    # pycodestyle runtime errors (syntax, undefined names)
+    "F",     # pyflakes (unused imports/variables, f-strings, shadowing)
+    "EXE",   # shebang / executable-bit consistency
+    "ISC",   # implicit string concatenation gotchas
+    "RUF100" # dead `noqa` directives
+]

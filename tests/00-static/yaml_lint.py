@@ -22,7 +22,7 @@ yaml.SafeLoader.add_constructor('!reset', lambda loader, node: None)
 yaml.SafeLoader.add_constructor('!override', lambda loader, node: loader.construct_scalar(node))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import ComposeLoader, Result, ROOT
+from conftest import ComposeLoader, Result, ROOT  # noqa: E402 (compose tags registered first)
 
 
 REQUIRED_TOP_KEYS = {"services"}

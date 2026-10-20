@@ -21,7 +21,6 @@ Usage:
 """
 
 import argparse
-import json
 import re
 import socket
 import subprocess

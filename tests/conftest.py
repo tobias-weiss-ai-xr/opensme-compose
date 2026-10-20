@@ -12,12 +12,9 @@
 #
 # All test scripts import from here. No external dependencies beyond PyYAML.
 
-import os
 import re
-import sys
 import yaml
 from pathlib import Path
-from dataclasses import dataclass, field
 from typing import Optional
 
 # Project root (parent of tests/)
@@ -534,7 +531,7 @@ def print_boot_failure(proc, label="boot", tail=30):
     after reporting the failure so the CI log shows WHY the boot diverged.
     """
     for name, stream in (("stdout", proc.stdout or ""), ("stderr", proc.stderr or "")):
-        lines = [l for l in stream.splitlines() if l.strip()]
+        lines = [line for line in stream.splitlines() if line.strip()]
         if not lines:
             continue
         print(f"--- {label} {name} (last {min(len(lines), tail)} of {len(lines)} lines)")

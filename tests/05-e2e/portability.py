@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from conftest import Result, ensure_portal_routed, wait_http_ok
+from conftest import Result, ensure_portal_routed
 from cloud_mock_support import start_cloud_standin, stop_cloud_standin
 
 import requests
@@ -217,8 +217,8 @@ def main() -> int:
                      "--format",
                      "{{range .Config.Env}}{{println .}}{{end}}"],
                     capture_output=True, text=True, timeout=30)
-                keep = [l for l in env_out.stdout.splitlines()
-                        if any(k in l for k in
+                keep = [line for line in env_out.stdout.splitlines()
+                        if any(k in line for k in
                                ("OPENSME_DOMAIN", "OPENCLOUD_URL",
                                 "INTERCOM_ATTACHMENT_HOSTS",
                                 "INTERCOM_ALLOW_HTTP", "PORTAL_DOMAIN"))]

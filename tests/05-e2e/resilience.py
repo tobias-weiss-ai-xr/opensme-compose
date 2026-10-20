@@ -162,9 +162,9 @@ def main() -> int:
         return 1
     try:
         try:
-            idp_down = session.get(idp_base + "/debug/ready", timeout=5) is not None
+            _idp_down = session.get(idp_base + "/debug/ready", timeout=5) is not None
         except requests.RequestException:
-            idp_down = True
+            _idp_down = True
         portal_up = False
         cloud_up = False
         try:

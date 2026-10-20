@@ -59,11 +59,11 @@ def check_workloads(result: Result, ns: str, kind: str):
         if kind == "Deployment":
             ready = status.get("readyReplicas", 0)
             updated = status.get("updatedReplicas", 0)
-            available = status.get("availableReplicas", 0)
+            _available = status.get("availableReplicas", 0)
         else:  # StatefulSet
             ready = status.get("readyReplicas", 0)
             updated = status.get("updatedReplicas", 0)
-            available = ready  # StatefulSets don't have availableReplicas
+            _available = ready  # StatefulSets don't have availableReplicas
 
         if ready == spec_replicas and updated == spec_replicas:
             result.ok(f"{ns}/{name}: {ready}/{spec_replicas} ready")

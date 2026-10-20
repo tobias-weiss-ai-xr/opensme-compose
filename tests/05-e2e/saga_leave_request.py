@@ -22,11 +22,11 @@ import requests
 import urllib3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import T, install_dns_fallback, is_localish, load_env_file  # noqa: E402
-from saga_common import probe_portal, service_deployed, service_url  # noqa: E402
+from run import T, install_dns_fallback, is_localish, load_env_file
+from saga_common import probe_portal, service_deployed, service_url
 
 
 # Operaton (BPMN) REST API paths.
@@ -99,7 +99,7 @@ def main() -> bool:
             else:
                 result.fail(f"process definition key mismatch: expected {PROCESS_KEY}, got {key}")
         elif r.status_code == 404:
-            result.fail(f"vacation-request process definition not deployed (404)")
+            result.fail("vacation-request process definition not deployed (404)")
         else:
             result.fail(f"process definition probe: HTTP {r.status_code}")
     except (requests.RequestException, ValueError) as e:

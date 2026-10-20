@@ -118,7 +118,7 @@ python3 tests/run.py --domain opensme.graphwiz.ai
 ## Makefile integration
 
 ```bash
-make lint          # Layer 0: compose-check + env-check + secret-scan + perf + boot contracts + compose matrix
+make lint          # Layer 0: compose-check + env-check + secret-scan + perf + boot contracts + compose matrix + ruff
 make specs         # Layer 1: spec validation
 make contracts     # Layer 2: contract validation
 make test-static   # Layers 0-2 (all static checks)

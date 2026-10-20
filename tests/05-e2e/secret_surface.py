@@ -76,8 +76,8 @@ def inspect_all() -> dict[str, dict]:
             continue
         raw = subprocess.run(
             ["docker", "inspect", name,
-             "--format", "{{json .Config.Env}}|{{json .Mounts}}"
-                         "|{{json .Config.Labels}}"],
+             "--format", ("{{json .Config.Env}}|{{json .Mounts}}"
+                         "|{{json .Config.Labels}}")],
             capture_output=True, text=True).stdout
         env_json, mounts_json, labels_json = raw.split("|", 2)
         env = [e.split("=", 1)[0] for e in json.loads(env_json)]

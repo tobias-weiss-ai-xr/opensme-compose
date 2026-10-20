@@ -155,7 +155,7 @@ def main():
                 try:
                     c = json.loads(line)
                     name = c.get("Name", c.get("name", "?"))
-                    health = c.get("Health", c.get("health", "unknown"))
+                    _health = c.get("Health", c.get("health", "unknown"))
                     status = c.get("Status", c.get("status", ""))
                     if "healthy" in status.lower():
                         result.ok(f"{name}: healthy")

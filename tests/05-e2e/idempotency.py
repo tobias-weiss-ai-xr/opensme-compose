@@ -50,7 +50,7 @@ def _load_suite():
 
 suite = _load_suite()  # reuses fetch_seeded / mgmt / bootstrap_app
 
-import requests
+import requests  # noqa: E402 (must follow the suite bootstrap)
 
 T = 15
 LOCALISH_SUFFIXES = (".local", ".localhost", ".test")

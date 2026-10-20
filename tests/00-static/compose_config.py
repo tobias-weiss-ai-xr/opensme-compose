@@ -126,7 +126,7 @@ def run_config(files: list[str], profiles: list[str]) -> tuple[bool, str]:
                              timeout=120, cwd=str(ROOT))
     except subprocess.TimeoutExpired:
         return False, "timed out"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, str(e)
     if out.returncode == 0:
         return True, out.stdout
@@ -151,7 +151,7 @@ def stray_brace_in_env(label: str, rendered: str) -> list[str]:
     """
     try:
         cfg = yaml.safe_load(rendered)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return [f"(could not parse rendered config for [{label}]: {exc})"]
     if not isinstance(cfg, dict):
         return []

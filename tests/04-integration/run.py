@@ -27,11 +27,8 @@ Run against the same COMPOSE_FILE selection as the stack:
 """
 
 import argparse
-import json
-import os
 import re
 import socket
-import ssl
 import subprocess
 import sys
 import time

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 # Tracked path matching (regex) → why it must never be committed.
 FORBIDDEN = [

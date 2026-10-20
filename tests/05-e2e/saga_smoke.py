@@ -36,11 +36,11 @@ import requests
 import urllib3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import T, install_dns_fallback, is_localish, load_env_file  # noqa: E402
-from saga_common import (  # noqa: E402
+from run import T, install_dns_fallback, is_localish, load_env_file
+from saga_common import (
     OPTIONAL_CATALOG, probe_portal, service_deployed,
 )
 

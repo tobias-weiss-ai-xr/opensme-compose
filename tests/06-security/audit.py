@@ -23,7 +23,6 @@ Exit codes:
 import os
 import sys
 import re
-import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -155,9 +154,9 @@ def check_traefik_api_secure(result, loader):
         result.ok("traefik: api.insecure disabled")
 
     # The secure dashboard router must carry an auth middleware
-    labels = [str(l) for l in (traefik["data"].get("labels") or [])]
-    has_internal = any("service=api@internal" in l for l in labels)
-    has_auth = any("middlewares=auth" in l or "basicauth" in l for l in labels)
+    labels = [str(label) for label in (traefik["data"].get("labels") or [])]
+    has_internal = any("service=api@internal" in label for label in labels)
+    has_auth = any("middlewares=auth" in label or "basicauth" in label for label in labels)
     if has_internal:
         if has_auth:
             result.ok("traefik: dashboard routed via api@internal with auth middleware")
@@ -230,7 +229,7 @@ def check_env_not_in_git(result):
     # Check .env is in .gitignore
     if gitignore.exists():
         content = gitignore.read_text()
-        if ".env" in content and not ".env.example" in content.split(".env")[0].split("\n")[-1]:
+        if ".env" in content and ".env.example" not in content.split(".env")[0].split("\n")[-1]:
             result.ok(".env is in .gitignore")
         elif ".env" in content:
             result.ok(".env is in .gitignore")

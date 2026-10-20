@@ -108,14 +108,14 @@ def check_oidc_discovery(result: Result):
     # Internal (best-effort — may not be reachable from outside the cluster)
     code, body = curl(INTERNAL_ISSUER, timeout=10)
     if code == 200:
-        result.ok(f"Internal OIDC discovery: 200")
+        result.ok("Internal OIDC discovery: 200")
     else:
         result.warn(f"Internal OIDC discovery: {code} (not reachable from host — expected if not in-cluster)")
 
     # External
     code, body = curl(EXTERNAL_ISSUER, timeout=15)
     if code == 200:
-        result.ok(f"External OIDC discovery: 200")
+        result.ok("External OIDC discovery: 200")
     else:
         result.fail(f"External OIDC discovery: {code} ({body[:200]})")
 

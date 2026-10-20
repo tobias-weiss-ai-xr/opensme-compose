@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 INTEROP = ROOT / "contracts" / "interop.yml"
 COMPOSE_MAIN = ROOT / "docker-compose.yml"
@@ -122,7 +122,7 @@ def main():
             failures.append(f"BPMN bootstrap artifact missing: {bpmn}")
 
     # ── 6. Document flow volumes ───────────────────────────────────────
-    ninja_env = env_of(Path("services/invoice-ninja.yml"))
+    _ninja_env = env_of(Path("services/invoice-ninja.yml"))
     paper_doc = yaml.safe_load((ROOT / "services" / "paperless.yml").read_text())
     paper_vols = " ".join(
         " ".join(s.get("volumes") or []) for s in paper_doc["services"].values()

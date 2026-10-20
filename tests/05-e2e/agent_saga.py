@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 BOT = "opensme-saga-bot"
 MOCK = "opensme-saga-mock"
@@ -115,7 +115,7 @@ def main() -> int:
         print()
         return 0
 
-    keep = args.keep
+    _keep = args.keep
     try:
         # A0: the bot image exists (built if missing).
         img = docker("image", "inspect", IMAGE)
@@ -204,7 +204,7 @@ def main() -> int:
         stop_bot()
 
         # ── phase 2: consent ON ──────────────────────────────────────────
-        keep = False  # once we pose a real restart we always clean up
+        _keep = False  # once we pose a real restart we always clean up
         rc, err = run_bot(allow_heal=True)
         (result.ok if rc == 0 else result.fail)(f"bot restarted consent-on: {err if rc else ''}")
         if rc != 0:

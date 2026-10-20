@@ -18,17 +18,16 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 import urllib3
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import T, REDIRECTS, install_dns_fallback, is_localish, load_env_file  # noqa: E402
-from saga_common import probe_portal, service_deployed, service_url  # noqa: E402
+from run import T, REDIRECTS, install_dns_fallback, is_localish, load_env_file
+from saga_common import probe_portal, service_deployed, service_url
 
 
 def main() -> bool:

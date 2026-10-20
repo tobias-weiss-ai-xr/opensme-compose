@@ -21,7 +21,6 @@ Usage:
 import argparse
 import re
 import socket
-import statistics
 import sys
 import time
 import urllib3

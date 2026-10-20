@@ -50,8 +50,8 @@ def start_cloud_standin(tmpdir: Path, alias: str | None = None,
     for _ in range(20):
         probe = subprocess.run(
             ["docker", "exec", CLOUD_NAME, "python3", "-c",
-             f"import socket;s=socket.create_connection(('127.0.0.1',{port}),2);"
-             "s.close()"],
+             (f"import socket;s=socket.create_connection(('127.0.0.1',{port}),2);"
+             "s.close()")],
             capture_output=True, timeout=30)
         if probe.returncode == 0:
             return True

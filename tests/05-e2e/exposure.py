@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import json
 import re
 import socket
 import subprocess
@@ -41,7 +40,7 @@ LOCALISH_SUFFIXES = (".local", ".localhost", ".test")
 
 
 def compose_args() -> list[str]:
-    cf = f"docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:profiles/demo.dev.yml"
+    cf = "docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:profiles/demo.dev.yml"
     if Path("docker-compose.yml").exists():
         args: list[str] = []
         for f in cf.split(":"):

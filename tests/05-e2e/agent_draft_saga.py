@@ -47,7 +47,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 BOT = "opensme-draft-bot"
 IMAGE = "opensme-dev-maintenance-bot:latest"
@@ -121,7 +121,7 @@ def evidence_kinds() -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="AS2/AS3/AS5 draft→approval→commit gate")
     ap.add_argument("--keep", action="store_true", help="leave the bot up on failure")
-    args = ap.parse_args()
+    _args = ap.parse_args()
 
     result = Result("agent-draft-saga")
     result.header("openSME e2e agent draft saga (AS2/AS3/AS5 write gate)")
@@ -172,7 +172,7 @@ def main() -> int:
             return 1
         did = json.loads(d1.stdout)["id"]
         drafts_after = [e for e in evidence_kinds() if e.get("kind") == "draft"]
-        commits_after = [e for e in evidence_kinds() if e.get("kind") == "commit"]
+        _commits_after = [e for e in evidence_kinds() if e.get("kind") == "commit"]
         (result.ok if len(drafts_after) >= 1 else result.fail)(
             "B2 draft creation is audited (kind draft)")
 

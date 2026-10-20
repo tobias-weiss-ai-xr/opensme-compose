@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import Result, ensure_portal_routed
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import (  # noqa: E402  (path bootstrap before import)
+from run import (
     REDIRECTS,
     T,
     authorize_url,
@@ -82,7 +82,6 @@ def bootstrap_cloud_app(session, idp_base, pat, callback, post_logout):
 
     Lives in its own project so it never collides with the portal app
     bootstrap (bootstrap_app cleans up apps named 'e2e-sso')."""
-    import requests
 
     def mgmt(method, path, payload=None):
         return session.request(

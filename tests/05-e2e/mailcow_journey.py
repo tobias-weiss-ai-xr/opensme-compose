@@ -26,7 +26,6 @@ Usage:
 """
 
 import argparse
-import configparser
 import json
 import re
 import socket

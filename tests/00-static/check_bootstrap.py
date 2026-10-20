@@ -36,7 +36,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 BPMN_DIR = ROOT / "bootstrap" / "bpmn"
 DEPLOY_SCRIPT = ROOT / "bootstrap" / "bpmn-deploy.sh"

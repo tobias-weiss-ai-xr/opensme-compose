@@ -164,7 +164,7 @@ def main():
     result.info(f"Loaded {len(loader.services)} services from compose files")
 
     for svc_name, spec in sorted(specs.items()):
-        spec_file = spec.get("_spec_file", "?")
+        _spec_file = spec.get("_spec_file", "?")
         compose_file = spec.get("compose_file", "?")
         required = spec.get("required", False)
 

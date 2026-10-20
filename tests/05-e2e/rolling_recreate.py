@@ -129,7 +129,6 @@ def main() -> int:
     result = Result("rolling-recreate")
     result.header(f"openSME e2e rolling recreate journey — domain={args.domain}")
 
-    import subprocess
     names = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
                            capture_output=True, text=True).stdout.split()
     if not any("opensme-portal" in n for n in names):
@@ -148,11 +147,11 @@ def main() -> int:
 
     env = dict(os.environ, COMPOSE_FILE=DEMO_SET, COMPOSE_PROFILES="standalone")
     poller = TrafficPoller(portal)
-    ok_all = True
+    _ok_all = True
     try:
         poller.start()
         time.sleep(2)  # warm-up samples before the disruption
-        t_start = time.monotonic()
+        _t_start = time.monotonic()
 
         proc = subprocess.run(
             ["docker", "compose", *compose_args(),
@@ -162,18 +161,18 @@ def main() -> int:
 
         # wait until the container reports running again (poller keeps going)
         deadline = time.monotonic() + RECREATE_WINDOW
-        up_again = False
+        _up_again = False
         while time.monotonic() < deadline:
             state = subprocess.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}",
                  "opensme-portal"],
                 capture_output=True, text=True).stdout.strip()
             if state == "true":
-                up_again = True
+                _up_again = True
                 break
             time.sleep(1)
 
-        t_up = time.monotonic()
+        _t_up = time.monotonic()
         # recovery window: poller keeps running; ensure_portal_routed heals
         # any lingering traefik provider lag before we judge the samples
         if not ensure_portal_routed(session, portal):

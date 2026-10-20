@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 ENV_EXAMPLE = ROOT / ".env.example"
 ENV_DEMO = ROOT / ".env.demo"

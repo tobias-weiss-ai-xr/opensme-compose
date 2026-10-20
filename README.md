@@ -1116,7 +1116,7 @@ make pull                 # Pull images
 make upgrade              # Pre-flight checks + pull + rolling restart
 
 # Testing (layered pyramid — see docs/VALIDATION.md)
-make lint                 # Layer 0: YAML, env, secrets, compose matrix, perf gate
+make lint                 # Layer 0: YAML, env, secrets, compose matrix, perf gate, ruff
 make test-static          # Layer 0 + 1 + 2: lint, specs, contracts
 make container            # Layer 3: container health
 make smoke                # Layer 3: HTTP/SSL/port smoke

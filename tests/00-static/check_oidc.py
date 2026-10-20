@@ -35,7 +35,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 ZITADEL_CLIENT_SH = ROOT / "scripts" / "zitadel-client.sh"
 ENV_EXAMPLE = ROOT / ".env.example"

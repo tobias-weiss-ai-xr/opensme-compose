@@ -99,10 +99,10 @@ def main() -> int:
     for name in containers:
         r = subprocess.run(
             ["docker", "inspect", name, "--format",
-             '{"health": {{if .Config.Healthcheck}}true{{else}}false{{end}},'
+             ('{"health": {{if .Config.Healthcheck}}true{{else}}false{{end}},'
              '"status": "{{if .State.Health}}{{.State.Health.Status}}{{end}}",'
              '"start_period": "{{if .Config.Healthcheck}}{{.Config.Healthcheck.StartPeriod}}{{end}}",'
-             '"started": "{{.State.StartedAt}}"}'],
+             '"started": "{{.State.StartedAt}}"}')],
             capture_output=True, text=True, timeout=60)
         if r.returncode != 0:
             continue

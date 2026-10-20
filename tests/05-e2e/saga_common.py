@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import requests
 
-from run import T  # noqa: E402  (shared per-request timeout)
+from run import T
 
 # Catalog functions that are NOT auto-visible: saga preconditions. A saga
 # journey skips cleanly when a participating service's tile is absent.

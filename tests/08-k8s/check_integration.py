@@ -35,7 +35,6 @@ Exit codes:
     1 = one or more integration links failed
 """
 
-import json
 import subprocess
 import sys
 from pathlib import Path

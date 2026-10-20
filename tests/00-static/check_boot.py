@@ -36,8 +36,6 @@ Exit codes:
     1 = a boot contract was violated
 """
 
-import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path

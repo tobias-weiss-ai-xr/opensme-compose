@@ -257,12 +257,12 @@ def write_baselines(tier_services: dict):
     lines = [
         "# openSME — Resource Baselines",
         "",
-        f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_ "
-        "by `tests/00-static/check_perf.py --write-baselines`.",
+        (f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_ "
+        "by `tests/00-static/check_perf.py --write-baselines`."),
         "",
-        "Merged `docker compose` models (pure-YAML, no engine needed). "
+        ("Merged `docker compose` models (pure-YAML, no engine needed). "
         "Budgets are **reservation** sums (what the scheduler guarantees); "
-        "limits cap spikes. Profile-gated overlays are included per tier.",
+        "limits cap spikes. Profile-gated overlays are included per tier."),
         "",
         "| Tier | Host | Σlimits | Σreservations | Budget (res) | Status |",
         "|------|------|---------|---------------|--------------|--------|",
@@ -289,7 +289,7 @@ def write_baselines(tier_services: dict):
                          f"{res.get('cpus','-')}c/{res.get('memory','-')} |")
         lines.append("")
     (out_dir / "baselines.md").write_text("\n".join(lines))
-    print(f"  Wrote docs/perf/baselines.md")
+    print("  Wrote docs/perf/baselines.md")
 
 
 def main():

@@ -212,7 +212,7 @@ def main():
     print(f"{BOLD}║  openSME — Spec / Contract / Test Scaffold             ║{NC}")
     print(f"{BOLD}╚══════════════════════════════════════════════════════════════╝{NC}")
     print(f"\n  Domain: {BLUE}{args.domain}{NC}")
-    print(f"  Layers: {BLUE}{', '.join(str(l) for l in layers_to_run)}{NC}")
+    print(f"  Layers: {BLUE}{', '.join(str(layer) for layer in layers_to_run)}{NC}")
 
     total_pass = 0
     total_fail = 0

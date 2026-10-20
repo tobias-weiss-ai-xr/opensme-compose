@@ -1189,7 +1189,7 @@ def main() -> bool:
         try:
             cleanup_app(session, idp_base, pat, owned[0], owned[1])
             result.ok("removed throw-away OIDC app")
-        except Exception:  # noqa: BLE001 — see comment above
+        except Exception:
             result.warn("could not remove throw-away OIDC app (delete project 'e2e-sso')")
 
     # 6) App reachability

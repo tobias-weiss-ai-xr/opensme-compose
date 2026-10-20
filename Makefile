@@ -198,7 +198,7 @@ bench:
 # ---------------------------------------------------------------------------
 # Layer 0 — Static Validation (no containers needed)
 # ---------------------------------------------------------------------------
-lint: compose-check yaml-lint env-check secret-scan perf-check
+lint: compose-check yaml-lint env-check secret-scan perf-check py-lint
 	@echo -e "$(GREEN)✅ All linting passed$(NC)"
 
 # ────────────────────────────────────────────────────────────────
@@ -235,6 +235,11 @@ yaml-lint:
 env-check:
 	@echo -e "$(BLUE)── env completeness ──$(NC)"
 	@$(PYTHON) tests/00-static/check_env.py 2>&1
+
+py-lint:
+	@echo -e "$(BLUE)── Python lint (ruff, config: ruff.toml) ──$(NC)"
+	@command -v ruff >/dev/null || { echo "ruff not found — pip install 'ruff>=0.16'"; exit 1; }
+	@ruff check tests/
 
 secret-scan:
 	@echo -e "$(BLUE)── secret scanning ──$(NC)"

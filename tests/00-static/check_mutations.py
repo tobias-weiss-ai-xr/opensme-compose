@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result  # noqa: E402
+from conftest import Result
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -334,7 +334,7 @@ def _copy_tree(src: Path, dst: Path, _rel: Path | None = None) -> None:
         else:
             try:
                 shutil.copy2(child, out)
-            except (PermissionError, OSError) as e:
+            except (PermissionError, OSError):
                 # unreadable residuals in vendored subtrees (e.g. mode 000)
                 # are never read by any targeted check; skip them
                 continue
@@ -408,7 +408,7 @@ def _check_full_coverage(room: Result) -> int:
 
 def check(room: Result) -> int:
     failures: list[str] = []
-    info: list[str] = []
+    _info: list[str] = []
 
     for mutation in MUTATIONS:
         name = mutation["name"]
@@ -436,7 +436,7 @@ def check(room: Result) -> int:
                 )
             else:
                 room.ok(f"{name}: caught ({mutation['check']} rc={rc})")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             failures.append(f"{name}: mutation harness error: {e}")
         finally:
             if shadow is not None:

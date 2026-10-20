@@ -32,7 +32,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT  # noqa: E402
+from conftest import Result, ROOT
 
 TILES_CONTRACT = ROOT / "contracts" / "tiles.yml"
 COMPOSE_MAIN = ROOT / "docker-compose.yml"

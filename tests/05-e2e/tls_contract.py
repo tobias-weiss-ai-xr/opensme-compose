@@ -22,7 +22,6 @@ import re
 import socket
 import ssl
 import sys
-import time
 import urllib3
 from pathlib import Path
 
@@ -149,7 +148,6 @@ def main() -> int:
     # (parsed by the host's openssl — same tool an operator would use)
     in_window, detail = False, ""
     try:
-        import base64
         import subprocess
         pem = get_cert(ip, host)["pem"]
         proc = subprocess.run(
@@ -169,7 +167,7 @@ def main() -> int:
         now = datetime.datetime.now(datetime.timezone.utc)
         in_window = nb <= now <= na
         detail = f"valid {nb:%Y-%m-%d} → {na:%Y-%m-%d}"
-    except Exception as e:  # noqa: BLE001 — probe must never crash
+    except Exception as e:
         detail = f"{e.__class__.__name__}: {e}"
     (result.ok if in_window else result.fail)(
         f"certificate inside validity window ({detail})"

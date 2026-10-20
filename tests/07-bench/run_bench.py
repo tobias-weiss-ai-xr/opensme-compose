@@ -42,7 +42,7 @@ def sh(cmd, timeout=30):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return -1, "", str(e)
 
 
@@ -117,7 +117,7 @@ def measure_latency_urllib(host: str, path: str, samples: int) -> dict:
                                          headers={"Host": host})
             urllib.request.urlopen(req, timeout=10).read()
             times.append((time.time() - t0) * 1000)
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return _percentiles(times)
 
@@ -160,8 +160,8 @@ def run_agentic_bench(args) -> int:
     token_ok = total_tokens <= MAX_TOKENS_PER_JOURNEY
 
     lines = [
-        f"# Layer-7 Agentic Bench",
-        f"",
+        "# Layer-7 Agentic Bench",
+        "",
         f"- Journey latency: {elapsed_ms:.1f}ms ({'PASS' if latency_ok else 'FAIL'} <= {MAX_LATENCY_MS}ms)",
         f"- Tokens: prompt={mock_prompt_tokens}, completion={mock_completion_tokens}, total={total_tokens} ({'PASS' if token_ok else 'FAIL'} <= {MAX_TOKENS_PER_JOURNEY})",
     ]
@@ -228,8 +228,8 @@ def main():
 
     lines = [
         "# Benchmark Run", "",
-        f"_generated {results['generated_at']}_ by "
-        "`tests/07-bench/run_bench.py` — live stack present._", "",
+        (f"_generated {results['generated_at']}_ by "
+        "`tests/07-bench/run_bench.py` — live stack present._"), "",
         "## Memory (docker stats --no-stream)", "",
         "| Container | Memory | CPU |", "|-----------|--------|-----|",
     ]
@@ -249,9 +249,9 @@ def main():
         for n, v in results["boot_baseline"].items():
             lines.append(f"- {n}: {v['boot_ms']}")
     lines += ["", "## Notes", "",
-              "- Memory/latency vary by host; pin host+commit for "
-              "before/after.", "- CI runs only the static budget subset "
-              "(`tests/00-static/check_perf.py`); live numbers are advisory."]
+              ("- Memory/latency vary by host; pin host+commit for "
+              "before/after."), ("- CI runs only the static budget subset "
+              "(`tests/00-static/check_perf.py`); live numbers are advisory.")]
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text("\n".join(lines) + "\n")
     print(f"Benchmarks written to {args.out} (+ JSON snapshot)")
