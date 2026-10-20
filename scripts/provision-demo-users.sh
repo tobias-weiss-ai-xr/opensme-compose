@@ -518,10 +518,6 @@ STALWART_CONTAINER="${STALWART_CONTAINER:-opensme-stalwart}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-opensme-postgres}"
 STALWART_MAIL_DOMAIN="${STALWART_MAIL_DOMAIN:-$DOMAIN}"
 
-# Permissions of the role every mail user needs: Stalwart refuses IMAP LOGIN
-# (and sending) for a principal without them.
-STALWART_USER_PERMISSIONS='["authenticate","email-receive","email-send","imap-append","imap-authenticate","imap-copy","imap-create","imap-delete","imap-enable","imap-expunge","imap-fetch","imap-id","imap-idle","imap-list","imap-lsub","imap-move","imap-select","imap-status","imap-store"]'
-
 # SOGo password hash: a fresh salt per call means two runs produce different
 # (equally valid) hashes — the row is only rewritten when it is missing.
 sogo_password_hash() {
@@ -670,10 +666,10 @@ main_zitadel() {
         exit 0
     fi
     
-    local company groups users
+    # Zitadel has no groups; only the human accounts are provisioned.
+    local company users
     company=$(echo "$config" | jq -r '.company')
     users=$(echo "$config" | jq -c '.users[]')
-    groups=$(echo "$config" | jq -c '.groups[]')
     
     info "Provisioning demo users for: $company"
     info "Domain: $DOMAIN"
