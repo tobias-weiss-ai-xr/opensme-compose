@@ -1,0 +1,39 @@
+---
+# Pull-through mirror registry for the openedusuite suite images.
+# registry.openedusuite.org  ->  ghcr.io/tobias-weiss-ai-xr/openedusuite
+#
+# Pull-through proxy mode (registry:2 native): `docker pull
+# registry.openedusuite.org/tobias-weiss-ai-xr/openedusuite/<name>:<tag>`
+# fetches the image from ghcr on first use, caches the blobs here, and
+# serves them locally afterwards. Same repo path as ghcr (a hostname swap),
+# so cluster/compose refs just change the registry prefix.
+#
+# NOT published on a host port: the fleet traefik is host-mode and routes it
+# via a file-provider router (immune to the docker-provider event-stream bug).
+services:
+  registry:
+    image: registry:2
+    container_name: opensme-registry
+    restart: unless-stopped
+    networks: [opensme-net]
+    ports: []
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      # Pull-through cache -> ghcr root; the full repo path
+      # (tobias-weiss-ai-xr/openedusuite/..) is carried in the request URL.
+      REGISTRY_PROXY_REMOTEURL: https://ghcr.io
+      # ghcr packages are currently private, so pull-through needs a
+      # read-scoped token supplied at runtime (never committed). Provide it
+      # as an environment variable when starting the container, e.g.:
+      #   docker compose --env-file .env up -d   (REGISTRY_PROXY_PASSWORD=...)
+      REGISTRY_PROXY_USERNAME: tobias-weiss-ai-xr
+      REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:?set ghcr read-scoped token}
+    volumes:
+      - opensme-registry:/var/lib/registry
+
+networks:
+  opensme-net:
+    external: true
+
+volumes:
+  opensme-registry:
