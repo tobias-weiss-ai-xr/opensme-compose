@@ -822,10 +822,14 @@ def section_sogo_sso(result, session, webmail_base, idp_base, client_id=None):
     # misfire on it. Classify it explicitly instead of failing.
     try:
         h = session.get(webmail_base + "/api/user/v1/health", timeout=T)
-        if h.status_code == 200 and h.json().get("status") == "ok":
+        hj = h.json() if h.status_code == 200 else {}
+        # sogo6 health shape: {status: ok|degraded, version, uptime_seconds,
+        # dependencies{database,ldap}} — version 6.x is the giveaway
+        if str(hj.get("version", "")).startswith("6.") and "dependencies" in hj:
             result.skip(
-                "sogo6 webmail stack detected — SOGo5 SSO probe not applicable "
-                "(sogo6 login enablement: LDAP user source pending)"
+                f"sogo6 webmail stack detected (health={hj.get('status')}) — "
+                "SOGo5 SSO probe not applicable (sogo6 login enablement: "
+                "LDAP user source pending)"
             )
             return
     except (requests.RequestException, ValueError):
