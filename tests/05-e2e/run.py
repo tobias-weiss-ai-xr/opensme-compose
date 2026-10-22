@@ -822,9 +822,11 @@ def section_sogo_sso(result, session, webmail_base, idp_base, client_id=None):
     # misfire on it. Classify it explicitly instead of failing.
     try:
         h = session.get(webmail_base + "/api/user/v1/health", timeout=T)
-        hj = h.json() if h.status_code == 200 else {}
         # sogo6 health shape: {status: ok|degraded, version, uptime_seconds,
-        # dependencies{database,ldap}} — version 6.x is the giveaway
+        # dependencies{database,ldap}} — version 6.x is the giveaway. A
+        # degraded stack (no LDAP user source yet) answers 503, so the shape
+        # is matched regardless of the status code.
+        hj = h.json()
         if str(hj.get("version", "")).startswith("6.") and "dependencies" in hj:
             result.skip(
                 f"sogo6 webmail stack detected (health={hj.get('status')}) — "
