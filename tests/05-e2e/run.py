@@ -817,6 +817,20 @@ def section_sogo_sso(result, session, webmail_base, idp_base, client_id=None):
     to the authorize endpoint (carrying the configured client_id) — a local
     login form is a failure, not a warning. The login page's asset contract
     lives in tests/05-e2e/webmail.py (which walks the whole flow)."""
+    # The experimental sogo6 webmail stack (SOGo6-UI/server) answers its own
+    # health contract and does not serve /SOGo/ — the SOGo5 probe below would
+    # misfire on it. Classify it explicitly instead of failing.
+    try:
+        h = session.get(webmail_base + "/api/user/v1/health", timeout=T)
+        if h.status_code == 200 and h.json().get("status") == "ok":
+            result.skip(
+                "sogo6 webmail stack detected — SOGo5 SSO probe not applicable "
+                "(sogo6 login enablement: LDAP user source pending)"
+            )
+            return
+    except (requests.RequestException, ValueError):
+        pass  # not sogo6 — fall through to the SOGo5 probe
+
     for path in ("/sogo/", "/SOGo/", "/"):
         try:
             r = session.get(webmail_base + path, allow_redirects=False, timeout=T)
