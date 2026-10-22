@@ -1,7 +1,7 @@
 # dev-maintenance-bot — multi-stage build.
 # Build context is the REPO ROOT (go.mod + opensme-knowledge live there):
 #   docker build -f opensme-dev-agent/Dockerfile -t opensme-dev-maintenance-bot:latest .
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY main.go ./
