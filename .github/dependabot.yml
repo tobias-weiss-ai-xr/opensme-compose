@@ -13,7 +13,12 @@ updates:
       prefix: "chore(ci)"
 
   - package-ecosystem: "docker"
-    directory: "/"
+    # docker updater does NOT recurse from "/" — every run failed with
+    # "No Dockerfiles nor Kubernetes YAML found in /". Use a recursive glob
+    # over the tracked service dirs (Dockerfiles live in portal/, services/*,
+    # opensme-dev-agent/, monitoring/nix/dev-agent-files/).
+    directories:
+      - "/**/*"
     schedule:
       interval: "weekly"
     commit-message:

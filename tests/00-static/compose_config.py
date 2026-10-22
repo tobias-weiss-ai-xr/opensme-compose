@@ -85,7 +85,16 @@ MATRIX = [
                 "services/invoice-ninja.yml", "services/paperless.yml",
                 "monitoring/dev-agent.yml", "profiles/medium.yml"],
      ["standalone", "invoice", "paperless"], "medium"),
+    # Sidecar: pull-through registry (outside the suite chain). Its required
+    # var is a deployment secret, so the render env supplies a dummy (this
+    # gate validates shape, not credentials).
+    ("registry", ["registry/registry-compose.yml"], [], None),
 ]
+
+# Extra env per MATRIX label (see run_config).
+MATRIX_ENV: dict[str, dict[str, str]] = {
+    "registry": {"REGISTRY_PROXY_PASSWORD": "dummy-for-config-validation-only"},
+}
 
 
 def docker_compose_available() -> bool:
@@ -101,17 +110,24 @@ def has_compose_plugin() -> bool:
         return False
 
 
-def run_config(files: list[str], profiles: list[str]) -> tuple[bool, str]:
+def run_config(files: list[str], profiles: list[str],
+               extra_env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run `docker compose -f ... --profile ... config`.
 
     Validated against .env.example (the documented defaults) — in CI there
     is no .env, and fail-fast :? interpolations must resolve against the
     example file, not an ambient local .env.
 
+    extra_env: additional environment variables for sidecar compose files
+    whose required vars are deployment secrets (e.g. REGISTRY_PROXY_PASSWORD)
+    that no example file carries. Only used for config rendering.
+
     Returns (ok, output). On success `output` is the FULL RENDERED compose
     config (needed by the Z-BRACE env-value guard); on failure it is the
     error text.
     """
+    import os
+
     env_example = ROOT / ".env.example"
     cmd = ["docker", "compose"]
     if env_example.exists():
@@ -123,7 +139,8 @@ def run_config(files: list[str], profiles: list[str]) -> tuple[bool, str]:
     cmd += ["config"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
-                             timeout=120, cwd=str(ROOT))
+                             timeout=120, cwd=str(ROOT),
+                             env={**os.environ, **(extra_env or {})})
     except subprocess.TimeoutExpired:
         return False, "timed out"
     except Exception as e:
@@ -189,7 +206,7 @@ def main():
             result.skip(f"[{label}] missing files {missing} (not in this "
                         "install profile)")
             continue
-        ok, output = run_config(files, profiles)
+        ok, output = run_config(files, profiles, MATRIX_ENV.get(label))
         if ok:
             # Z-BRACE backstop: even a parse-clean config can leak a stray '}'
             # into a rendered env value; fail loudly if any do.

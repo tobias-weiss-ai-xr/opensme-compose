@@ -32,10 +32,11 @@ provider event stream dies after docker daemon restarts on the OpenVZ host.
 # on the host:
 mkdir -p /opt/opensme-registry
 cp registry-compose.yml .env.example /opt/opensme-registry/
+cp .env.example .env
 # edit /opt/opensme-registry/.env — set REGISTRY_PROXY_PASSWORD to a
 # read-scoped PAT (required while the ghcr packages remain private)
 cd /opt/opensme-registry
-docker compose --env-file .env up -d
+docker compose -f registry-compose.yml --env-file .env up -d
 ```
 
 Then place a file-provider router at

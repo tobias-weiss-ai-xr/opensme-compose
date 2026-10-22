@@ -13,6 +13,8 @@ Exit codes:
     1 = secrets found
 """
 
+import shutil
+import subprocess
 import sys
 import re
 from pathlib import Path
@@ -38,6 +40,22 @@ SECRET_PATTERNS = [
     (r'-----BEGIN\s+PGP\s+MESSAGE-----', "PGP message"),
 ]
 
+# Credential FORMAT patterns — match the token itself regardless of the
+# variable name it is assigned to (REGISTRY_PROXY_PASSWORD=ghp_… slipped
+# past the name-based patterns above). Word-bounded, high-entropy shapes.
+# Checked separately: exemption via PLACEHOLDER_HINT (docs examples).
+FORMAT_PATTERNS = [
+    (r'\bgh[pousr]_[A-Za-z0-9]{20,}\b', "GitHub token (ghp_/gho_/ghs_…)"),
+    (r'\bgithub_pat_[A-Za-z0-9_]{20,}\b', "GitHub fine-grained PAT"),
+    (r'\bAKIA[0-9A-Z]{16}\b', "AWS access key id"),
+    (r'\bxox[bpars]-[0-9A-Za-z-]{10,}\b', "Slack token"),
+    (r'\bsk_live_[A-Za-z0-9]{20,}\b', "Stripe live key"),
+]
+
+# Placeholder-shaped values that LOOK like tokens but are documentation
+# examples (e.g. ghp_your_read_scoped_token_here) — never fail on these.
+PLACEHOLDER_HINT = re.compile(r'your[-_]|[-_]here\b|example|changeme|<[^>]+>', re.IGNORECASE)
+
 # Internal network ranges that must never appear in a public repo.
 # RFC1918 private ranges + link-local. Hostname-specific guards are deliberately
 # NOT hardcoded here: naming internal hosts would re-introduce them into the
@@ -53,11 +71,17 @@ INTERNAL_PATTERNS = [
 CHANGEME_PATTERN = re.compile(r'CHANGEME_[a-z_]+', re.IGNORECASE)
 
 # Files to scan
-SCAN_DIRS = ["docker-compose.yml", "idm/", "opencloud/", "mail/", "services/",
-             "monitoring/", "profiles/", "scripts/", "portal/"]
-# Note: .md is included because markdown docs are where hostnames/IPs (e.g.
-# comparison notes, deployment plans) most often leak — see COMPARISON.md.
-SCAN_EXTS = {".yml", ".yaml", ".sh", ".py", ".md", ".env", ".env.example", ".env.demo"}
+#
+# Discovery: ALL git-tracked files matching SCAN_EXTS (via `git ls-files`).
+# A hardcoded dir whitelist is how registry/, docs/, .github/, contracts/,
+# specs/ and postgres-init/ silently escaped scanning (bug found 2026-10:
+# a planted fake PAT in the repo root scored "99 files, 0 findings, PASS").
+# Tracked-file discovery keeps the same semantics as the CI leak-scan job.
+SCAN_EXTS = {".yml", ".yaml", ".sh", ".py", ".md", ".env", ".env.example", ".env.demo", ".toml", ".cfg", ".ini", ".conf"}
+
+# Test fixtures MAY deliberately embed fake secrets/canaries (see CI leak-scan
+# excludes) — never scan them.
+_SCAN_SKIP_NAME = re.compile(r'(^|_)(test)\.(py|go)$|_test\.(py|go)$|(^|/)node_modules/')
 
 
 def _submodule_paths() -> set[Path]:
@@ -89,6 +113,19 @@ def _in_submodule(fp: Path) -> bool:
 def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
     """Scan a file for secrets. Returns list of (line_number, pattern_name, line)."""
     findings = []
+    # Scope rules (calibrated against the real tree):
+    #  - NAME-based secret patterns (password=, token=, …) fire on non-test
+    #    code only: python signatures/unpacking in tests/ are noise, and
+    #    .env.example/.env.demo intentionally carry reproducible demo values.
+    #  - FORMAT-based credential patterns + internal-range patterns fire on
+    #    EVERY scanned file: real tokens must never exist anywhere, and demo
+    #    files must still be free of private-range IPs.
+    #    NOTE for future canary fixtures: fake tokens shaped like ghp_… in
+    #    tests must carry a scanner exclusion or this layer will (correctly)
+    #    fail.
+    rel_str = str(filepath)
+    is_env_sample = filepath.name in (".env.example", ".env.demo", ".env")
+    in_tests = "/tests/" in rel_str
     try:
         with open(filepath, encoding="utf-8", errors="replace") as f:
             for i, line in enumerate(f, 1):
@@ -106,11 +143,22 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                         findings.append((i, "CHANGEME in compose file", line.rstrip()))
 
                 # Check for secret patterns
-                for pattern, name in SECRET_PATTERNS:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        # Exclude env var references like ${VAR}
-                        if "${" not in line and "CHANGEME" not in line:
-                            findings.append((i, name, line.rstrip()))
+                if not in_tests and not is_env_sample:
+                    for pattern, name in SECRET_PATTERNS:
+                        if re.search(pattern, line, re.IGNORECASE):
+                            # Exclude env var references like ${VAR}
+                            if "${" not in line and "CHANGEME" not in line:
+                                findings.append((i, name, line.rstrip()))
+
+                # Credential FORMAT patterns: match regardless of variable
+                # name, but allow documented placeholder examples in the
+                # env sample files.
+                for pattern, name in FORMAT_PATTERNS:
+                    if is_env_sample:
+                        break
+                    m = re.search(pattern, line)
+                    if m and not PLACEHOLDER_HINT.search(line):
+                        findings.append((i, name, line.rstrip()))
 
                 # Check for internal network ranges / hostnames (never ship)
                 for pattern, name in INTERNAL_PATTERNS:
@@ -131,47 +179,44 @@ def main():
     files_scanned = 0
     total_findings = 0
 
-    for item in SCAN_DIRS:
-        path = scan_root / item
-        if path.is_file() and path.suffix in SCAN_EXTS:
-            findings = scan_file(path)
-            files_scanned += 1
-            if findings:
-                for line_no, name, line in findings:
-                    total_findings += 1
-                    # Only flag CHANGEME in compose files as error, not .env.example
-                    if "CHANGEME" in name and path.name == ".env.example":
-                        continue
-                    result.fail(f"{path.name}:{line_no} — {name}: {line.strip()}")
-            else:
-                result.ok(f"{path.name} clean")
-        elif path.is_dir():
-            for ext in SCAN_EXTS:
-                for fp in path.rglob(f"*{ext}"):
-                    if ".git" in fp.parts:
-                        continue
-                    # git submodules carry THEIR OWN tree (e.g. mailcow's
-                    # upstream source with test-fixture strings) — their
-                    # licensing/security review is the upstream's job, not
-                    # this repo's secret scan
-                    if _in_submodule(fp):
-                        continue
-                    findings = scan_file(fp)
-                    files_scanned += 1
-                    if findings:
-                        for line_no, name, line in findings:
-                            total_findings += 1
-                            if "CHANGEME" in name and fp.name == ".env.example":
-                                continue
-                            result.fail(f"{fp.relative_to(scan_root)}:{line_no} — {name}: {line.strip()}")
-                    else:
-                        result.ok(f"{fp.relative_to(scan_root)} clean")
+    # Gather candidate files: git-tracked (falls back to rglob outside a
+    # repo, e.g. when pointed at an extracted tree).
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    ran_git = False
+    if git and (scan_root / ".git").exists():
+        try:
+            out = subprocess.run([git, "ls-files", "-z"], cwd=scan_root,
+                                 capture_output=True, timeout=60, check=True)
+            candidates = [scan_root / p for p in out.stdout.decode().split("\0") if p]
+            ran_git = True
+        except (subprocess.SubprocessError, UnicodeDecodeError):
+            candidates = []
+    if not ran_git:
+        for ext in SCAN_EXTS:
+            candidates.extend(scan_root.rglob(f"*{ext}"))
 
-    # Scan .env.example separately (CHANGEME_ is OK here)
-    env_example = scan_root / ".env.example"
-    if env_example.exists():
+    for fp in candidates:
+        if ".git" in fp.parts or _SCAN_SKIP_NAME.search(str(fp)):
+            continue
+        if _in_submodule(fp):
+            continue
+        keep = fp.name in ("Dockerfile",) or fp.suffix in SCAN_EXTS or fp.name.endswith((".env.example", ".env.demo", ".env"))
+        if not keep:
+            continue
+        if not fp.is_file():
+            continue
+        findings = scan_file(fp)
         files_scanned += 1
-        result.ok(f"{env_example.name} (CHANGEME_ placeholders OK)")
+        if findings:
+            for line_no, name, line in findings:
+                total_findings += 1
+                # Only flag CHANGEME in compose files as error, not .env.example
+                if "CHANGEME" in name and fp.name == ".env.example":
+                    continue
+                result.fail(f"{fp}:{line_no} — {name}: {line.strip()}")
+        else:
+            result.ok(f"{fp} clean")
 
     result.info(f"Scanned {files_scanned} files, {total_findings} findings")
 
