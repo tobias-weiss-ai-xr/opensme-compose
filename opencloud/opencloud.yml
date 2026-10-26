@@ -38,17 +38,17 @@ services:
     # HTTPS. Inside the compose network the public IdP hostname resolves to
     # the Zitadel CONTAINER IP, where :443 is NOT listening (internally it
     # only serves :8080 plain HTTP; TLS lives at the edge traefik) — server-
-    # side discovery/JWKS validation fails and the OIDC login never completes
-    # (seen live: /.well-known shows the right issuer but token validation
-    # refused for 30 s then 401). Do NOT pin the IdP host here: ocis's Go
-    # HTTP client ignores Docker's injected http_proxy AND /etc/hosts pins
-    # dial DIRECTLY — host-gateway resolves to the docker0 bridge (172.17.0.1)
-    # where the host firewall silently drops TLS from opensme-net, and the
-    # opensme-net gateway has no :443 listener. With no pin, ocis resolves the
-    # IdP publicly (hairpin through the edge, verified 200/15 ms in prod) and
-    # discovery + JWKS validation complete. (Synapse's pin to host-gateway
-    # works only because synapse proxies its discovery fetch via Python and
-    # does not validate JWKS per request.)
+    # side discovery/JWKS validation fails and the OIDC login never completes.
+    # Docker's embedded DNS resolves the IdP hostname to the zitadel container
+    # IP (172.19.0.18) where only plain-HTTP :8080 listens -> ocis's Go HTTP
+    # client fails discovery with `connection refused` on :443 and every API
+    # call 401s. Pin the IdP hostname to host-gateway (= the docker0 bridge,
+    # 172.17.0.1) where the fleet traefik listens on :443 and serves the IdP
+    # vhost by Host/SNI. NOTE ocis ignores Docker's injected http_proxy, so
+    # "backchannel works" tests must use wget -Y off (busybox --no-proxy is
+    # not supported and silently false-fails).
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
