@@ -1,0 +1,14 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "${ELEMENT_DEFAULT_SERVER_URL}",
+      "server_name": "${ELEMENT_HOMESERVER_NAME}"
+    }
+  },
+  "disable_custom_urls": false,
+  "default_country_code": "DE",
+  "show_labs_settings": false,
+  "brand": "openSME Chat",
+  "integrations_ui_url": "",
+  "integrations_rest_url": ""
+}

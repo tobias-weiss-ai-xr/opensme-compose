@@ -37,7 +37,23 @@ services:
       # unbindable (unprivileged container, capability +ep lost via entrypoint
       # user switch) — use the unprivileged 8080 like the old elementio layout
       ELEMENT_WEB_PORT: "8080"
+      # Homeserver the web client should talk to. The stock element-web
+      # entrypoint only renders config.json from a *.template (envsubst-on-
+      # templates); the image ships a baked config.json (matrix.org) and no
+      # template, so ELEMENT_DEFAULT_SERVER_URL was being ignored and the UI
+      # pointed at matrix.org (seen live 2026-10-26). We render our own
+      # config.json from services/element-config.json.template in a small
+      # pre-entrypoint below.
       ELEMENT_DEFAULT_SERVER_URL: "https://matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+      ELEMENT_HOMESERVER_NAME: "matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+    volumes:
+      - ./services/element-config.json.template:/render/config.json.template:ro
+    # Render the homeserver config deterministically (envsubst), then run the
+    # stock entrypoint. envsubst is present in the image (alpine).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "envsubst < /render/config.json.template > /usr/share/nginx/html/config.json && exec /docker-entrypoint.sh nginx -g 'daemon off;'"
     networks:
       - opensme-net
     labels:
