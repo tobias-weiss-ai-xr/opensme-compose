@@ -83,6 +83,44 @@ jobs:
           done < <(git ls-files -z '*.sh')
           exit $FAIL
 
+  portal-web:
+    name: Portal Web UI (Next.js — lint + typecheck + test + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: portal/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: portal/web
+
+      - name: ESLint
+        run: npm run lint
+        working-directory: portal/web
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: portal/web
+
+      - name: Unit tests (Vitest)
+        run: npm test
+        working-directory: portal/web
+
+      - name: Production build (standalone)
+        run: npm run build
+        working-directory: portal/web
+        env:
+          BACKEND_URL: http://localhost:8080
+
+
   static:
     name: Static validation + secret scan
     runs-on: ubuntu-latest

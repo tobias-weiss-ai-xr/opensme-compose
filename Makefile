@@ -536,3 +536,22 @@ sso-check: ## Check SSO redirect health for all single services
 sso-monitor: ## Monitor SSO health for all single services
 	@./scripts/sso-check.sh
 
+# ── Portal Web UI (Next.js frontend, portal/web) ─────────────────
+portal-web-install: ## Install portal/web dependencies (npm ci)
+	cd portal/web && npm ci
+
+portal-web-lint: ## ESLint (portal/web)
+	cd portal/web && npm run lint
+
+portal-web-typecheck: ## TypeScript noEmit (portal/web)
+	cd portal/web && npm run typecheck
+
+portal-web-test: ## Vitest unit tests (portal/web)
+	cd portal/web && npm test
+
+portal-web-build: ## Next.js standalone production build (portal/web)
+	cd portal/web && npm run build
+
+portal-web-image: ## Build the portal-web container image (for docker save | docker load)
+	docker build -t compose-portal-web:latest -f portal/web/Dockerfile portal/web
+

@@ -41,6 +41,12 @@ result-*
 logs/
 *.log
 __pycache__/
+
+# Next.js portal web app (portal/web)
+node_modules/
+portal/web/node_modules/
+portal/web/.next/
+.eslintcache
 # Zitadel masterkey + system API key (provisioned at deploy time)
 idm/secrets/masterkey
 idm/secrets/zitadel-system-key.pem
@@ -52,3 +58,4 @@ idm/zitadel/busybox
 mail/mailcow.conf
 mail/mailcow-dockerized/data/
 mail/mailcow-dockerized/helper-scripts/overwrite.conf
+portal/web/tsconfig.tsbuildinfo

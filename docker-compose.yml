@@ -400,6 +400,75 @@ services:
           cpus: "0.1"
           memory: 32M
 
+  # ── Next.js Portal Web UI ─────────────────────────
+  # Frontend in front of the Rust API (portal service). Rendered with Next.js
+  # 15 in openEduSuite style; every /api|/health|/metrics request is proxied
+  # to `portal` same-origin by route handlers. Opt-in via the `web` profile:
+  # the demo set (no profile) keeps the Rust-served page, the live chain
+  # enables `web` and traefik routes Host(portal) here (priority 10 > 0).
+  portal-web:
+    <<: *service-defaults
+    profiles: ["web"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    build:
+      context: ./portal/web
+      dockerfile: Dockerfile
+    container_name: opensme-portal-web
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://portal:8080
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}
+      OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      OPENCLOUD_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
+      MAIL_URL: ${MAIL_URL:-}
+      IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
+      TICKETING_URL: ${TICKETING_URL:-}
+      CMS_URL: ${CMS_URL:-}
+      SHOP_URL: ${SHOP_URL:-}
+      BPM_URL: ${BPM_URL:-}
+      INVOICE_URL: ${INVOICE_URL:-}
+      PAPERLESS_URL: ${PAPERLESS_URL:-}
+      CHAT_URL: ${CHAT_URL:-}
+      NOTES_URL: ${NOTES_URL:-}
+      SURVEYS_URL: ${SURVEYS_URL:-}
+      PORTAL_ANNOUNCEMENTS: ${PORTAL_ANNOUNCEMENTS:-}
+      PORTAL_FEEDS: ${PORTAL_FEEDS:-}
+      AI_API_URL: ${AI_API_URL:-}
+      POLLS_ENABLED: ${POLLS_ENABLED:-}
+    depends_on:
+      portal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - opensme-net
+    labels:
+      - "traefik.enable=true"
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "traefik.http.routers.portal-web.rule=Host(`${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.portal-web.priority=10"
+      - "traefik.http.routers.portal-web.tls=true"
+      - "traefik.http.routers.portal-web.entrypoints=websecure"
+      - "traefik.http.services.portal-web.loadbalancer.server.port=3000"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
 networks:
   opensme-net:
     name: opensme-net
