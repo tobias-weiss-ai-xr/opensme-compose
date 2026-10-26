@@ -27,17 +27,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Webmail-SSO backchannel pin (same pattern as opencloud.yml's :443 pin):
-    # Docker's embedded DNS resolves the external IdP hostname to the
-    # Zitadel container IP, where nothing listens on :8081 — the userinfo
-    # call rendered into [directory.oidc] dead-ends there. The fleet traefik
-    # (host network) binds the internal-only 'idpplain' entrypoint on the
-    # docker0 bridge, so the pin routes the userinfo call through the host,
-    # where traefik answers :8081 with the external Host header (Zitadel
-    # 404s requests whose Host differs from its ExternalDomain) and proxies
-    # to Zitadel :8080.
-    extra_hosts:
-      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
+    # Webmail-SSO backchannel: the composed stacks resolve the external IdP
+    # hostname via the traefik network alias to the internal-only 'idpplain'
+    # entrypoint (:8081, Host-rewrite middleware) — so the shared compose
+    # carries NO extra_hosts pin for it (breaking CI's alias path). Fleet
+    # deployments (VM: host-network traefik owns :8081 on the docker0
+    # bridge) inject an extra_hosts '<idp>:host-gateway' pin from their
+    # ansible overlay instead.
     ports:
       - "25:25"
       - "143:143"

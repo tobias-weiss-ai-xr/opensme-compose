@@ -142,12 +142,12 @@ MUTATIONS = [
     {
         "name": "webmail-sso-pin-broken",
         "file": "mail/stalwart.yml",
-        "old": '- "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"',
-        "new": '- "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:203.0.113.10"',
+        "old": "    container_name: opensme-stalwart",
+        "new": "    container_name: opensme-stalwart\n    extra_hosts:\n      - \"${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:203.0.113.10\"",
         "check": "tests/00-static/check_webmail_sso.py",
-        "why": "W3 — the stalwart IdP backchannel must stay pinned to "
-              "host-gateway (a hardcoded test IP dead-ends the :8081 "
-              "idpplain userinfo hop and webmail SSO with it)",
+        "why": "W3 — a hardcoded test-IP IdP pin dead-ends the :8081 idpplain "
+              "userinfo hop (and breaks CI's alias path); only the fleet "
+              "overlay's host-gateway pin is allowed",
     },
     {
         "name": "webmail-sso-directory-dropped",

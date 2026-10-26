@@ -22,14 +22,16 @@ contract statically on a fresh checkout:
        release build of stalwart verifies TLS unconditionally), external
        Host header because Zitadel 404s requests whose Host differs from
        its configured ExternalDomain.
-  W3 — IdP backchannel pin: mail/stalwart.yml's stalwart service must pin
-       the IdP hostname to host-gateway (extra_hosts). Docker's embedded
-       DNS resolves the external IdP hostname to the Zitadel container IP
-       where NOTHING listens on :8081 — the userinfo call dead-ends. The
-       fleet traefik (host network) binds the idpplain entrypoint on the
-       docker0 bridge, so containers must reach it via the host gateway,
-       exactly like opencloud/opencloud.yml already does for :443.
-       (Verified live 2026-10-26.)
+  W3 — IdP backchannel pin: the shared compose must NOT hardcode the IdP
+       hostname to a container/private/link-local IP. Inside the compose
+       network Docker's DNS resolves the external IdP hostname via the
+       traefik network alias, whose internal-only `idpplain` entrypoint
+       (:8081) answers the userinfo call (Host-rewrite middleware keeps
+       Zitadel's ExternalDomain check happy) — the demo/CI stacks rely on
+       this. Fleet deployments (VM: host-network traefik owns :8081 on the
+       docker0 bridge) inject an extra_hosts '<idp>:host-gateway' pin from
+       their ansible overlay, which is also accepted here. A hardcoded
+       test/private IP dead-ends the hop (W1/W3 regression guard).
   W4 — Container identity: container_name must stay opensme-stalwart —
        traefik routing, healthchecks and operator runbooks refer to the
        container by this exact name.
@@ -158,15 +160,18 @@ def check_userinfo_endpoint(result: Result) -> None:
 
 
 def check_idp_backchannel_pin(result: Result) -> None:
-    """W3 — stalwart's IdP backchannel must go through the host.
+    """W3 — no hardcoded-IP IdP backchannel pin in the shared compose.
 
-    Inside the compose network Docker's embedded DNS resolves the external
-    IdP hostname to the Zitadel container IP, where nothing listens on
-    :8081 — the userinfo call in [directory.oidc] dead-ends and webmail SSO
-    never completes. The fleet traefik (host network) binds the idpplain
-    entrypoint on the docker0 bridge, so an extra_hosts
-    '<idp-host>:host-gateway' pin (like opencloud.yml's :443 pin) is
-    required to route the call through the host.
+    Inside the compose network Docker's DNS resolves the external IdP
+    hostname through the traefik network alias; the internal-only
+    'idpplain' entrypoint (:8081) answers the userinfo call with a
+    Host-rewrite middleware (see config.toml.template [directory.oidc] for
+    why the TLS entrypoint cannot serve it). The demo/CI stacks rely on
+    this alias path, so stalwart.yml must NOT pin the IdP hostname to a
+    container/private/link-local IP — that dead-ends the hop there. Fleet
+    deployments (VM: host-network fleet traefik owns :8081 on the docker0
+    bridge) inject an extra_hosts '<idp>:host-gateway' pin from their
+    ansible overlay; host-gateway is accepted (and harmless) here too.
     """
     svc = load_service(STALWART_YML, "stalwart")
     if not svc:
@@ -177,22 +182,31 @@ def check_idp_backchannel_pin(result: Result) -> None:
         return
     hosts = svc.get("extra_hosts") or []
     entries = hosts.values() if isinstance(hosts, dict) else hosts
-    pinned = any(
-        isinstance(e, str) and e.endswith(":host-gateway") for e in entries
-    )
-    if pinned:
-        result.ok(
-            "stalwart IdP backchannel pinned to host-gateway "
-            "(extra_hosts → :8081 idpplain hop)"
-        )
-    else:
+    hard = []
+    for e in entries:
+        if not isinstance(e, str):
+            continue
+        if e.endswith(":host-gateway"):
+            continue  # fleet overlay pattern; harmless in shared compose
+        # any non-host-gateway pin for the IdP host, or any literal
+        # TEST-NET / RFC1918 / link-local target
+        if "ZITADEL_DOMAIN" in e or re.search(
+                r":(203\.0\.113\.|10\.|192\.168\.|"
+                r"172\.(1[6-9]|2\d|3[01])\.|127\.)", e):
+            hard.append(e)
+    if hard:
         result.fail(
-            "mail/stalwart.yml (W3): stalwart extra_hosts has no "
-            "'<idp-host>:host-gateway' entry — Docker DNS resolves the IdP "
-            "hostname to the Zitadel container IP where :8081 is not "
-            "listening; the userinfo call dead-ends and webmail SSO stays "
-            "broken"
+            "mail/stalwart.yml (W3): IdP backchannel must not be pinned to "
+            "a hardcoded IP (got %r) — the composed stacks resolve the IdP "
+            "hostname via the traefik network alias / idpplain; the fleet "
+            "overlay's host-gateway pin is injected outside this repo"
+            % hard[0]
         )
+        return
+    result.ok(
+        "stalwart IdP backchannel pin-free in shared compose (fleet "
+        "overlay injects host-gateway; alias path covers demo/CI)"
+    )
 
 
 def check_container_identity(result: Result) -> None:
