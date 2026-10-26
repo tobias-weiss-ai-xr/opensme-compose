@@ -176,7 +176,7 @@ der Token-Typ-Switch ist eine einmalige Management-API-Aktion danach.
 ocis validiert Tokens server-seitig gegen `OC_OIDC_ISSUER`
 (= `https://auth.home.opensme.graphwiz.ai`) **über HTTPS**. Dockers embedded
 DNS löst den öffentlichen IdP-Hostnamen aber zur **Zitadel-Container-IP**
-(`172.19.0.18`) auf — dort lauscht nur plain-HTTP `:8080`, TLS lebt am
+auf — dort lauscht nur plain-HTTP `:8080`, TLS lebt am
 Edge-Traefik. Ergebnis: `connection refused` auf `:443` bei Discovery/JWKS,
 und **jeder API-Call 401t still** — trotz perfekt registriertem Client.
 
@@ -188,8 +188,10 @@ extra_hosts:
   - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
 ```
 
-`host-gateway` (= docker0-Bridge, `172.17.0.1`) führt zum Fleet-Traefik, der
-auf `:443` TLS terminiert und den IdP-vHost per Host/SNI bedient.
+`host-gateway` (die docker0-Bridge des Docker-Hosts) führt zum Fleet-Traefik,
+der auf `:443` TLS terminiert und den IdP-vHost per Host/SNI bedient.
+(RFC1918-Adressen werden hier bewusst nicht genannt — die Compose-Quelle
+in `opencloud/opencloud.yml` ist der einzige normative Referenzpunkt.)
 
 **Probe im Container** — ocis' Go-HTTP-Client ignoriert Dockers injiziertes
 `http_proxy`; ein Proxey-nutzender Test lügt also. Busybox-wget hat kein

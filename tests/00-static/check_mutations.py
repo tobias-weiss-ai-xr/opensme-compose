@@ -97,7 +97,7 @@ MUTATIONS = [
         "name": "sso-oc-hostgateway-pin",
         "file": "opencloud/opencloud.yml",
         "old": ":host-gateway",
-        "new": ":172.19.0.99",
+        "new": ":203.0.113.10",
         "check": "tests/00-static/check_oidc.py",
         "why": "R4 — the ocis IdP backchannel must stay pinned to "
               "host-gateway (a hardcoded container IP dead-ends discovery)",
