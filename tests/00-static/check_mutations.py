@@ -310,6 +310,8 @@ SHADOW_INCOMPATIBLE = {
 
 SKIP_SUBTREES = {
     "portal/target",           # rust build artifacts (3.2 GB, never read)
+    "portal/web/node_modules", # portal deps (673 MB, never read)
+    "portal/web/.next",        # next.js build output (158 MB, never read)
     "backups",                 # volume dumps (24 MB, never read)
     "openspec",                # spec/change artifacts (checks only need contracts/)
     "mail/mailcow-dockerized", # vendored compose subtree (49 MB, only mail/*.yml is read)
@@ -360,13 +362,16 @@ def _copy_tree(src: Path, dst: Path, _rel: Path | None = None) -> None:
         if _should_skip(rel):
             continue
         out = dst / child.name
+        if child.is_symlink():
+            # dangling/host-relative symlinks are never read by the checks;
+            # skip rather than break the shadow copy. MUST be tested before
+            # is_dir(): is_dir() follows symlinks, so a symlink that resolves
+            # to a directory would recurse into itself (e.g. a gitignored
+            # node_modules symlink) until ELOOP.
+            continue
         if child.is_dir():
             out.mkdir(parents=True, exist_ok=True)
             _copy_tree(child, out, rel)
-        elif child.is_symlink():
-            # dangling/host-relative symlinks are never read by the checks;
-            # skip rather than break the shadow copy
-            continue
         else:
             try:
                 shutil.copy2(child, out)
