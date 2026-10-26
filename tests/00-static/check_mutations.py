@@ -140,6 +140,26 @@ MUTATIONS = [
               "JWKS-validating backend (ocis: 'invalid number of segments')",
     },
     {
+        "name": "webmail-sso-pin-broken",
+        "file": "mail/stalwart.yml",
+        "old": '- "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"',
+        "new": '- "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:203.0.113.10"',
+        "check": "tests/00-static/check_webmail_sso.py",
+        "why": "W3 — the stalwart IdP backchannel must stay pinned to "
+              "host-gateway (a hardcoded test IP dead-ends the :8081 "
+              "idpplain userinfo hop and webmail SSO with it)",
+    },
+    {
+        "name": "webmail-sso-directory-dropped",
+        "file": "mail/stalwart/config.toml.template",
+        "old": 'directory = "oidc"',
+        "new": 'directory = "internal"',
+        "check": "tests/00-static/check_webmail_sso.py",
+        "why": "W1 — stalwart's default directory must stay 'oidc' so "
+              "XOAUTH2 webmail logins validate against Zitadel's userinfo "
+              "endpoint (an internal directory refuses every SSO login)",
+    },
+    {
         "name": "env-completeness",
         "file": ".env.example",
         "old": "REDIS_PASSWORD=CHANGEME_redis",
