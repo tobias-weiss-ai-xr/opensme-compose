@@ -51,12 +51,6 @@ services:
       # OIDC token validation target (webmail SSO): rendered into the
       # userinfo endpoint URL, see config.toml.template [directory.oidc]
       ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
-    # Webmail-SSO userinfo hop: Docker DNS would resolve the IdP hostname to
-    # the Zitadel container IP, where the plain-HTTP idpplain :8081 entrypoint
-    # (fleet traefik) is NOT listening. The host-gateway pin routes the userinfo
-    # call to the Docker host where fleet traefik's idpplain answers -> Zitadel.
-    extra_hosts:
-      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     volumes:
       - stalwart-etc:/opt/stalwart/etc
       - stalwart-data:/var/lib/stalwart
