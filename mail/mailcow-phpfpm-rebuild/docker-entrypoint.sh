@@ -126,7 +126,7 @@ if [[ "${MASTER}" =~ ^([yY][eE][sS]|[yY])+$ ]]; then
     DOMAIN_ARR+=("$line")
   done < <(mariadb --skip-ssl --socket=/var/run/mysqld/mysqld.sock -u ${DBUSER} -p${DBPASS} ${DBNAME} -e "SELECT alias_domain FROM alias_domain" -Bs)
 
-  if [[ ! -z ${DOMAIN_ARR} ]]; then
+  if [[ -n ${DOMAIN_ARR[*]} ]]; then
   for domain in "${DOMAIN_ARR[@]}"; do
     ${REDIS_CMDLINE} HSET DOMAIN_MAP ${domain} 1 > /dev/null
   done
@@ -143,7 +143,7 @@ if [[ "${MASTER}" =~ ^([yY][eE][sS]|[yY])+$ ]]; then
         VALIDATED_API_ALLOW_FROM_ARR+=("${IP}")
       fi
     done
-    VALIDATED_IPS=$(array_by_comma ${VALIDATED_API_ALLOW_FROM_ARR[*]})
+    VALIDATED_IPS=$(array_by_comma "${VALIDATED_API_ALLOW_FROM_ARR[@]}")
     if [[ ! -z ${VALIDATED_IPS} ]]; then
       if [[ ${API_KEY} != "invalid" ]] && [[ ! -z ${API_KEY} ]]; then
         mariadb --skip-ssl --socket=/var/run/mysqld/mysqld.sock -u ${DBUSER} -p${DBPASS} ${DBNAME} << EOF

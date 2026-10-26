@@ -95,7 +95,11 @@ cd "$PROJECT_DIR"
 # ── Generate .env if not exists ───────────────
 # Random password generator (needed by the generation block below AND the
 # upgrade-append block — must be defined unconditionally)
-pw() { openssl rand -base64 24; }
+# openssl rand -base64 is ~1/600 likely to produce a digit-less string, which
+# Zitadel's setup REJECTS (password complexity policy: HasNumber) — CI hit
+# `migration failed … HasNumber` once. Guarantee at least one digit so boot
+# is deterministic.
+pw() { local p; p=$(openssl rand -base64 24 | tr -d '\n'); case "$p" in *[0-9]*) ;; *) p="${p}9" ;; esac; printf '%s' "$p"; }
 
 if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
   info "Generating .env with random passwords..."

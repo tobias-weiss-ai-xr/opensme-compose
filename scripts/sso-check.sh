@@ -31,12 +31,8 @@ NOTES_DOMAIN="${NOTES_DOMAIN:-notes.${DOMAIN}}"
 NOSDESK_DOMAIN="${NOSDESK_DOMAIN:-help.${DOMAIN}}"
 SOGO_DOMAIN="${SOGO_DOMAIN:-webmail.${DOMAIN}}"
 
-SCHEME="https"
-if [[ "$DOMAIN" == "localhost" || "$DOMAIN" == *.local || "$DOMAIN" == *.test ]]; then
-    # For local demo, try https but allow self-signed
-    :
-fi
-
+# All suite endpoints are TLS-fronted by the edge; local demo hosts use
+# self-signed certs (verified with curl -k below).
 FAILED=0
 
 check_sso_redirect() {
