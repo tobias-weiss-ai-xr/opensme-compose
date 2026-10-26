@@ -522,3 +522,17 @@ help:
 	@echo "    make bpm-deploy          Deploy seed BPMN processes to the Operaton engine"
 	@echo "    make clean               Remove test artifacts"
 	@echo ""
+
+# ── SSO & Provisioning Monitoring (single services) ─────────────────
+provision-status: ## Show provisioning status for all single services
+	@./scripts/provision-demo-users.sh --status
+
+provision-monitor: ## Monitor provisioning across all single services
+	@./scripts/provision-demo-users.sh --monitor
+
+sso-check: ## Check SSO redirect health for all single services
+	@./scripts/sso-check.sh
+
+sso-monitor: ## Monitor SSO health for all single services
+	@./scripts/sso-check.sh
+

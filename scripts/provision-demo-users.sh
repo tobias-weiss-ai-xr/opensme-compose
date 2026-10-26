@@ -65,6 +65,8 @@ while [[ $# -gt 0 ]]; do
         --verbose|-v) VERBOSE=true; shift ;;
         --in-docker)  IN_DOCKER=true; shift ;;
         --component)  COMPONENT="$2"; shift 2 ;;
+        --status)     provision_status; exit $? ;;
+        --monitor)    provision_monitor; exit $? ;;
         --help|-h)
             echo "Usage: $0 [options]"
             echo "Options:"
@@ -616,6 +618,102 @@ main_stalwart() {
     done < <(jq -c '.users[]' "$USERS_JSON")
     info "[stalwart] done: $sogo_written SOGo rows (Stalwart principals auto-provision on first login)"
     [[ $failures -eq 0 ]]
+}
+
+# ── provisioning status/monitor (mirrors openEduSuite patterns) ─────
+provision_status() {
+    info "Provisioning Status (per single service)"
+    info "========================================"
+    info ""
+    
+    if [[ ! -f "$USERS_JSON" ]]; then
+        err "Demo users config not found: $USERS_JSON"
+        return 1
+    fi
+    local config
+    config=$(jq . "$USERS_JSON") || { err "Invalid JSON in $USERS_JSON"; return 1; }
+    
+    local count_total=12
+    local company
+    company=$(echo "$config" | jq -r '.company')
+    info "Company: $company"
+    info "Domain: $DOMAIN"
+    info "Target components: $ALL_COMPONENTS"
+    info ""
+    
+    # Zitadel status
+    info "Zitadel (IdP):"
+    if command -v docker &>/dev/null; then
+        local pat
+        pat=$(get_pat 2>/dev/null || true)
+        if [[ -n "$pat" ]]; then
+            local cnt=0
+            while IFS= read -r user_json; do
+                [[ -z "$user_json" ]] && continue
+                local un
+                un=$(echo "$user_json" | jq -r '.username')
+                local uid
+                uid=$(get_user_id "$un" "$pat" 2>/dev/null || true)
+                [[ -n "$uid" ]] && cnt=$((cnt+1))
+            done < <(printf '%s\n' "$(echo "$config" | jq -c '.users[]')")
+            info "  Users provisioned: $cnt / $count_total"
+        else
+            info "  Status: unknown (no PAT available)"
+        fi
+    else
+        info "  Status: unknown (docker not available)"
+    fi
+    info ""
+    
+    # Operaton status
+    info "Operaton (BPM):"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "opensme-camunda\|camunda"; then
+        info "  Container: running"
+        info "  Target users: $count_total (configured)"
+    else
+        info "  Status: not running"
+    fi
+    info ""
+    
+    # Synapse status
+    info "Synapse (Matrix):"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "synapse"; then
+        info "  Container: running"
+        info "  Users: configured via shared-secret registration"
+    else
+        info "  Status: not running"
+    fi
+    info ""
+    
+    # Paperless status
+    info "Paperless-ngx (Documents):"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "paperless"; then
+        info "  Container: running"
+        info "  Users: Django users (provisioned via manage.py)"
+    else
+        info "  Status: not running"
+    fi
+    info ""
+    
+    # Stalwart/SOGo status
+    info "Stalwart/SOGo (Mail/Webmail):"
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE "stalwart|sogo"; then
+        info "  Containers: running"
+        if docker ps --format '{{.Names}}' | grep -q "postgres"; then
+            local scnt
+            scnt=$(docker exec "$(env_get POSTGRES_CONTAINER opensme-postgres)" psql -U "$(env_get POSTGRES_USER postgres)" -d sogo -t -c "SELECT COUNT(*) FROM mail_users;" 2>/dev/null | tr -d ' ' || echo "0")
+            info "  SOGo mail_users rows: $scnt"
+        fi
+    else
+        info "  Status: not running"
+    fi
+    info ""
+    
+    info "Single-service provisioning monitoring complete"
+}
+
+provision_monitor() {
+    provision_status
 }
 
 # ── component dispatcher ──────────────────────────────────────────────

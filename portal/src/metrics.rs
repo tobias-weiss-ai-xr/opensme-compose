@@ -5,8 +5,8 @@
 //! [`global()`] so handlers never construct or pass metrics around.
 
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
-    TextEncoder,
+    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Registry, TextEncoder,
 };
 use std::sync::OnceLock;
 
@@ -19,6 +19,8 @@ pub struct Metrics {
     intercom_messages_total: IntCounter,
     sso_logins_total: IntCounter,
     sso_login_failures_total: IntCounter,
+    sso_check_status: IntGaugeVec,
+    provisioning_status: IntGaugeVec,
 }
 
 static GLOBAL: OnceLock<Metrics> = OnceLock::new();
@@ -69,6 +71,16 @@ impl Metrics {
             "Total number of failed SSO logins.",
         )
         .expect("metrics: build sso_login_failures_total");
+        let sso_check_status = IntGaugeVec::new(
+            Opts::new("sso_check_status", "SSO health status per single service (1=ok, 0=fail)."),
+            &["service"],
+        )
+        .expect("metrics: build sso_check_status");
+        let provisioning_status = IntGaugeVec::new(
+            Opts::new("provisioning_status", "Provisioning status per single service (1=ok, 0=fail)."),
+            &["service", "component"],
+        )
+        .expect("metrics: build provisioning_status");
 
         let metrics = Metrics {
             registry,
@@ -78,6 +90,8 @@ impl Metrics {
             intercom_messages_total,
             sso_logins_total,
             sso_login_failures_total,
+            sso_check_status,
+            provisioning_status,
         };
         metrics.register_all();
         metrics
@@ -91,6 +105,8 @@ impl Metrics {
             Box::new(self.intercom_messages_total.clone()),
             Box::new(self.sso_logins_total.clone()),
             Box::new(self.sso_login_failures_total.clone()),
+            Box::new(self.sso_check_status.clone()),
+            Box::new(self.provisioning_status.clone()),
         ] {
             self.registry
                 .register(metric)
@@ -131,6 +147,20 @@ impl Metrics {
     #[allow(dead_code)]
     pub fn inc_sso_login_failure(&self) {
         self.sso_login_failures_total.inc();
+    }
+
+    /// Set SSO health status for a single service (1 = healthy/ok, 0 = failed).
+    #[allow(dead_code)]
+    pub fn set_sso_check_status(&self, service: &str, status: i64) {
+        self.sso_check_status.with_label_values(&[service]).set(status);
+    }
+
+    /// Set provisioning status for a single service/component (1 = ok, 0 = fail).
+    #[allow(dead_code)]
+    pub fn set_provisioning_status(&self, service: &str, component: &str, status: i64) {
+        self.provisioning_status
+            .with_label_values(&[service, component])
+            .set(status);
     }
 
     /// Render all metrics in Prometheus text exposition format.
