@@ -28,6 +28,13 @@ services:
     image: vectorim/element-web:latest
     container_name: opensme-element
     restart: unless-stopped
+    # The image runs as uid 101 (nginx) and the baked /app/config.json is
+    # root-owned, so the entrypoint-rendered config could not be written as
+    # the stock user (crash: "can't create .../config.json: Permission
+    # denied"). Run as root for the envsubst render + nginx master; workers
+    # drop to uid 101 via the image's nginx.conf. Bounded static server,
+    # no-new-privileges, non-host network.
+    user: "0:0"
     depends_on:
       synapse:
         condition: service_healthy
