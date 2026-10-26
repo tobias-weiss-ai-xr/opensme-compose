@@ -84,7 +84,16 @@ services:
       # .env as OC_OIDC_CLIENT_SECRET. OC_OIDC_SECRET is kept as a legacy
       # fallback for older .env files / overlay consumers.
       OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:-${OC_OIDC_SECRET:-CHANGEME_oidc_client}}
-      PROXY_ROLE_ASSIGNMENT_DRIVER: ${OPENCLOUD_ROLE_ASSIGNMENT_DRIVER:-oidc}
+      PROXY_ROLE_ASSIGNMENT_DRIVER: ${OPENCLOUD_ROLE_ASSIGNMENT_DRIVER:-default}
+      # External (Zitadel) subjects are provisioned into the IDM on first
+      # login. Without this ocis 401s every SSO user after a successful token
+      # validation: "Autoprovisioning disabled" (proxy/account_resolver). The
+      # 'default' role driver assigns the built-in user role to every
+      # authenticated subject — robust when the IdP does not emit a groups
+      # claim (the 'oidc' driver needs one to map roles).
+      PROXY_AUTOPROVISION_ACCOUNTS: "true"
+      PROXY_USER_OIDC_CLAIM: preferred_username
+      PROXY_USER_CS3_CLAIM: username
       # Opt-in machine auth for automation (poll-attachment upload +
       # automated public-share creation). Validates basic-auth credentials
       # against the IDM — works alongside the Zitadel IdP. Off by default;
