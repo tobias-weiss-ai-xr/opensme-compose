@@ -54,6 +54,7 @@ directories:
 | Document | What it covers |
 |---|---|
 | [PERFORMANCE.md](PERFORMANCE.md) | Reservations-first sizing, per-tier parameters (PostgreSQL, PgBouncer, Redis/Memcached, Traefik), boot ordering, hardening defaults |
+| [SSO.md](SSO.md) | SSO-Architektur & Login-Durchgänge — Zitadel/OIDC-Flow, Status-Matrix aller Dienste, Login-UI, Token-Typen, Backchannel-Pin, Ops-Runbook |
 | [perf/README.md](perf/README.md) | Per-tier “what may run” matrix + benchmark protocol |
 | [perf/baselines.md](perf/baselines.md) | Measured resource numbers per tier |
 | [perf/benchmark-run.md](perf/benchmark-run.md) | How a benchmark run is recorded (`make bench`) |
