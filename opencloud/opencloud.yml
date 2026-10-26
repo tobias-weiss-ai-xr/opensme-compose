@@ -40,10 +40,10 @@ services:
     # only serves :8080 plain HTTP; TLS lives at the edge traefik) — server-
     # side discovery/JWKS validation fails and the OIDC login never completes.
     # Docker's embedded DNS resolves the IdP hostname to the zitadel container
-    # IP (172.19.0.18) where only plain-HTTP :8080 listens -> ocis's Go HTTP
+    # IP (plain-HTTP :8080 only) -> ocis's Go HTTP
     # client fails discovery with `connection refused` on :443 and every API
-    # call 401s. Pin the IdP hostname to host-gateway (= the docker0 bridge,
-    # 172.17.0.1) where the fleet traefik listens on :443 and serves the IdP
+    # call 401s. Pin the IdP hostname to host-gateway (= the docker0 bridge of
+    # the Docker host) where the fleet traefik listens on :443 and serves the IdP
     # vhost by Host/SNI. NOTE ocis ignores Docker's injected http_proxy, so
     # "backchannel works" tests must use wget -Y off (busybox --no-proxy is
     # not supported and silently false-fails).

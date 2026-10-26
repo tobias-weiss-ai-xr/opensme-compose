@@ -201,7 +201,7 @@ in `opencloud/opencloud.yml` ist der einzige normative Referenzpunkt.)
 docker exec opensme-opencloud wget -Y off -q -O- \
   https://auth.home.opensme.graphwiz.ai/.well-known/openid-configuration | head -c 200
 
-# Auflösung prüfen: muss host-gateway (172.17.0.1) sein, NICHT 172.19.0.18
+# Auflösung prüfen: muss host-gateway sein, NICHT die Zitadel-Container-IP
 docker exec opensme-opencloud getent hosts auth.home.opensme.graphwiz.ai
 ```
 
