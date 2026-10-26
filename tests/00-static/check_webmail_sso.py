@@ -52,6 +52,7 @@ from conftest import Result, ROOT
 
 STALWART_YML = ROOT / "mail" / "stalwart.yml"
 CONFIG_TEMPLATE = ROOT / "mail" / "stalwart" / "config.toml.template"
+ZITADEL_YML = ROOT / "idm" / "zitadel.yml"
 
 
 # ── Parsing helpers ─────────────────────────────────────────────
@@ -233,19 +234,60 @@ def check_container_identity(result: Result) -> None:
         )
 
 
+def check_issuer_override(result: Result) -> None:
+    """W5 — the idpplain router's Host-rewrite must also override the
+    forwarded proto/port.
+
+    Stalwart dials the userinfo endpoint through the internal-only
+    'idpplain' entrypoint (http://host:8081). Traefik forwards
+    X-Forwarded-Proto:http + X-Forwarded-Port:8081; Zitadel derives the
+    expected access-token issuer from those and gets
+    'http://host:8081' instead of the token's real iss
+    (https://<ZITADEL_DOMAIN>) → PermissionDenied at userinfo → SMTP 535
+    on XOAUTH2 submission. The zitadel-idp-host middleware must therefore
+    set Host + X-Forwarded-Proto=https + X-Forwarded-Port=443.
+    (Verified live 2026-10-26 from CI zitadel logs.)
+    """
+    if not ZITADEL_YML.exists():
+        result.fail("idm/zitadel.yml missing — cannot check W5")
+        return
+    text = ZITADEL_YML.read_text()
+    need = [
+        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+        "Host=",
+        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+        "X-Forwarded-Proto=https",
+        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+        "X-Forwarded-Port=443",
+    ]
+    missing = [n for n in need if n not in text]
+    if missing:
+        result.fail(
+            "idm/zitadel.yml (W5): idpplain userinfo would fail issuer "
+            "matching — zitadel-idp-host middleware missing %s (SMTP 535 "
+            "'issuer does not match' at userinfo)" % ", ".join(missing)
+        )
+        return
+    result.ok(
+        "zitadel-idp-host overrides Host + X-Forwarded-Proto/Port (issuer "
+        "matches the token's https origin)"
+    )
+
+
 # ── Checks ─────────────────────────────────────────────────────
 
 def main() -> bool:
     result = Result("sme-webmail-sso")
     result.header(
         "Layer 0: webmail (stalwart) SSO backchannel — oidc directory, "
-        "idpplain userinfo hop, host-gateway pin"
+        "idpplain userinfo hop, forwarded issuer override"
     )
 
     check_default_directory(result)
     check_userinfo_endpoint(result)
     check_idp_backchannel_pin(result)
     check_container_identity(result)
+    check_issuer_override(result)
 
     return result.summary()
 

@@ -160,6 +160,16 @@ MUTATIONS = [
               "endpoint (an internal directory refuses every SSO login)",
     },
     {
+        "name": "webmail-sso-issuer-override-dropped",
+        "file": "idm/zitadel.yml",
+        "old": '      - "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders.X-Forwarded-Proto=https"\n',
+        "new": "",
+        "check": "tests/00-static/check_webmail_sso.py",
+        "why": "W5 — the idpplain hop must override X-Forwarded-Proto/Port or "
+              "Zitadel derives the wrong issuer at userinfo (SMTP 535 "
+              "'issuer does not match' on XOAUTH2 submission)",
+    },
+    {
         "name": "env-completeness",
         "file": ".env.example",
         "old": "REDIS_PASSWORD=CHANGEME_redis",

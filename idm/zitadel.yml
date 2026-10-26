@@ -135,9 +135,14 @@ services:
       - "traefik.http.routers.zitadel-idp.entrypoints=idpplain"
       # Stalwart dials http://<ZITADEL_DOMAIN>:8081 — the Host header carries
       # the :8081 port, which trips Zitadel's ExternalDomain check (404).
-      # Rewrite it to the bare external hostname.
+      # Rewrite it to the bare external hostname AND override the forwarded
+      # proto/port: otherwise Zitadel derives the expected token issuer from
+      # the proxied request (http://host:8081) and rejects the access token
+      # at userinfo with PermissionDenied 'issuer does not match' (SMTP 535).
       - "traefik.http.routers.zitadel-idp.middlewares=zitadel-idp-host"
       - "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders.Host=${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}"
+      - "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders.X-Forwarded-Port=443"
       - "traefik.http.services.zitadel.loadbalancer.server.port=8080"
     deploy:
       resources:
