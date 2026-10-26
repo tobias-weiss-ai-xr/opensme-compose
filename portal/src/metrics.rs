@@ -72,12 +72,18 @@ impl Metrics {
         )
         .expect("metrics: build sso_login_failures_total");
         let sso_check_status = IntGaugeVec::new(
-            Opts::new("sso_check_status", "SSO health status per single service (1=ok, 0=fail)."),
+            Opts::new(
+                "sso_check_status",
+                "SSO health status per single service (1=ok, 0=fail).",
+            ),
             &["service"],
         )
         .expect("metrics: build sso_check_status");
         let provisioning_status = IntGaugeVec::new(
-            Opts::new("provisioning_status", "Provisioning status per single service (1=ok, 0=fail)."),
+            Opts::new(
+                "provisioning_status",
+                "Provisioning status per single service (1=ok, 0=fail).",
+            ),
             &["service", "component"],
         )
         .expect("metrics: build provisioning_status");
@@ -152,7 +158,9 @@ impl Metrics {
     /// Set SSO health status for a single service (1 = healthy/ok, 0 = failed).
     #[allow(dead_code)]
     pub fn set_sso_check_status(&self, service: &str, status: i64) {
-        self.sso_check_status.with_label_values(&[service]).set(status);
+        self.sso_check_status
+            .with_label_values(&[service])
+            .set(status);
     }
 
     /// Set provisioning status for a single service/component (1 = ok, 0 = fail).

@@ -97,7 +97,10 @@ SETUID_IMAGES = {
     "gotenberg", "paperless-ngx", "tika", "opencloud", "collabora", "zitadel",
 }
 # Images that run as root by design and manage their own privileges.
-CAP_DROP_ALL_OK = {"traefik", "seaweedfs", "portal", "dev-agent"}
+# portal-web is the non-root node:22-alpine Next.js app (user nextjs, no
+# setuid binaries in its path) — dropping ALL caps is strictly safer and
+# nothing inside the container performs a privilege transition.
+CAP_DROP_ALL_OK = {"traefik", "seaweedfs", "portal", "portal-web", "dev-agent"}
 
 # Intentionally simplistic image<->service mapping used by the checks below.
 # Keyed by service name as defined in the compose files.
