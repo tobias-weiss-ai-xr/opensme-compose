@@ -229,6 +229,26 @@ Layer-0-Wächter: `tests/00-static/check_oidc.py` (R5).
 
 ## Ops-Runbook
 
+### Stalwart-Webmail-Backchannel (OIDC-Directory → idpplain)
+
+Stalwart validiert XOAUTH2-Zugriffstokens über `[directory.oidc]` an Zitadels
+Userinfo-Endpoint. Der Aufruf läuft über den **nur-internen** `idpplain`-
+Entrypoint (`:8081`, nie publiziert) mit einer Host-Rewrite-Middleware
+(`zitadel-idp-host`). Zwei Dinge sind nicht verhandelbar:
+
+1. **Kein hartkodierter IP-Pin im Shared-Compose** — die Demo/CI-Stacks
+   lösen `${ZITADEL_DOMAIN}` über den Traefik-Netzwerk-Alias auf; der
+   Fleet-Deploy (VM) bekommt seinen `host-gateway`-Pin aus dem Ansible-
+   Overlay (`stalwart-idpplain.yml`, Rolle `opensme_suite`).
+2. **Issuer-Override**: Dieselbe Middleware muss zusäztlich
+   `X-Forwarded-Host`/`Proto`/`Port` auf die externe HTTPS-Origin setzen.
+   Sonst leitet Zitadel aus dem proxied Request (`http://host:8081`) einen
+   falschen Issuer ab und lehnt das Token mit `PermissionDenied "issuer
+   does not match"` ab → SMTP 535 **und** SOGo-INBOX 500.
+
+Wächter: `tests/00-static/check_webmail_sso.py` (W1–W5) + Mutationen
+(`webmail-sso-*`).
+
 ### Schnell-Check: Redirect-Gesundheit pro Dienst
 
 ```sh
