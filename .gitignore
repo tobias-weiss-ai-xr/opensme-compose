@@ -44,7 +44,7 @@ __pycache__/
 
 # Next.js portal web app (portal/web)
 node_modules/
-portal/web/node_modules/
+portal/web/node_modules
 portal/web/.next/
 .eslintcache
 # Zitadel masterkey + system API key (provisioned at deploy time)
