@@ -2,7 +2,7 @@
   "default_server_config": {
     "m.homeserver": {
       "base_url": "${ELEMENT_DEFAULT_SERVER_URL}",
-      "server_name": "${ELEMENT_HOMESERVER_NAME}"
+      "server_name": "${SN}"
     }
   },
   "disable_custom_urls": false,

@@ -52,15 +52,18 @@ services:
       # config.json from services/element-config.json.template in a small
       # pre-entrypoint below.
       ELEMENT_DEFAULT_SERVER_URL: "https://matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
-      ELEMENT_HOMESERVER_NAME: "matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
     volumes:
       - ./services/element-config.json.template:/render/config.json.template:ro
     # Render the homeserver config deterministically (envsubst), then run the
-    # stock entrypoint. envsubst is present in the image (alpine).
+    # stock entrypoint. envsubst is present in the image (alpine). server_name
+    # is derived from ELEMENT_DEFAULT_SERVER_URL (scheme stripped) so it stays
+    # in sync with whichever URL overlays inject for that var — a mismatch
+    # (seen live: base_url matrix.home… vs server_name matrix.… from two
+    # different domain vars) breaks @user:server IDs against synapse.
     entrypoint:
       - /bin/sh
       - -c
-      - "envsubst < /render/config.json.template > /usr/share/nginx/html/config.json && exec /docker-entrypoint.sh nginx -g 'daemon off;'"
+      - "SN=$${ELEMENT_DEFAULT_SERVER_URL#https://}; SN=$${SN#http://}; export SN ELEMENT_DEFAULT_SERVER_URL; envsubst < /render/config.json.template > /app/config.json && exec /docker-entrypoint.sh nginx -g 'daemon off;'"
     networks:
       - opensme-net
     labels:
