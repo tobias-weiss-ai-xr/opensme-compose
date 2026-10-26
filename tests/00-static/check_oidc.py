@@ -42,6 +42,11 @@ exists, but the stack must still complete a real login):
   R7 — zitadel login UI declared: idm/zitadel.yml must declare the
        'zitadel-login' service (the v4 login UI behind /ui/v2/login); with
        loginV2 required, dropping it dead-ends every browser login in a 404.
+  R8 — JWT access tokens: scripts/zitadel-client.sh must register OIDC
+       apps with accessTokenType (TOKEN_TYPE, default OIDC_TOKEN_TYPE_JWT)
+       — Zitadel's OPAQUE default is rejected by every JWKS-validating
+       backend (ocis 'invalid number of segments'), so a registrar that
+       drops the field breaks every SSO login after the code exchange.
 
 Pure file inspection — no docker, runs on any fresh checkout.
 
@@ -291,6 +296,54 @@ def check_zitadel_login_ui(result: Result) -> None:
         )
 
 
+def check_app_token_type(result: Result) -> None:
+    """R8 — OIDC apps must be registered with JWT access tokens.
+
+    Zitadel v4.19 defaults new OIDC apps to OPAQUE access tokens, but
+    every backend in this stack validates the bearer token against the
+    IdP JWKS endpoint — opencloud/ocis answers opaque tokens with
+    'invalid number of segments', notes reads OIDC_OP_JWKS_ENDPOINT, and
+    synapse/ticketing validate the JWKS too. The registrar must therefore
+    pin accessTokenType in the AddOIDCApp POST body (from TOKEN_TYPE) and
+    keep the OIDC_TOKEN_TYPE_JWT default — otherwise every SSO login
+    401s right after a successful code exchange.
+    """
+    if not ZITADEL_CLIENT_SH.exists():
+        result.fail(
+            "scripts/zitadel-client.sh missing — cannot verify JWT "
+            "access-token registration"
+        )
+        return
+    text = ZITADEL_CLIENT_SH.read_text()
+
+    # Extract the jq program that builds the AddOIDCApp POST body
+    # (from 'app_body=' up to the closing quote of the '{ ... }' block).
+    start = text.find("app_body=")
+    end = text.find("}')\"", start) if start != -1 else -1
+    jq_body = text[start:end] if (start != -1 and end != -1) else ""
+
+    if "accessTokenType: $tokentype" in jq_body:
+        result.ok(
+            "OIDC app POST body pins accessTokenType (JWT by default)"
+        )
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh: the OIDC app POST body must set "
+            "accessTokenType: $tokentype — Zitadel's OPAQUE default is "
+            "rejected by every JWKS-validating backend (ocis: 'invalid "
+            "number of segments')"
+        )
+
+    if "OIDC_TOKEN_TYPE_JWT" in text:
+        result.ok("OIDC_TOKEN_TYPE_JWT default present in zitadel-client.sh")
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh must default TOKEN_TYPE to "
+            "OIDC_TOKEN_TYPE_JWT — JWKS-validating backends cannot read "
+            "OPAQUE tokens"
+        )
+
+
 # ── Checks ─────────────────────────────────────────────────────
 
 def main() -> bool:
@@ -372,6 +425,9 @@ def main() -> bool:
     check_ocis_external_users(result)
     check_element_homeserver_source(result)
     check_zitadel_login_ui(result)
+
+    # ── R8: JWT access-token registration ──
+    check_app_token_type(result)
 
     return result.summary()
 

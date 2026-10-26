@@ -29,6 +29,15 @@
 # secret is issued and a warning tells you to regenerate/re-source .env;
 # Zitadel stays the single source of truth for the deployed secret.
 #
+# ACCESS TOKENS: every app is registered with JWT access tokens
+# (OIDC_TOKEN_TYPE_JWT). Zitadel v4.19 defaults new apps to OPAQUE tokens,
+# which the JWKS-validating backends reject (opencloud/ocis answers
+# 'invalid number of segments'; notes reads OIDC_OP_JWKS_ENDPOINT; synapse
+# and ticketing validate the JWKS too). Existing apps are re-enforced on
+# every run via PUT .../apps/{id}/oidc_config, so a previously-OPAQUE app
+# is flipped to JWT on the next run — the durable replacement for the
+# manual/live-only flip of 2026-10-26. ZITADEL_APP_TOKEN_TYPE overrides.
+#
 # Redirect URIs registered for BOTH protocol faces of the demo stack (Traefik
 # terminates TLS at :443 and redirects http :80 -> https):
 #   https://<OPENCLOUD_DOMAIN>/oidc/callback   (+ http)   — real OpenCloud OIDC callback
@@ -74,7 +83,9 @@ usage() {
 Usage: scripts/zitadel-client.sh [options]
 
 Register (or reuse) a persistent OIDC client in the running Zitadel
-instance. Idempotent — safe to run on every boot.
+instance. Idempotent — safe to run on every boot. Apps are registered
+with JWT access tokens (needed by the JWKS-validating backends like
+opencloud/ocis) and existing apps are re-enforced to JWT on every run.
 
 Options:
   --app NAME         which client to ensure: opencloud (default), notes,
@@ -88,6 +99,9 @@ Options:
 
 Environment:
   ZITADEL_PAT / E2E_ZITADEL_PAT   machine PAT (skips docker compose cp)
+  ZITADEL_APP_TOKEN_TYPE          access-token type for the registered
+                                 apps (default OIDC_TOKEN_TYPE_JWT — the
+                                 JWKS-validating backends need JWTs)
   <APP>_OIDC_CLIENT_ID / SECRET   existing client credentials for the
                                  selected --app (looked up first)
 
@@ -153,7 +167,9 @@ IDP_HOST="$(printf '%s' "$IDP_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
 
 # ── per-app configuration ────────────────────────────────────────────────
 # Each app: Zitadel project + app name, the .env keys the issued pair is
-# persisted under, and the callback paths it expects. Callbacks are
+# persisted under, the callback paths it expects, and its access-token
+# type (all JWT — see ACCESS TOKENS above; ZITADEL_APP_TOKEN_TYPE
+# overrides the default). Callbacks are
 # registered for BOTH protocol faces (Traefik terminates TLS at :443 and
 # redirects http :80 -> https).
 case "$APP_KIND" in
@@ -163,6 +179,7 @@ case "$APP_KIND" in
     CLIENT_ID_KEY="OC_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="OC_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY="OC_OIDC_SECRET"   # legacy alias kept in sync
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
     app_domain="$(env_get OPENCLOUD_DOMAIN "$(env_get OC_DOMAIN cloud.opensme.local)")"
     CLIENT_ID_LABEL="$(env_get OC_OIDC_CLIENT_ID opencloud)"
     base_paths=("/oidc/callback" "/oidc-callback.html")
@@ -173,6 +190,7 @@ case "$APP_KIND" in
     CLIENT_ID_KEY="NOTES_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="NOTES_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
     app_domain="$(env_get NOTES_DOMAIN "notes.opensme.local")"
     CLIENT_ID_LABEL="$(env_get NOTES_OIDC_CLIENT_ID opensme-notes)"
     # lasuite.oidc_login callback: impress's OIDC lives under the API
@@ -190,6 +208,7 @@ case "$APP_KIND" in
     CLIENT_ID_KEY="SYNAPSE_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="SYNAPSE_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
     app_domain="$(env_get MATRIX_DOMAIN "matrix.opensme.local")"
     CLIENT_ID_LABEL="$(env_get SYNAPSE_OIDC_CLIENT_ID synapse)"
     # synapse derives its redirect from public_baseurl — exactly this URI
@@ -201,6 +220,7 @@ case "$APP_KIND" in
     CLIENT_ID_KEY="NOSDESK_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="NOSDESK_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
     # Nosdesk serves the helpdesk under help.<domain>; the OIDC block in
     # services/ticketing.yml wires its redirect to $FRONTEND_URL/auth/oidc/callback
     app_domain="$(env_get NOSDESK_DOMAIN "help.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
@@ -213,6 +233,7 @@ case "$APP_KIND" in
     CLIENT_ID_KEY="SOGO_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="SOGO_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
     app_domain="$(env_get SOGO_DOMAIN "webmail.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
     CLIENT_ID_LABEL="$(env_get SOGO_OIDC_CLIENT_ID sogo-webmail)"
     # SOGo 5.12's OpenID flow sends the browser back to the SOGo app root
@@ -323,6 +344,47 @@ api() {
 
 api_http() { tr -d '\r\n' < "$API_TMP"; }
 
+# ── access-token type enforcement (durable JWT flip) ───────────────────────
+# Zitadel v4.19: flipping an existing app's token type via the GENERIC
+# PUT /management/v1/projects/{pid}/apps/{app_id} fails ('No changes'); the
+# dedicated PUT .../apps/{app_id}/oidc_config takes a FLAT body and does
+# the flip. It answers 200 or 204 (both fine); the only tolerated 4xx is
+# Zitadel's 'No changes' reply — an idempotent no-op meaning the app
+# already carries the requested type.
+app_token_type() {
+  # app_token_type PID APP_ID → prints the app's current accessTokenType
+  local out t
+  out="$(api GET "/management/v1/projects/${1}/apps/${2}" 2>/dev/null || true)"
+  t="$(printf '%s' "$out" | jq -r '.app.oidcConfig.accessTokenType // .oidcConfig.accessTokenType // "unknown"' 2>/dev/null || true)"
+  printf '%s' "${t:-unknown}"
+}
+
+enforce_token_type() {
+  # enforce_token_type PID APP_ID — force accessTokenType=$TOKEN_TYPE.
+  local pid="$1" app_id="$2" before after resp code
+  before="$(app_token_type "$pid" "$app_id")"
+  info "Access token type of app '${APP_NAME}': ${before} (target ${TOKEN_TYPE})"
+  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
+             "{\"accessTokenType\":\"${TOKEN_TYPE}\"}" 2>/dev/null || true)"
+  code="$(api_http)"
+  after="$(app_token_type "$pid" "$app_id")"
+  case "$code" in
+    2??)
+      ok "Access token type enforced: ${before} -> ${after} (HTTP ${code})"
+      ;;
+    *)
+      if [[ "$resp" == *"No changes"* ]]; then
+        ok "Access token type already ${after:-$TOKEN_TYPE} — Zitadel: 'no changes' (HTTP ${code})"
+      else
+        err "Could not enforce access token type ${TOKEN_TYPE} (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
+        err "JWKS-validating backends reject OPAQUE tokens — flip it manually via"
+        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
+        return 1
+      fi
+      ;;
+  esac
+}
+
 # ── persist a KEY=value into .env (upsert, atomic via temp file) ────────────
 set_env() {
   local key="$1" val="$2"
@@ -346,6 +408,7 @@ if [[ "$DRY_RUN" == true ]]; then
   info "IdP base:      ${IDP_URL}"
   info "App to ensure: '${APP_NAME}' (project '${APP_PROJECT}')"
   info "Client id:     '${CLIENT_ID_LABEL}' (looked up first; persisted to .env as ${CLIENT_ID_KEY})"
+  info "Access tokens: ${TOKEN_TYPE} (JWT default — enforced on existing apps too)"
   info "Machine PAT:   $([[ -n "$PAT" ]] && echo "found" || echo "NOT FOUND")"
   info "Redirect URIs:"
   for u in "${REDIRECTS[@]}"; do
@@ -354,9 +417,12 @@ if [[ "$DRY_RUN" == true ]]; then
   info "Plan:"
   info "  1. POST ${IDP_URL}/management/v1/projects/_search  (readiness + auth probe)"
   info "  2. scan projects' apps for '$APP_NAME' / client id '$CLIENT_ID_LABEL'"
-  info "     -> if found: report 'already registered', exit 0 (no changes)"
+  info "     -> if found: enforce access token type ${TOKEN_TYPE} via"
+  info "        PUT .../apps/{id}/oidc_config, then report 'already registered', exit 0"
   info "  3. otherwise: create project '$APP_PROJECT' (if needed) and the OIDC app"
-  info "     (web, authorization-code, client_secret_basic, devMode, both http+https URIs)"
+  info "     (web, authorization-code, client_secret_basic, ${TOKEN_TYPE} access"
+  info "     tokens, devMode, both http+https URIs), then enforce ${TOKEN_TYPE}"
+  info "     on the new app as well"
   info "  4. write ${CLIENT_ID_KEY} + ${CLIENT_SECRET_KEY} into .env"
   exit 0
 fi
@@ -408,7 +474,12 @@ done <<< "$(printf '%s' "$projects_json" | jq -r '.result[]?.id' 2>/dev/null || 
 
 if [[ -n "$FOUND_APP" ]]; then
   ok "OIDC app '${APP_NAME}' already registered (client id '${FOUND_CLIENT_ID:-?}', project '${FOUND_PROJECT}')"
-  info "Nothing to do — idempotent no-op. The client credentials in .env are the working ones."
+  # Durable enforcement: an app registered before the JWT default (or
+  # flipped by hand) may still carry Zitadel's OPAQUE tokens, which every
+  # JWKS-validating backend rejects — flip it here on every run instead
+  # of the manual/live-only fix of 2026-10-26.
+  enforce_token_type "$FOUND_PROJECT" "$FOUND_APP" || exit 1
+  info "Client credentials in .env are the working ones — idempotent beyond the token type."
   exit 0
 fi
 
@@ -430,11 +501,13 @@ if [[ -z "$pid" ]]; then
 fi
 
 app_body="$(jq -nc --arg name "$APP_NAME" \
+  --arg tokentype "$TOKEN_TYPE" \
   --argjson redirects "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
   --argjson logout "$(printf '%s\n' "${POST_LOGOUT[@]}" | jq -R . | jq -s -c .)" \
   '{ name: $name,
      redirectUris: $redirects,
      postLogoutRedirectUris: $logout,
+     accessTokenType: $tokentype,
      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
      appType: "OIDC_APP_TYPE_WEB",
@@ -465,12 +538,26 @@ if [[ -n "$SECRET_ALIAS_KEY" ]] && grep -q "^${SECRET_ALIAS_KEY}=" .env; then
   set_env "$SECRET_ALIAS_KEY" "$new_secret"
 fi
 
+# ── 5) enforce the access-token type on the freshly registered app ────────
+# The app was just created with ${TOKEN_TYPE}; this belt-and-braces PUT
+# covers any Zitadel-side default drift right after creation (and proves
+# the oidc_config endpoint accepts the type). AddOIDCApp's response only
+# carries clientId/clientSecret — the app id is re-resolved via search.
+new_app_id="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev/null \
+  | jq -r --arg cid "$new_client_id" '.result[]? | select((.oidcConfig.clientId // "") == $cid) | .id' 2>/dev/null | head -1 || true)"
+if [[ -n "${new_app_id:-}" ]]; then
+  enforce_token_type "$pid" "$new_app_id" || exit 1
+else
+  warn "Could not re-resolve the new app id — skipping token-type enforcement (app was created with ${TOKEN_TYPE})."
+fi
+
 echo ""
 ok "Registered persistent OIDC client (${APP_KIND})."
 info "  Project:          ${APP_PROJECT}  (id ${pid})"
 info "  App:              ${APP_NAME}  (id ${FOUND_APP:-new})"
 info "  Client id:        ${new_client_id}"
 info "  Client secret:    <set> (written to .env, never printed)"
+info "  Access tokens:    ${TOKEN_TYPE} (JWKS-validating backends need JWTs)"
 info "  Redirect URIs:    $(IFS=', '; echo "${REDIRECTS[*]}")"
 info "  Post-logout URIs: $(IFS=', '; echo "${POST_LOGOUT[*]}")"
 info "Persisted into .env: ${CLIENT_ID_KEY} and ${CLIENT_SECRET_KEY}"
