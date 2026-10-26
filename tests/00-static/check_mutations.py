@@ -94,6 +94,42 @@ MUTATIONS = [
         "why": "R1 — every referenced OIDC client var needs a branch",
     },
     {
+        "name": "sso-oc-hostgateway-pin",
+        "file": "opencloud/opencloud.yml",
+        "old": ":host-gateway",
+        "new": ":172.19.0.99",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R4 — the ocis IdP backchannel must stay pinned to "
+              "host-gateway (a hardcoded container IP dead-ends discovery)",
+    },
+    {
+        "name": "sso-oc-autoprovision",
+        "file": "opencloud/opencloud.yml",
+        "old": 'PROXY_AUTOPROVISION_ACCOUNTS: "true"',
+        "new": 'PROXY_AUTOPROVISION_ACCOUNTS: "false"',
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R5 — external (Zitadel) users must stay autoprovisioned "
+              "with the default role driver",
+    },
+    {
+        "name": "sso-element-homeserver",
+        "file": "services/element.yml",
+        "old": 'ELEMENT_DEFAULT_SERVER_URL: "https://matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"',
+        "new": 'ELEMENT_DEFAULT_SERVER_URL: "https://matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"\n      ELEMENT_HOMESERVER_NAME: matrix.opensme.graphwiz.ai',
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R6 — element server_name must derive from "
+              "ELEMENT_DEFAULT_SERVER_URL only (no second source)",
+    },
+    {
+        "name": "sso-zitadel-login-service",
+        "file": "idm/zitadel.yml",
+        "old": "  zitadel-login:\n",
+        "new": "  zitadel-login-disabled:\n",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R7 — the v4 login UI service must stay declared in "
+              "idm/zitadel.yml",
+    },
+    {
         "name": "env-completeness",
         "file": ".env.example",
         "old": "REDIS_PASSWORD=CHANGEME_redis",

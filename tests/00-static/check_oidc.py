@@ -23,6 +23,26 @@ caught on a fresh checkout, without a running stack:
        client-id must equal the APP_NAME of the branch that owns VAR — a
        made-up default (like 'opencloud') is a client that can never log in.
 
+Plus the RUNTIME SSO invariants (post-registration contract — the client
+exists, but the stack must still complete a real login):
+
+  R4 — ocis IdP backchannel pin: opencloud.extra_hosts must pin the IdP
+       hostname to host-gateway. Inside the compose network the public IdP
+       hostname resolves to the Zitadel container IP where :443 is not
+       listening — ocis discovery/JWKS fails and every API call 401s.
+  R5 — ocis external-user handling: PROXY_AUTOPROVISION_ACCOUNTS must be
+       'true' (external Zitadel subjects are provisioned on first login;
+       without it ocis 401s every SSO user after token validation) and
+       PROXY_ROLE_ASSIGNMENT_DRIVER must default to 'default' (the 'oidc'
+       driver needs a groups claim the IdP does not emit).
+  R6 — element server_name source: services/element.yml must NOT set
+       ELEMENT_HOMESERVER_NAME — the entrypoint derives server_name from
+       ELEMENT_DEFAULT_SERVER_URL so the two can never desync (a mismatch
+       breaks @user:server IDs against synapse).
+  R7 — zitadel login UI declared: idm/zitadel.yml must declare the
+       'zitadel-login' service (the v4 login UI behind /ui/v2/login); with
+       loginV2 required, dropping it dead-ends every browser login in a 404.
+
 Pure file inspection — no docker, runs on any fresh checkout.
 
 Usage: python3 tests/00-static/check_oidc.py
@@ -39,6 +59,9 @@ from conftest import Result, ROOT
 
 ZITADEL_CLIENT_SH = ROOT / "scripts" / "zitadel-client.sh"
 ENV_EXAMPLE = ROOT / ".env.example"
+OPENCLOUD_YML = ROOT / "opencloud" / "opencloud.yml"
+ELEMENT_YML = ROOT / "services" / "element.yml"
+ZITADEL_YML = ROOT / "idm" / "zitadel.yml"
 
 # Compose files that may carry OIDC client references (base + optionals).
 COMPOSE_CANDIDATES = [
@@ -134,6 +157,140 @@ def env_example_vars(env_path: Path) -> set[str]:
     )
 
 
+def load_service(compose_path: Path, service: str) -> dict:
+    """Return a parsed compose service block ({} if file/service missing)."""
+    if not compose_path.exists():
+        return {}
+    data = yaml.safe_load(compose_path.read_text()) or {}
+    return (data.get("services") or {}).get(service) or {}
+
+
+def service_env(svc: dict) -> dict:
+    """Flatten a service environment block (dict or list form) to a mapping."""
+    env = svc.get("environment") or {}
+    if isinstance(env, dict):
+        return dict(env)
+    out: dict[str, str] = {}
+    for item in env:
+        if isinstance(item, str):
+            k, _, v = item.partition("=")
+            out[k] = v
+    return out
+
+
+# ── Runtime SSO invariants (R4–R7) ─────────────────────────────
+
+def check_ocis_backchannel_pin(result: Result) -> None:
+    """R4 — ocis IdP backchannel must go through the host (host-gateway).
+
+    ocis validates tokens against OC_OIDC_ISSUER over HTTPS. Docker's
+    embedded DNS resolves the public IdP hostname to the Zitadel container
+    IP, where only plain-HTTP :8080 listens — TLS lives at the edge
+    traefik. A missing (or hardcoded-container-IP) extra_hosts pin makes
+    server-side discovery/JWKS fail with connection refused on :443 and
+    the login never completes, even with a perfectly registered client.
+    """
+    svc = load_service(OPENCLOUD_YML, "opencloud")
+    if not svc:
+        result.fail(
+            "opencloud/opencloud.yml: service 'opencloud' missing — cannot "
+            "verify the IdP backchannel pin"
+        )
+        return
+    hosts = svc.get("extra_hosts") or []
+    entries = hosts.values() if isinstance(hosts, dict) else hosts
+    pinned = any(
+        isinstance(e, str) and e.endswith(":host-gateway") for e in entries
+    )
+    if pinned:
+        result.ok("ocis IdP backchannel pinned to host-gateway (extra_hosts)")
+    else:
+        result.fail(
+            "opencloud extra_hosts has no '<idp-host>:host-gateway' entry — "
+            "inside the compose network the IdP hostname resolves to the "
+            "Zitadel container IP where :443 is not listening; ocis "
+            "discovery/JWKS fails and the OIDC login dead-ends"
+        )
+
+
+def check_ocis_external_users(result: Result) -> None:
+    """R5 — external (IdP) users must be autoprovisioned with the default
+    role driver, or ocis 401s every SSO user right after a successful
+    token validation ("Autoprovisioning disabled", proxy/account_resolver).
+    """
+    env = service_env(load_service(OPENCLOUD_YML, "opencloud"))
+
+    autoprov = str(env.get("PROXY_AUTOPROVISION_ACCOUNTS", "")).strip().lower()
+    ok_autoprov = autoprov == "true"
+
+    driver = env.get("PROXY_ROLE_ASSIGNMENT_DRIVER")
+    driver_default: str | None = None
+    if isinstance(driver, str):
+        m = re.match(r"^\$\{[^:}]+:-(.*)\}$", driver.strip())
+        driver_default = (m.group(1) if m else driver).strip()
+    ok_driver = driver_default is not None and driver_default.lower() == "default"
+
+    if ok_autoprov and ok_driver:
+        result.ok(
+            "ocis external users: autoprovision=true, role driver 'default'"
+        )
+        return
+    if not ok_autoprov:
+        result.fail(
+            "opencloud PROXY_AUTOPROVISION_ACCOUNTS must be 'true' — without "
+            "it ocis 401s every SSO user after a successful token validation"
+        )
+    if not ok_driver:
+        result.fail(
+            "opencloud PROXY_ROLE_ASSIGNMENT_DRIVER must default to 'default' "
+            "— the 'oidc' driver needs a groups claim the IdP does not emit"
+        )
+
+
+def check_element_homeserver_source(result: Result) -> None:
+    """R6 — element server_name has exactly ONE source:
+    ELEMENT_DEFAULT_SERVER_URL. The entrypoint derives server_name from it
+    (scheme stripped) precisely so base_url and server_name stay in sync; a
+    separate ELEMENT_HOMESERVER_NAME would reintroduce the two-variable
+    desync that broke @user:server IDs against synapse.
+    """
+    if not ELEMENT_YML.exists():
+        result.fail("services/element.yml missing — cannot verify server_name source")
+        return
+    if "ELEMENT_HOMESERVER_NAME" in ELEMENT_YML.read_text():
+        result.fail(
+            "services/element.yml must not set ELEMENT_HOMESERVER_NAME — "
+            "server_name is derived from ELEMENT_DEFAULT_SERVER_URL in the "
+            "entrypoint; a second source desyncs @user:server IDs against "
+            "synapse"
+        )
+    else:
+        result.ok(
+            "element server_name derived from ELEMENT_DEFAULT_SERVER_URL "
+            "(no ELEMENT_HOMESERVER_NAME)"
+        )
+
+
+def check_zitadel_login_ui(result: Result) -> None:
+    """R7 — the Zitadel v4 login UI service must stay declared.
+
+    `authorize` redirects humans to /ui/v2/login (loginV2.required is on).
+    The Next.js app behind it is a separate service — if it is dropped or
+    renamed, every browser login dead-ends in Zitadel's 404 while the
+    headless journeys (Session API) still look green.
+    """
+    data: dict = {}
+    if ZITADEL_YML.exists():
+        data = yaml.safe_load(ZITADEL_YML.read_text()) or {}
+    if "zitadel-login" in (data.get("services") or {}):
+        result.ok("zitadel-login (v4 login UI) service declared in idm/zitadel.yml")
+    else:
+        result.fail(
+            "idm/zitadel.yml: service 'zitadel-login' missing — loginV2 is "
+            "required, so every browser login dead-ends in a 404 without it"
+        )
+
+
 # ── Checks ─────────────────────────────────────────────────────
 
 def main() -> bool:
@@ -209,6 +366,12 @@ def main() -> bool:
             )
     else:
         result.ok("no phantom (unregistered) client-id defaults")
+
+    # ── Runtime SSO invariants (R4–R7) ──
+    check_ocis_backchannel_pin(result)
+    check_ocis_external_users(result)
+    check_element_homeserver_source(result)
+    check_zitadel_login_ui(result)
 
     return result.summary()
 
