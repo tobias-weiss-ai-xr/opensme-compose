@@ -130,6 +130,16 @@ MUTATIONS = [
               "idm/zitadel.yml",
     },
     {
+        "name": "sso-oidc-app-tokentype",
+        "file": "scripts/zitadel-client.sh",
+        "old": "accessTokenType: $tokentype,",
+        "new": 'accessTokenType: "OIDC_TOKEN_TYPE_OPAQUE",',
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R8 — the OIDC app must be registered with JWT access "
+              "tokens; Zitadel's OPAQUE default is rejected by every "
+              "JWKS-validating backend (ocis: 'invalid number of segments')",
+    },
+    {
         "name": "env-completeness",
         "file": ".env.example",
         "old": "REDIS_PASSWORD=CHANGEME_redis",
