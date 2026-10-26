@@ -40,10 +40,15 @@ services:
     # only serves :8080 plain HTTP; TLS lives at the edge traefik) — server-
     # side discovery/JWKS validation fails and the OIDC login never completes
     # (seen live: /.well-known shows the right issuer but token validation
-    # refused). Pin the IdP hostname to host-gateway (= opensme-net gateway)
-    # so HTTPS egresses via the edge, same backchannel pattern as synapse.
-    extra_hosts:
-      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
+    # refused for 30 s then 401). Do NOT pin the IdP host here: ocis's Go
+    # HTTP client ignores Docker's injected http_proxy AND /etc/hosts pins
+    # dial DIRECTLY — host-gateway resolves to the docker0 bridge (172.17.0.1)
+    # where the host firewall silently drops TLS from opensme-net, and the
+    # opensme-net gateway has no :443 listener. With no pin, ocis resolves the
+    # IdP publicly (hairpin through the edge, verified 200/15 ms in prod) and
+    # discovery + JWKS validation complete. (Synapse's pin to host-gateway
+    # works only because synapse proxies its discovery fetch via Python and
+    # does not validate JWKS per request.)
     depends_on:
       postgres:
         condition: service_healthy
