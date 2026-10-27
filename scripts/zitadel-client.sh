@@ -9,6 +9,7 @@
 # without touching anything.
 #
 # Apps (--app):
+#   portal     home.<domain>/api/auth/callback → PORTAL_OIDC_CLIENT_ID/SECRET
 #   opencloud  cloud.<domain>/oidc/callback(.html)      → OC_OIDC_CLIENT_ID/SECRET
 #   notes      notes.<domain>/api/v1.0/callback/ (lasuite oidc_login)
 #              → NOTES_OIDC_CLIENT_ID/SECRET
@@ -88,8 +89,8 @@ with JWT access tokens (needed by the JWKS-validating backends like
 opencloud/ocis) and existing apps are re-enforced to JWT on every run.
 
 Options:
-  --app NAME         which client to ensure: opencloud (default), notes,
-                     synapse, ticketing or sogo — selects the redirect URIs
+  --app NAME         which client to ensure: opencloud (default), portal,
+                     notes, synapse, ticketing or sogo — selects the redirect URIs
                      and the .env keys the Zitadel-issued credentials are
                      persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
@@ -118,7 +119,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run)  DRY_RUN=true; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|notes|synapse|ticketing|sogo)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -173,6 +174,21 @@ IDP_HOST="$(printf '%s' "$IDP_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
 # registered for BOTH protocol faces (Traefik terminates TLS at :443 and
 # redirects http :80 -> https).
 case "$APP_KIND" in
+  portal)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-portal"
+    CLIENT_ID_KEY="PORTAL_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="PORTAL_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
+    # The portal's Rust OIDC RP lives behind the Next.js proxy: authorize
+    # redirects to /api/auth/callback and the SLO callback is /logged-out
+    # (both under the portal's own domain, PORTAL_DOMAIN).
+    app_domain="$(env_get PORTAL_DOMAIN "home.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get PORTAL_OIDC_CLIENT_ID opensme-portal)"
+    base_paths=("/api/auth/callback")
+    POST_LOGOUT_OVERRIDE=("https://${app_domain}/logged-out")
+    ;;
   opencloud)
     APP_PROJECT="opencloud"
     APP_NAME="opencloud"
@@ -254,7 +270,13 @@ POST_LOGOUT=()
 for p in "${base_paths[@]}"; do
   REDIRECTS+=("https://${app_domain}${p}" "http://${app_domain}${p}")
 done
-POST_LOGOUT=("${REDIRECTS[@]}")
+# Some apps need distinct SLO URIs (portal's /logged-out). Absolute-URI
+# overrides replace the derived list entirely.
+if [[ -n "${POST_LOGOUT_OVERRIDE:-}" ]]; then
+  POST_LOGOUT=("${POST_LOGOUT_OVERRIDE[@]}")
+else
+  POST_LOGOUT=("${REDIRECTS[@]}")
+fi
 
 # ── secret placeholder handling (never write a fixed default) ───────────────
 SECRET_CANDIDATE="$(env_get "$CLIENT_SECRET_KEY" "$( [[ -n "$SECRET_ALIAS_KEY" ]] && env_get "$SECRET_ALIAS_KEY" || printf '' )")"

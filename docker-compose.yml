@@ -440,6 +440,12 @@ services:
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
       AI_API_URL: ${AI_API_URL:-}
       POLLS_ENABLED: ${POLLS_ENABLED:-}
+      # Portal sign-in for the authenticated surfaces (intercom/polls):
+      # HMAC session key + the OIDC RP client registered by
+      # scripts/zitadel-client.sh --app portal (rotation path: demo/demo-live).
+      LOGIN_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:-}
+      PORTAL_OIDC_CLIENT_ID: ${PORTAL_OIDC_CLIENT_ID:-}
+      PORTAL_OIDC_CLIENT_SECRET: ${PORTAL_OIDC_CLIENT_SECRET:-}
     depends_on:
       portal:
         condition: service_healthy

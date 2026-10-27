@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { humanSize, markVoted, votedSet } from "@/lib/format";
+import LoginRequired from "@/components/LoginRequired";
 import type { Poll } from "@/lib/types";
 
 /**
@@ -16,11 +17,16 @@ export default function PollsPanel() {
   const [options, setOptions] = useState("");
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/polls", { cache: "no-store" });
+      if (res.status === 401) {
+        setAuthRequired(true);
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
       setPolls((await res.json()).polls as Poll[]);
     } catch {
@@ -33,6 +39,15 @@ export default function PollsPanel() {
   }, [refresh]);
 
   // Only render anything once we know the feature exists server-side.
+  if (polls === null && authRequired) {
+    return (
+      <section className="tab-panel" aria-label="Umfragen">
+        <h2 className="mb-3 text-lg font-bold">Umfragen</h2>
+        <LoginRequired label="Umfragen sind angemeldeten Nutzer:innen vorbehalten" />
+      </section>
+    );
+  }
+
   if (polls === null) {
     return (
       <section className="tab-panel" aria-label="Umfragen">
@@ -50,6 +65,7 @@ export default function PollsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ option }),
       });
+      if (res.status === 401) setAuthRequired(true);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       markVoted(poll.id);
       await refresh();
@@ -82,6 +98,7 @@ export default function PollsPanel() {
           headers: { "Content-Type": file.type || "application/octet-stream" },
           body: file,
         });
+        if (res.status === 401) setAuthRequired(true);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } else {
         const res = await fetch("/api/polls", {
@@ -93,6 +110,7 @@ export default function PollsPanel() {
             attachment_url: attachmentUrl || "",
           }),
         });
+        if (res.status === 401) setAuthRequired(true);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       }
       setQuestion("");

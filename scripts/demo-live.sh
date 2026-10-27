@@ -136,6 +136,11 @@ TRAEFIK_ACME_EMAIL=${ACME_EMAIL}
 TRAEFIK_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory
 TRAEFIK_USERS=${TRAEFIK_HASH_ESC}
 
+# ── Portal sessions (intercom/polls auth) ──
+LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
+PORTAL_OIDC_CLIENT_ID=opensme-portal   # replaced by zitadel-client.sh --app portal
+PORTAL_OIDC_CLIENT_SECRET=CHANGEME_portal_client
+
 # ── Logging ──
 LOG_LEVEL=info
 LOG_PRETTY=true

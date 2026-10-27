@@ -74,6 +74,16 @@ pub async fn handle_logout(State(config): State<Arc<AppConfig>>, headers: Header
             SET_COOKIE,
             format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0"),
         )
+        // The portal's own authenticated surfaces (intercom/polls) run on a
+        // separate signed cookie — clear it too or a logged-out human stays
+        // signed in at the portal for up to SESSION_TTL.
+        .header(
+            SET_COOKIE,
+            format!(
+                "{}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0",
+                crate::session::PORTAL_SESSION_COOKIE
+            ),
+        )
         .body(axum::body::Body::empty())
         .expect("static logout response is always valid")
 }
@@ -215,6 +225,17 @@ mod tests {
         let set_cookie = res.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
         assert!(set_cookie.starts_with("OPENSMESESSION=;"));
         assert!(set_cookie.contains("Max-Age=0"));
+        // the portal's own authenticated-surface cookie is cleared too
+        let cookies: Vec<&str> = res
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert!(cookies
+            .iter()
+            .any(|c| c.starts_with("OPENSMEMEPORTALSESSION=;")
+                || c.starts_with("OPENSMEPORTALSESSION=;")));
     }
 
     #[test]

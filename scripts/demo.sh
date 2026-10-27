@@ -296,6 +296,14 @@ if [[ "$IDP_READY" == "yes" ]]; then
   if ! "${SCRIPT_DIR}/zitadel-client.sh" --app sogo; then
     warn "SOGo OIDC client registration failed — webmail SSO stays unwired"
   fi
+  info "Registering the portal OIDC client in Zitadel (idempotent)..."
+  # Signs in users on the portal so intercom/polls only work for them: the
+  # callback URI must exist before humans click Anmelden, and the minted
+  # client secret is written into .env (PORTAL_OIDC_CLIENT_ID/SECRET), which
+  # the portal container reads via the compose env.
+  if ! "${SCRIPT_DIR}/zitadel-client.sh" --app portal; then
+    warn "Portal OIDC client registration failed — intercom/polls stay login-gated"
+  fi
 else
   warn "Zitadel did not become healthy — skipping OIDC client registration"
   warn "(web login against the IdP would fail; the e2e suite degrades to a warning)"

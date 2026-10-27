@@ -383,6 +383,76 @@ def terminate(session, idp_base, lc_pat, client_uid, sid, stok):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Portal login (intercom/polls are authenticated surfaces)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
+    """Drive the portal's real OIDC login so `session` carries OPENSMESESSION.
+
+    The intercom/polls endpoints only answer signed-in users (the Rust
+    middleware rejects everything else with 401 — the wall this program
+    proves). The portal mints an OAuth `state` and binds it in an HttpOnly
+    cookie; the whole round trip must go through the real /api/auth/login →
+    IdP (v2 sessions + password + finalize) → /api/auth/callback chain,
+    which lands the OPENSMESESSION cookie back in the requests session.
+
+    Falls back to the demo stack's .env configuration for the IdP
+    credentials unless overrides are passed via env. Returns True on
+    success. On failure the session is left unauthenticated so callers can
+    report it instead of silently proceeding.
+    """
+    dotenv = load_env_file()
+
+    def cfg(key, default=""):
+        return os.environ.get(key) or dotenv.get(key) or default
+
+    if client_id is None:
+        client_id = cfg("PORTAL_OIDC_CLIENT_ID", "opensme-portal")
+    login_name = cfg("E2E_ZITADEL_LOGIN_NAME", "zitadel-admin")
+    pw = cfg("ZITADEL_ADMIN_PASSWORD")
+    lc_pat = cfg("E2E_ZITADEL_LOGINCLIENT_PAT")
+    if not (pw and lc_pat):
+        return False
+    pat = cfg("E2E_ZITADEL_PAT") or fetch_seeded("/machinekey/pat")
+    if not pat:
+        return False
+    if disc is None:
+        try:
+            disc = session.get(
+                f"{idp_base}/.well-known/openid-configuration", timeout=T
+            ).json()
+        except requests.RequestException:
+            return False
+    client_uid = resolve_user_id(session, idp_base, lc_pat, login_name)
+    if not client_uid:
+        return False
+
+    # 1) start the flow — capture the authorize Location + state cookie
+    try:
+        r = session.get(
+            portal_base + "/api/auth/login", allow_redirects=False, timeout=T
+        )
+        if r.status_code not in REDIRECTS or "Location" not in r.headers:
+            return False
+        authz_url = r.headers["Location"]
+        if client_id and client_id not in authz_url:
+            # safety: the authorize URL must target the portal's own client
+            return False
+        # 2) IdP leg: v2 session + password check + finalize
+        qs, _session = api_login(
+            session, idp_base, lc_pat, client_uid, authz_url, client_uid, pw
+        )
+        # 3) callback with the portal's own state → OPENSMESESSION cookie
+        cb = f"{portal_base}/api/auth/callback?{urlencode(qs)}"
+        r = session.get(cb, allow_redirects=False, timeout=T)
+        if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMESESSION"):
+            return False
+        return True
+    except (E2EError, KeyError, requests.RequestException):
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Sections
 # ─────────────────────────────────────────────────────────────────────────────
 

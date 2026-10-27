@@ -31,6 +31,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import Result, ensure_portal_routed
 
+# Intercom is an authenticated surface: reuse run.py's real OIDC login so
+# every writer carries a valid OPENSMESESSION cookie (run.py lives in the
+# same directory as this script).
+from run import portal_login
+
 import requests
 
 T = 15
@@ -76,12 +81,17 @@ def main() -> int:
         return 0
 
     portal = f"https://portal.{args.domain}"
+    idp_base = f"https://auth.{args.domain}"
     session = requests.Session()
     session.verify = False
     session.trust_env = False
     if not ensure_portal_routed(session, portal):
         result.fail("portal unreachable via traefik even after resync")
         return 1
+    if not portal_login(session, portal, idp_base):
+        result.fail("portal login failed — concurrent intercom writes need a session")
+        return 1
+    portal_cookie = session.cookies.get("OPENSMESESSION")
 
     payloads = [MARK.format(i=i) for i in range(N_WRITERS)]
 
@@ -89,6 +99,7 @@ def main() -> int:
         s = requests.Session()
         s.verify = False
         s.trust_env = False
+        s.cookies.set("OPENSMESESSION", portal_cookie)
         try:
             return s.post(portal + "/api/intercom",
                           json={"text": payloads[i]}, timeout=T).status_code
@@ -102,6 +113,7 @@ def main() -> int:
         s = requests.Session()
         s.verify = False
         s.trust_env = False
+        s.cookies.set("OPENSMESESSION", portal_cookie)
         try:
             r = s.get(portal + "/api/intercom", timeout=T)
             try:

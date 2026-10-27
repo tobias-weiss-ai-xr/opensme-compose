@@ -3,12 +3,24 @@ import IntercomPanel from "./IntercomPanel";
 import { fetchIntercom, postIntercom, postIntercomUpload } from "@/lib/api";
 import type { IntercomListResponse } from "@/lib/types";
 
+const { MockAuthError } = vi.hoisted(() => ({
+  MockAuthError: class MockAuthError extends Error {
+    status = 401;
+    constructor(m = "Anmeldung erforderlich") {
+      super(m);
+      this.name = "AuthError";
+    }
+  },
+}));
+
 vi.mock("@/lib/api", () => ({
   fetchIntercom: vi.fn(),
   postIntercom: vi.fn(),
   postIntercomUpload: vi.fn(),
+  AuthError: MockAuthError,
 }));
 
+const AuthError = MockAuthError;
 const mockedFetch = vi.mocked(fetchIntercom);
 const mockedPost = vi.mocked(postIntercom);
 const mockedUpload = vi.mocked(postIntercomUpload);
@@ -35,6 +47,20 @@ describe("IntercomPanel", () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("region", { name: "Notizen" })).toBeInTheDocument();
     expect(screen.getByRole("list")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("renders login CTA when the backend answers 401 (session required)", async () => {
+    mockedFetch.mockRejectedValue(new AuthError());
+    render(<IntercomPanel />);
+    expect(
+      await screen.findByText(
+        "Team-Notizen sind angemeldeten Nutzer:innen vorbehalten",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Anmelden/ }),
+    ).toHaveAttribute("href", "/api/auth/login");
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
   it("renders message text plus attachment link with humanSize suffix and content type", async () => {

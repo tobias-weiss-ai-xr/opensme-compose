@@ -36,6 +36,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import Result, ensure_portal_routed
 
+# Intercom is an authenticated surface: reuse run.py's real OIDC login so
+# the post-recreate content check carries a valid OPENSMESESSION cookie.
+from run import portal_login
+
 import requests
 
 T = 8
@@ -137,6 +141,7 @@ def main() -> int:
         return 0
 
     portal = f"https://portal.{args.domain}"
+    idp_base = f"https://auth.{args.domain}"
     session = requests.Session()
     session.verify = False
     session.trust_env = False
@@ -222,6 +227,11 @@ def main() -> int:
 
         # ── AD3: content still there ────────────────────────────────────
         health = session.get(portal + "/health", timeout=T)
+        # the intercom surface requires authentication; make sure the
+        # post-recreate check runs as a signed-in user, not anonymously
+        if not portal_login(session, portal, idp_base):
+            result.fail("portal login failed after recreate — cannot verify intercom")
+            return 1
         listed = session.get(portal + "/api/intercom", timeout=T)
         ad3 = health.status_code == 200 and listed.status_code == 200
         (result.ok if ad3 else result.fail)(

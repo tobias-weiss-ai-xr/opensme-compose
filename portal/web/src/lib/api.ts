@@ -17,13 +17,30 @@ export const API_BASE =
     ? (process.env.BACKEND_URL || "http://localhost:8080")
     : "";
 
+/**
+ * Raised when the Rust backend answers 401 — the surface (intercom/polls)
+ * is only available to signed-in users. Callers show the login CTA.
+ */
+export class AuthError extends Error {
+  status = 401;
+  constructor(message = "Anmeldung erforderlich") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+async function jsonOrAuthError<T>(res: Response, path: string): Promise<T> {
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
+  return res.json() as Promise<T>;
+}
+
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     ...init,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
-  return res.json() as Promise<T>;
+  return jsonOrAuthError<T>(res, path);
 }
 
 export function fetchServices(): Promise<{ services: import("./types").Service[] }> {
@@ -53,6 +70,7 @@ export async function postIntercom(payload: IntercomPayload): Promise<IntercomMe
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  if (res.status === 401) throw new AuthError();
   if (!res.ok) {
     let error = `HTTP ${res.status}`;
     try {
@@ -76,6 +94,7 @@ export async function postIntercomUpload(
     headers: { "Content-Type": file.type || "application/octet-stream" },
     body: file,
   });
+  if (res.status === 401) throw new AuthError();
   if (!res.ok) {
     let error = `HTTP ${res.status}`;
     try {

@@ -54,6 +54,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result, ensure_portal_routed
 from cloud_mock_support import CLOUD_NAME, CLOUD_PORT, start_cloud_standin, stop_cloud_standin
+# The portal's intercom/polls are authenticated surfaces: reuse run.py's
+# real OIDC login helper so this journey carries an OPENSMESESSION cookie.
+from run import E2EError, fetch_seeded, load_env_file, portal_login  # noqa: E402  (after T/helpers)
 
 import requests
 
@@ -131,6 +134,7 @@ def main() -> int:
         return 0
 
     portal = f"https://portal.{args.domain}"
+    idp_base = f"https://auth.{args.domain}"
     session = requests.Session()
     session.verify = False
     session.trust_env = False
@@ -142,6 +146,26 @@ def main() -> int:
         # after earlier journeys' fast recreates — heal before judging
         if not ensure_portal_routed(session, portal):
             result.fail("portal unreachable via traefik even after resync")
+            return 1
+
+        # T0: intercom is an AUTHENTICATED surface — an anonymous visitor
+        # must be walled out (401) before any credentials are minted. This
+        # proves the login gate itself, not just the happy path.
+        anon = session.get(portal + "/api/intercom", timeout=T)
+        anon_post = session.post(portal + "/api/intercom",
+                                 json={"text": "must not land"}, timeout=T)
+        (result.ok if anon.status_code == 401 and anon_post.status_code == 401 else result.fail)(
+            "anonymous intercom GET/POST walled out with 401"
+            if anon.status_code == 401 and anon_post.status_code == 401
+            else f"intercom not gated: GET={anon.status_code} POST={anon_post.status_code}"
+        )
+
+        # then sign in for real, so every subsequent assertion exercises
+        # the authenticated path (API + page rendering)
+        if portal_login(session, portal, idp_base):
+            result.ok("portal OIDC login minted an OPENSMESESSION cookie")
+        else:
+            result.fail("portal login failed — cannot exercise the authenticated intercom surface")
             return 1
 
         # T1: the card is always there

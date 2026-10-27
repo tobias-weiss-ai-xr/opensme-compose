@@ -20,6 +20,7 @@ mod intercom;
 mod logout;
 mod metrics;
 mod polls;
+mod session;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -45,6 +46,7 @@ struct AppConfig {
     intercom_client: reqwest::Client,
     polls: Option<Arc<polls::PollStore>>,
     feed_fetcher: Arc<feeds::FeedFetcher>,
+    session: session::SessionConfig,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -936,22 +938,29 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/services", get(handle_services))
         .route("/api/announcements", get(handle_announcements))
         .route("/api/feeds", get(handle_feeds))
+        .route("/api/auth/login", get(session::handle_login))
+        .route("/api/auth/callback", get(session::handle_callback))
+        .route("/api/logout", post(logout::handle_logout))
+        .route("/logged-out", get(logout::handle_logged_out));
+
+    // Authenticated surfaces: intercom + polls (+ their upload/file routes)
+    // sit behind the signed-session firewall. The public landing page, feeds
+    // and service tiles stay anonymous.
+    let mut protected = Router::new()
         .route("/api/intercom", get(handle_intercom_list))
         .route("/api/intercom", post(handle_intercom_post))
         .route("/api/intercom/upload", post(handle_intercom_upload))
         .route(
             "/api/intercom/files/:token/:name",
             get(handle_intercom_file),
-        )
-        .route("/api/logout", post(logout::handle_logout))
-        .route("/logged-out", get(logout::handle_logged_out));
+        );
 
     if config.ai.is_some() {
         router = router.route("/api/ai/chat", post(handle_ai_chat));
     }
 
     if config.polls.is_some() {
-        router = router
+        protected = protected
             .route("/api/polls", get(handle_polls_list))
             .route("/api/polls", post(handle_polls_create))
             .route("/api/polls/upload", post(handle_polls_upload))
@@ -959,7 +968,15 @@ fn build_router(config: Arc<AppConfig>) -> Router {
             .route("/api/files/:token/:name", get(handle_polls_file));
     }
 
+    // The session firewall is scoped to the protected sub-router only —
+    // every other route on the portal stays public.
+    protected = protected.route_layer(middleware::from_fn_with_state(
+        config.clone(),
+        session::require_session,
+    ));
+
     router
+        .merge(protected)
         .route("/metrics", get(handle_metrics))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(track_metrics))
@@ -1477,6 +1494,7 @@ fn load_config() -> Arc<AppConfig> {
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
         polls: polls_store_from_env(),
+        session: session::SessionConfig::from_env(),
         intercom_client: {
             let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
             // Egress-restricted hosts reach the cloud (attachment metadata
@@ -1509,6 +1527,9 @@ async fn main() {
     init_logging();
 
     let config = load_config();
+    // Loud early warning when the interactive surfaces are fail-closed
+    // because the session secret is missing or still a CHANGEME placeholder.
+    config.session.warn_if_closed();
 
     info!(
         portal_domain = %config.portal_domain,
@@ -1578,6 +1599,14 @@ mod tests {
             polls: None,
             intercom_client: reqwest::Client::new(),
             feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(""))),
+            session: session::SessionConfig {
+                idp_url: "https://auth.example".into(),
+                portal_domain: "portal.example".into(),
+                client_id: "opensme-portal".into(),
+                client_secret: "client-secret".into(),
+                session_secret: b"0123456789abcdef0123456789abcdef".to_vec(),
+                http: reqwest::Client::new(),
+            },
         }
     }
 
@@ -1941,8 +1970,17 @@ mod tests {
         uri: &str,
         json: Option<serde_json::Value>,
     ) -> axum::http::Response<Body> {
+        // Intercom/polls live behind the signed-session firewall; the tests
+        // act as an authenticated user with a freshly minted session cookie.
+        let cookie = session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
         let router = build_router(Arc::new(cfg));
-        let builder = axum::http::Request::builder().method(method).uri(uri);
+        let builder = axum::http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(
+                "cookie",
+                format!("{}={cookie}", session::PORTAL_SESSION_COOKIE),
+            );
         let request = match json {
             Some(v) => builder
                 .header("content-type", "application/json")

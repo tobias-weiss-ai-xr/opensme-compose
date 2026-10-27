@@ -50,6 +50,18 @@ describe("PollsPanel", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/polls", { cache: "no-store" });
   });
 
+  it("renders the login CTA when the backend answers 401 (session required)", async () => {
+    fetchMock.mockResolvedValue(res(false, { error: "session required" }, 401));
+    render(<PollsPanel />);
+    expect(
+      await screen.findByText("Umfragen sind angemeldeten Nutzer:innen vorbehalten"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Anmelden/ }),
+    ).toHaveAttribute("href", "/api/auth/login");
+    expect(screen.queryByText("Umfragen werden geladen…")).not.toBeInTheDocument();
+  });
+
   it("renders the empty placeholder for an empty list", async () => {
     fetchMock.mockResolvedValue(res(true, pollList([])));
     render(<PollsPanel />);

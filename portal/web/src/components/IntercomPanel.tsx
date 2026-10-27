@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { humanSize } from "@/lib/format";
-import { fetchIntercom, postIntercom, postIntercomUpload } from "@/lib/api";
+import {
+  AuthError,
+  fetchIntercom,
+  postIntercom,
+  postIntercomUpload,
+} from "@/lib/api";
+import LoginRequired from "@/components/LoginRequired";
 import type { IntercomMessage } from "@/lib/types";
 
 /**
@@ -17,13 +23,15 @@ export default function IntercomPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
       const data = await fetchIntercom();
       setMessages(data.messages);
-    } catch {
+    } catch (err) {
+      if (err instanceof AuthError) setAuthRequired(true);
       /* keep last known list */
     }
   }, []);
@@ -62,9 +70,19 @@ export default function IntercomPanel() {
       await refresh();
     } catch (err) {
       setOut(`Not sent: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof AuthError) setAuthRequired(true);
     } finally {
       setBusy(false);
     }
+  }
+
+  if (authRequired) {
+    return (
+      <section className="tab-panel" aria-label="Notizen">
+        <h2 className="mb-3 text-lg font-bold">Notizen</h2>
+        <LoginRequired label="Team-Notizen sind angemeldeten Nutzer:innen vorbehalten" />
+      </section>
+    );
   }
 
   return (

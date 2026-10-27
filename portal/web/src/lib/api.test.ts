@@ -109,6 +109,14 @@ describe("fetchIntercom", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/intercom", expect.anything());
     expect(result.messages).toEqual(messages);
   });
+
+  it("maps a 401 to AuthError (anonymous visitors get no message list)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: "session required" }, 401)),
+    );
+    await expect(fetchIntercom()).rejects.toMatchObject({ status: 401, name: "AuthError" });
+  });
 });
 
 describe("postIntercom", () => {
@@ -140,6 +148,17 @@ describe("postIntercom", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("plain", { status: 502 })));
 
     await expect(postIntercom({ text: "x" })).rejects.toThrow("HTTP 502");
+  });
+
+  it("maps a 401 to AuthError (intercom requires a signed-in session)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: "session required" }, 401)),
+    );
+    await expect(postIntercom({ text: "x" })).rejects.toMatchObject({
+      status: 401,
+      name: "AuthError",
+    });
   });
 });
 
@@ -174,6 +193,7 @@ describe("postIntercomUpload", () => {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body: file,
+
     });
   });
 

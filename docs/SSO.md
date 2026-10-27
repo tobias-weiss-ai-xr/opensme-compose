@@ -81,7 +81,7 @@ Stand: **2026-10-26, live verifiziert auf opensme.graphwiz.ai**.
 | Invoice (Invoice-Ninja) | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
 | Operaton (Camunda-Nachfolger) | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
 | Surveys (LimeSurvey) | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
-| Portal | — (braucht keinen eigenen) | ✅ SSO aktiv | Portal-Session-Cookie (`OPENSMESESSION`) trägt das OIDC-ID-Token der IdP-Session; Logout = RP-initiated Logout an den IdP (Single Sign-Out). Verifiziert via `tests/05-e2e/logout.py` + `session_lifecycle.py`. |
+| Portal | `opensme-portal` (`PORTAL_OIDC_CLIENT_ID`) | ✅ SSO aktiv | Das Portal ist seit dem Auth-Gate ein richtiger OIDC-RP: Authorize-Code-Flow hinter `/api/auth/login` + `/api/auth/callback` (Redirection gegen `PORTAL_DOMAIN`), `/userinfo`-Bestätigung, dann eine **eigene stateless HMAC-Session** in `OPENSMEPORTALSESSION` (getrennt vom IdP-Token-Cookie `OPENSMESESSION`, das die RP-initiated-Logout-Hint trägt). **Intercom + Umfragen antworten nur mit gültiger Portal-Session (sonst 401, fail-closed bei fehlendem/`CHANGEME_`-Secret).** Client registriert via `scripts/zitadel-client.sh --app portal`; SLO-URI `/logged-out` ist registriert. Verifiziert via Rust-/Vitest-Tests (unitaire + Mock-IdP-Flow); Live-Journeys (`intercom.py`, `concurrent_writers.py`, `rolling_recreate.py`) fahren den echten Login und prüfen zuerst, dass anonyme Zugriffe 401 sind. |
 
 ## Zitadel-Login-UI (Browser-Login)
 

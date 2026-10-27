@@ -16,6 +16,13 @@ feed-rs = "3.0.0"
 futures = "0.3.34"
 # Prometheus instrumentation (text exposition only — no protobuf/push)
 prometheus = { version = "0.14", default-features = false }
+# Session cookies for the authenticated surfaces (intercom/polls):
+# stateless HMAC-SHA256 (no JWT crypto, no JWKS in the portal), URL-safe
+# base64 payload, OS-random OAuth state.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
 
 [dev-dependencies]
 # SOTA test methods:
