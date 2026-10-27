@@ -470,6 +470,9 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
                 f"pre_cb={'yes' if pre_cb else 'no'}, "
                 f"post_login_val={(post_login or '')[:6]!r}, "
                 f"echo_val={(echoed or '')[:6]!r}, "
+                f"len_cookie={len(pre_cb) if pre_cb else 0}, "
+                f"len_echo={len(echoed) if echoed else 0}, "
+                f"sent_cookie={r.request.headers.get('Cookie', '')!r}",
                 f"sc_raw={raw_sc!r}"
             )
             return False
