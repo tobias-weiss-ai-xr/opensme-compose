@@ -141,6 +141,15 @@ COLLABORA_PASSWORD=$(pw)
 NOSDESK_DB_PASSWORD=$(pw)
 NOSDESK_JWT_SECRET=$(pw)
 NOSDESK_MFA_KEK=$(openssl rand -hex 32)
+# Secondary per-service DB passwords (hex: embedded in postgres:// URLs).
+# Populating them here keeps the postgres container free of the
+# ${VAR:-CHANGEME_*} compose fallbacks that the hygiene journey flags.
+CASDOOR_DB_PASSWORD=$(openssl rand -hex 24)
+SYNAPSE_DB_PASSWORD=$(openssl rand -hex 24)
+PAPERLESS_DB_PASSWORD=$(openssl rand -hex 24)
+INVOICENINJA_DB_PASSWORD=$(openssl rand -hex 24)
+NOTES_DB_PASSWORD=$(openssl rand -hex 24)
+CAMUNDA_DB_PASSWORD=$(openssl rand -hex 24)
 
 # Zitadel login v2 UI session-cookie signer (>= 32 chars enforced upstream)
 LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
@@ -170,6 +179,16 @@ if ! grep -q '^NOSDESK_DB_PASSWORD=' .env; then
   printf 'NOSDESK_DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
   ok "Appended NOSDESK_DB_PASSWORD to existing .env (new required var)"
 fi
+# Secondary per-service DB passwords (hex, embedded in postgres:// URLs).
+# Filling them on upgrade keeps the postgres container free of the
+# ${VAR:-CHANGEME_*} compose fallbacks the hygiene journey flags.
+for _dbvar in CASDOOR_DB_PASSWORD SYNAPSE_DB_PASSWORD PAPERLESS_DB_PASSWORD \
+              INVOICENINJA_DB_PASSWORD NOTES_DB_PASSWORD CAMUNDA_DB_PASSWORD; do
+  if ! grep -q "^${_dbvar}=" .env; then
+    printf '%s=%s\n' "$_dbvar" "$(openssl rand -hex 24)" >> .env
+    ok "Appended ${_dbvar} to existing .env (new required var)"
+  fi
+done
 if ! grep -q '^NOSDESK_JWT_SECRET=' .env; then
   printf 'NOSDESK_JWT_SECRET=%s\n' "$(pw)" >> .env
   ok "Appended NOSDESK_JWT_SECRET to existing .env (new required var)"
