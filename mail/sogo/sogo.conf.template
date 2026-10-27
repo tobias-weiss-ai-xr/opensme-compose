@@ -91,9 +91,9 @@
   SOGoAuthenticationType = openid;
   SOGoXSRFValidationEnabled = NO;
   OCSOpenIdURL = "postgresql://sogo_user:${SOGO_DB_PASSWORD}@postgres:5432/sogo/sogo_openid";
-  # OIDC discovery URL: defaults to the Traefik-fronted https URL.
-  # Override ZITADEL_OIDC_URL in .env to reach Zitadel directly when
-  # Traefik is unavailable (e.g. port conflict with sogo6-nginx).
+  // OIDC discovery URL: defaults to the Traefik-fronted https URL.
+  // Override ZITADEL_OIDC_URL in .env to reach Zitadel directly when
+  // Traefik is unavailable (e.g. port conflict with sogo6-nginx).
   SOGoOpenIdConfigUrl = "${ZITADEL_OIDC_URL}";
   SOGoOpenIdClient = "${SOGO_OIDC_CLIENT_ID}";
   SOGoOpenIdClientSecret = "${SOGO_OIDC_CLIENT_SECRET}";
