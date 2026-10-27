@@ -6,9 +6,10 @@
 # prints the public URL. Uploaded files are mirrored to OpenCloud by the
 # limesurvey-cloud-sync sidecar (services/limesurvey.yml, profile surveys).
 #
-# Usage:
+# usage:
 #   ./bootstrap/survey-deploy.sh                     # via docker exec
 #   SURVEYS_URL=https://surveys.example.org ./bootstrap/survey-deploy.sh
+#   ./bootstrap/survey-deploy.sh --delete            # remove the example survey
 #
 # Requires the opensme-postgres container (or set PG_CONTAINER/PG_USER).
 # Provisioning runs at the database level, mirroring LimeSurvey's own
@@ -16,6 +17,19 @@
 set -euo pipefail
 
 TITLE="Beispiel: Datei-Upload (openSME)"
+
+DELETE_SURVEY=false
+for arg in "$@"; do
+  case "$arg" in
+    --delete)  DELETE_SURVEY=true ;;
+    --help|-h)
+      echo "Usage: $0 [--delete]" >&2
+      echo "  (default) provision the example survey idempotently" >&2
+      echo "  --delete  remove the example survey + response table" >&2
+      exit 0 ;;
+    *) echo "error: unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 # ── Resolve containers ────────────────────────────
 PG_CONTAINER="${PG_CONTAINER:-opensme-postgres}"
@@ -34,8 +48,28 @@ psql() {
 # ── Idempotency: does the example survey already exist? ──
 SID="$(psql -tAc "SELECT surveyls_survey_id FROM lime_surveys_languagesettings WHERE surveyls_title = '$TITLE' LIMIT 1" | tr -d '[:space:]')"
 if [ -n "$SID" ]; then
+  if [ "$DELETE_SURVEY" = true ]; then
+    psql -1 -v ON_ERROR_STOP=1 <<SQL
+DROP TABLE IF EXISTS lime_survey_${SID};
+DELETE FROM lime_answers WHERE sid = $SID;
+DELETE FROM lime_question_attributes WHERE qid IN (SELECT qid FROM lime_questions WHERE sid = $SID);
+DELETE FROM lime_question_l10ns WHERE qid IN (SELECT qid FROM lime_questions WHERE sid = $SID);
+DELETE FROM lime_questions WHERE sid = $SID;
+DELETE FROM lime_group_l10ns WHERE gid IN (SELECT gid FROM lime_groups WHERE sid = $SID);
+DELETE FROM lime_groups WHERE sid = $SID;
+DELETE FROM lime_tokens WHERE sid = $SID;
+DELETE FROM lime_surveys_languagesettings WHERE surveyls_survey_id = $SID;
+DELETE FROM lime_surveys WHERE sid = $SID;
+SQL
+    echo "✓ example survey removed (sid=$SID)"
+    exit 0
+  fi
   echo "✓ example survey already exists (sid=$SID) — nothing to do"
 else
+  if [ "$DELETE_SURVEY" = true ]; then
+    echo "✓ example survey not present — nothing to delete"
+    exit 0
+  fi
   # LimeSurvey has no sid sequence (sids are generated app-side) — use
   # max+1 with a 6-digit floor, deterministic and collision-free
   SID="$(psql -tAc "SELECT GREATEST(100000, COALESCE((SELECT max(sid) FROM lime_surveys),99999)+1)" | tr -d '[:space:]')"

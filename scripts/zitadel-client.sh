@@ -75,6 +75,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 DRY_RUN=false
+MODE="register"
 IDP_URL_OVERRIDE=""
 APP_KIND="opencloud"
 LOCAL_SUFFIX_RE='(\.local|\.localhost|\.test|\.invalid)$'
@@ -88,11 +89,16 @@ instance. Idempotent — safe to run on every boot. Apps are registered
 with JWT access tokens (needed by the JWKS-validating backends like
 opencloud/ocis) and existing apps are re-enforced to JWT on every run.
 
+Modes:
+  (default)        register / verify the client (default)
+  --list           enumerate every registered client
+  --remove         delete the client selected by --app + scrub its .env keys
+
 Options:
-  --app NAME         which client to ensure: opencloud (default), portal,
-                     notes, synapse, ticketing or sogo — selects the redirect URIs
-                     and the .env keys the Zitadel-issued credentials are
-                     persisted under
+  --app NAME         which client to ensure/remove: opencloud (default),
+                     portal, notes, synapse, ticketing or sogo — selects the
+                     redirect URIs and the .env keys the Zitadel-issued
+                     credentials are persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -117,6 +123,8 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)  DRY_RUN=true; shift ;;
+    --list)     MODE=list; shift ;;
+    --remove)   MODE=remove; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
       [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo)"; exit 1; }
@@ -476,7 +484,68 @@ else
   exit 0
 fi
 
-# ── 2) idempotent lookup by persisted client id, then by app name ───────────
+# ── 2a) LIST / REMOVE modes ──────────────────────────────────────────────
+if [[ "$MODE" == "list" ]]; then
+  printf '%-46s %-22s %-14s %s\n' "CLIENT_ID" "APP_NAME" "PROJECT_ID" "APP_ID"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    apps_json="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev/null || true)"
+    [[ -n "$apps_json" ]] || continue
+    printf '%s\n' "$apps_json" | jq -r --arg p "$pid" \
+      '.result[]? | [.oidcConfig.clientId // "-", .name, $p, .id] | @tsv'
+  done <<< "$(printf '%s' "$projects_json" | jq -r '.result[]?.id' 2>/dev/null || true)"
+  exit 0
+fi
+
+if [[ "$MODE" == "remove" ]]; then
+  FOUND_PROJECT=""
+  FOUND_APP=""
+  FOUND_CLIENT_ID=""
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    apps_json="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev/null || true)"
+    [[ -n "$apps_json" ]] || continue
+    hit="$(printf '%s' "$apps_json" | jq -r --arg cid "$CLIENT_ID_LABEL" --arg name "$APP_NAME" \
+      '.result[]? | select((.oidcConfig.clientId // "") == $cid or .name == $name) | .id' 2>/dev/null | head -1)"
+    if [[ -n "$hit" ]]; then
+      FOUND_PROJECT="$pid"
+      FOUND_APP="$hit"
+      FOUND_CLIENT_ID="$(printf '%s' "$apps_json" | jq -r --arg id "$hit" '.result[]? | select(.id == $id) | .oidcConfig.clientId // empty' 2>/dev/null | head -1)"
+      break
+    fi
+  done <<< "$(printf '%s' "$projects_json" | jq -r '.result[]?.id' 2>/dev/null || true)"
+
+  if [[ -z "$FOUND_APP" ]]; then
+    ok "OIDC app '${APP_NAME}' is not registered — nothing to remove"
+    exit 0
+  fi
+  info "Removing OIDC app '${APP_NAME}' (client id '${FOUND_CLIENT_ID:-?}', project '${FOUND_PROJECT}')…"
+  if [[ "$DRY_RUN" == true ]]; then
+    ok "dry-run — would have deleted the app above"
+    exit 0
+  fi
+  api DELETE "/management/v1/projects/${FOUND_PROJECT}/apps/${FOUND_APP}" >/dev/null
+  if [[ "$(api_http)" != 2?? ]]; then
+    err "Removal failed (HTTP $(api_http))"
+    exit 1
+  fi
+  ok "OIDC app '${APP_NAME}' removed"
+  # scrub the persisted .env keys so a later provision re-registers cleanly
+  if [[ -f .env ]]; then
+    tmp_env="$(mktemp)"
+    grep -vE "^(${CLIENT_ID_KEY}|${CLIENT_SECRET_KEY})=" .env > "$tmp_env" || true
+    mv "$tmp_env" .env
+    if [[ -n "$SECRET_ALIAS_KEY" ]]; then
+      tmp_env2="$(mktemp)"
+      grep -vE "^${SECRET_ALIAS_KEY}=" .env > "$tmp_env2" || true
+      mv "$tmp_env2" .env
+    fi
+    ok "Removed ${CLIENT_ID_KEY}/${CLIENT_SECRET_KEY} from .env"
+  fi
+  exit 0
+fi
+
+# ── 2b) idempotent lookup by persisted client id, then by app name ────────
 FOUND_PROJECT=""
 FOUND_APP=""
 FOUND_CLIENT_ID=""

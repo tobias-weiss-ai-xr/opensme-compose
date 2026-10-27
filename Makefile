@@ -26,7 +26,8 @@
 .PHONY: test test-all test-static lint compose-check env-check secret-scan \
         specs contracts yaml-lint \
         container smoke integration e2e saga security \
-        bootstrap bpm-deploy clean help \
+        bootstrap bootstrap-all provision deprovision \
+        bpm-deploy bpm-undeploy survey-deploy survey-delete survey-up clean help \
         up down status logs pull upgrade \
         mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
         up-soho up-small up-medium up-all \
@@ -422,9 +423,37 @@ bpm-deploy:
 	@echo -e "$(BLUE)── deploying BPMN seed processes ──$(NC)"
 	@./bootstrap/bpmn-deploy.sh
 
+bpm-undeploy:
+	@./bootstrap/bpmn-deploy.sh --undeploy all
+
 survey-deploy:
 	@echo -e "$(BLUE)── provisioning example LimeSurvey survey ──$(NC)"
 	@./bootstrap/survey-deploy.sh
+
+survey-delete:
+	@./bootstrap/survey-deploy.sh --delete
+
+survey-up:
+	@echo -e "$(BLUE)── starting surveys overlay (not part of up-all) ──$(NC)"
+	@$(COMPOSE) --env-file $(TEST_ENV) -f docker-compose.yml -f services/limesurvey.yml --profile surveys up -d
+
+# ---------------------------------------------------------------------------
+# Lifecycle: bootstrap (all services + provision) / provision / deprovision
+# ---------------------------------------------------------------------------
+# bootstrap-all  greenfield bring-up of EVERY service then provision it
+#                (env -> up-all -> surveys overlay -> provision.sh)
+# provision      idempotently provision OIDC clients, demo users, mail rows,
+#                BPMN processes and the example survey
+# deprovision    reverse provision (survey, BPMN, users, OIDC clients);
+#                --data additionally destroys containers + volumes
+bootstrap-all:
+	@bash scripts/bootstrap.sh
+
+provision:
+	@bash scripts/provision.sh
+
+deprovision:
+	@bash scripts/deprovision.sh
 
 clean:
 	@rm -rf tests/05-e2e/test-results/ tests/05-e2e/playwright-report/
@@ -465,6 +494,10 @@ help:
 	@echo -e "  $(GREEN)Operations$(NC)"
 	@echo "    make up                  Start stack (PROFILE=soho|small|medium)"
 	@echo "    make up-all              Start with ALL optional services"
+	@echo "    make bootstrap-all       Greenfield: .env + ALL services + provision"
+	@echo "    make provision           Idempotently provision OIDC clients, demo"
+	@echo "                             users, mail rows, BPMN + example survey"
+	@echo "    make deprovision         Reverse provision (state; --data wipes volumes)"
 	@echo "    make down                Stop stack"
 	@echo "    make down-volumes        Stop + remove volumes (data loss!)"
 	@echo "    make status              Show container status"

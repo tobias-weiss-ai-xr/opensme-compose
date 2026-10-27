@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
-# bootstrap/bpmn-deploy.sh — deploy seed BPMN processes to the Operaton engine.
+# bootstrap/bpmn-deploy.sh — deploy (or undeploy) seed BPMN processes.
 #
 # Usage:
 #   ./bootstrap/bpmn-deploy.sh                    # auto-detect (docker exec or BPM_URL)
 #   BPM_URL=https://bpm.example.org ./bootstrap/bpmn-deploy.sh
+#   ./bootstrap/bpmn-deploy.sh --undeploy all     # remove every seed deployment
+#   ./bootstrap/bpmn-deploy.sh --undeploy invoice # remove matching deployments
 #
 # Deploys every .bpmn file in bootstrap/bpmn/ to the engine's REST API
 # (POST /engine-rest/deployment/create). Idempotent: re-running updates
-# existing deployments by name.
+# existing deployments by name. --undeploy removes the deployments tagged
+# deployment-source=opensme-bootstrap (cascade deletes instances).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BPMN_DIR="${SCRIPT_DIR}/bpmn"
+
+UNDEPLOY=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --undeploy)
+      UNDEPLOY="${2:-}"
+      [[ -n "$UNDEPLOY" ]] || { echo "error: --undeploy needs a key or 'all'" >&2; exit 1; }
+      shift 2 ;;
+    --help|-h)
+      echo "Usage: $0 [--undeploy all|<key>]" >&2
+      exit 0 ;;
+    *) echo "error: unknown option: $1" >&2; exit 1 ;;
+  esac
+done
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "error: curl is required" >&2
@@ -62,6 +79,55 @@ else
     fi
     sleep 2
   done
+fi
+
+# ── Undeploy mode ────────────────────────────────
+if [ -n "$UNDEPLOY" ]; then
+  echo "Undeploying seed BPMN deployments (source=opensme-bootstrap)…"
+  if [ "$USE_DOCKER_EXEC" = true ]; then
+    deployments_json="$(docker exec opensme-camunda curl -sf \
+      'http://localhost:8080/engine-rest/deployment?source=opensme-bootstrap' 2>/dev/null || echo '{"data":[]}')"
+  else
+    deployments_json="$(curl -sf "${BPM_URL}/engine-rest/deployment?source=opensme-bootstrap" 2>/dev/null || echo '{"data":[]}')"
+  fi
+
+  lines="$(printf '%s' "$deployments_json" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+data = d.get("data") or d.get("result") or []
+for dep in data:
+    print("%s\t%s" % (dep.get("id",""), dep.get("name","")))
+' 2>/dev/null || true)"
+
+  if [ -z "$lines" ]; then
+    echo "  no seed deployments found — nothing to undeploy"
+    exit 0
+  fi
+
+  removed=0
+  while IFS=$'\t' read -r id name; do
+    [ -n "$id" ] || continue
+    if [ "$UNDEPLOY" = "all" ] || [[ "$name" == *"$UNDEPLOY"* ]]; then
+      if [ "$USE_DOCKER_EXEC" = true ]; then
+        if docker exec opensme-camunda curl -sf -X DELETE \
+            "http://localhost:8080/engine-rest/deployment/${id}?cascade=true" >/dev/null 2>&1; then
+          echo "  removed ${name} (${id})"
+          removed=$((removed + 1))
+        fi
+      else
+        if curl -sf -X DELETE "${BPM_URL}/engine-rest/deployment/${id}?cascade=true" >/dev/null 2>&1; then
+          echo "  removed ${name} (${id})"
+          removed=$((removed + 1))
+        fi
+      fi
+    fi
+  done <<< "$lines"
+
+  echo "Undeployed ${removed} deployment(s)."
+  exit 0
 fi
 
 # ── Deploy each .bpmn file ─────────────────────────

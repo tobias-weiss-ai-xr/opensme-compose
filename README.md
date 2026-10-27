@@ -305,6 +305,48 @@ docker compose --profile notes up -d                        # Collaborative note
 docker compose --profile surveys up -d                      # LimeSurvey surveys
 ```
 
+### Bootstrap, provision &amp; deprovision (lifecycle tooling)
+
+The suite ships three orchestration entry points that bundle the piecemeal
+scripts (`init-env.sh`, `zitadel-client.sh`, `provision-demo-users.sh`,
+`bpmn-deploy.sh`, `survey-deploy.sh`) into one lifecycle:
+
+```bash
+# 1) GREENFIELD — bring up EVERY service, then provision everything:
+./scripts/bootstrap.sh          # env → make up-all → surveys overlay → provision.sh
+#    (or: make bootstrap-all   |   --force-env to regenerate .env)
+
+# 2) PROVISION — idempotent, safe to re-run on a running stack:
+./scripts/provision.sh                                   # all components
+./scripts/provision.sh --components oidc,users           # subset
+./scripts/provision.sh --skip-bpmn --skip-surveys        # minus some
+#    OIDC clients (opencloud/portal/notes/synapse/ticketing/sogo), demo users,
+#    mail rows, BPMN processes, example LimeSurvey — skips slices not running.
+#    (or: make provision)
+
+# 3) DEPROVISION — reverse the provisioning, in dependency order:
+./scripts/deprovision.sh                  # state only: survey, BPMN, users,
+#                                         #   OIDC clients + .env keys removed
+./scripts/deprovision.sh --data           # full teardown: + docker compose down -v
+#                                         #   (containers + ALL volumes destroyed,
+#                                         #    guarded by a confirmation)
+./scripts/deprovision.sh --dry-run        # print the plan, change nothing
+#    (or: make deprovision)
+```
+
+Individual removal primitives are also exposed directly:
+
+| Tool | Purpose |
+|------|---------|
+| `scripts/zitadel-client.sh --list` | enumerate every registered OIDC client |
+| `scripts/zitadel-client.sh --remove --app <name>` | delete one client + scrub its `.env` keys |
+| `bootstrap/bpmn-deploy.sh --undeploy all` | undeploy seed BPMN deployments (cascade) |
+| `bootstrap/survey-deploy.sh --delete` | delete the seeded example survey + response table |
+| `scripts/deprovision.sh --data` | everything above + `down -v` (full teardown) |
+
+`provision.sh` / `deprovision.sh` are inverse-idempotent: re-running either is
+safe, and each reports what it skipped and why (stack slice not running).
+
 ## Hardware Tiers
 
 All tiers run the **same Compose stack** — scale vertically, no config changes.

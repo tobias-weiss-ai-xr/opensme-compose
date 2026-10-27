@@ -28,6 +28,7 @@ Beyond the BPMN payloads it also validates the other bootstrap content:
 Usage: python3 tests/00-static/check_bootstrap.py
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -355,6 +356,41 @@ def check_demo_users(result: Result) -> None:
         result.ok("scripts/provision-demo-users.sh present and executable")
 
 
+def check_lifecycle_tooling(result: Result) -> None:
+    """The bootstrap→provision→deprovision lifecycle is part of the shipped
+    tooling: all three orchestrators must be present, executable, parse, and
+    answer --help; the Makefile must expose the corresponding targets so the
+    lifecycle is always discoverable."""
+    trio = {
+        "scripts/bootstrap.sh": "greenfield bring-up of ALL services + provision",
+        "scripts/provision.sh": "idempotent provisioning orchestrator",
+        "scripts/deprovision.sh": "reverses provision (and optionally wipes volumes)",
+    }
+    for rel, purpose in trio.items():
+        path = ROOT / rel
+        if not path.is_file():
+            result.fail(f"{rel} missing ({purpose})")
+            continue
+        if not path.stat().st_mode & 0o111:
+            result.fail(f"{rel} is not executable")
+            continue
+        run = subprocess.run(
+            ["bash", rel, "--help"], cwd=ROOT,
+            capture_output=True, text=True,
+        )
+        if run.returncode != 0:
+            result.fail(f"{rel} --help exit={run.returncode}: {run.stderr.strip()}")
+        else:
+            result.ok(f"{rel} present, executable, --help ok ({purpose})")
+
+    makefile = (ROOT / "Makefile").read_text()
+    for target in ("bootstrap-all", "provision", "deprovision"):
+        if not re.search(rf"^{target}:", makefile, re.M):
+            result.fail(f"Makefile missing '{target}' target")
+        else:
+            result.ok(f"Makefile provides 'make {target}'")
+
+
 def main() -> int:
     result = Result("bootstrap-seed-data")
     if not BPMN_DIR.is_dir():
@@ -370,6 +406,7 @@ def main() -> int:
     # seed-content + demo-users checks run regardless of bpmn/ state.
     check_seed_content(result)
     check_demo_users(result)
+    check_lifecycle_tooling(result)
     return 0 if result.summary() else 1
 
 
