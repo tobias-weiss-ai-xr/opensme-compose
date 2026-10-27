@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendUrl, forwardToBackend } from "@/lib/backend";
+import { getSetCookieList, parseSetCookie } from "@/lib/setcookie";
 
 /**
  * Same-origin proxy to the Rust axum API (runtime BACKEND_URL — dynamic
@@ -47,13 +48,23 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] 
       // matches the Rust portal's own timeout conventions; AI chat can be slow
       timeoutMs: 300_000,
     });
+    // Next's runtime does not reliably carry raw `set-cookie` headers from a
+    // constructed NextResponse (the logout/session contract depends on them:
+    // OPENSMESTATE, OPENSMESESSION and the Max-Age=0 clears). Re-apply each
+    // upstream cookie through the ResponseCookies API instead.
+    const upstreamCookies = result.headers.has("set-cookie")
+      ? getSetCookieList(result.headers)
+      : [];
+    result.headers.delete("set-cookie");
     if (req.method === "HEAD") {
       return new NextResponse(null, { status: result.status, headers: result.headers });
     }
-    return new NextResponse(Buffer.from(result.bytes), {
+    const res = new NextResponse(Buffer.from(result.bytes), {
       status: result.status,
       headers: result.headers,
     });
+    upstreamCookies.forEach((raw) => res.cookies.set(parseSetCookie(raw)));
+    return res;
   } catch {
     return NextResponse.json(
       { error: "portal backend unreachable" },
