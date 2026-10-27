@@ -48,6 +48,13 @@ const STATE_COOKIE: &str = "OPENSMESTATE";
 #[derive(Clone)]
 pub struct SessionConfig {
     pub idp_url: String,
+    /// Separate base for the portal's SERVER-SIDE OIDC calls (token +
+    /// userinfo). Demo/CI serve the IdP behind Traefik's self-signed cert,
+    /// which reqwest's TLS verification rejects; those stacks map this to
+    /// the IdP's plain-HTTP listener on the compose network
+    /// (e.g. http://zitadel:8080). Empty = fall back to `idp_url` (prod
+    /// keeps verifying the public endpoint).
+    pub idp_internal_url: String,
     pub portal_domain: String,
     pub client_id: String,
     pub client_secret: String,
@@ -63,6 +70,7 @@ impl SessionConfig {
     /// closed) while still allowing the public landing page to serve.
     pub fn from_env() -> Self {
         let idp_url = crate::load_env("IDP_URL", "");
+        let idp_internal_url = crate::load_env("IDP_INTERNAL_URL", "");
         let portal_domain = crate::load_env("PORTAL_DOMAIN", "portal.opensme.graphwiz.ai");
         let client_id = crate::load_env("PORTAL_OIDC_CLIENT_ID", "");
         let client_secret = crate::load_env("PORTAL_OIDC_CLIENT_SECRET", "");
@@ -71,6 +79,7 @@ impl SessionConfig {
             .into_bytes();
         SessionConfig {
             idp_url,
+            idp_internal_url,
             portal_domain,
             client_id,
             client_secret,
@@ -89,6 +98,30 @@ impl SessionConfig {
     /// The portal's authenticated surfaces only open when an IdP AND a
     /// real (rotated) session secret are configured. Everything else is
     /// fail-closed.
+    /// The base the portal itself uses for server-side OIDC calls.
+    fn idp_internal_base(&self) -> String {
+        let v = self.idp_internal_url.trim();
+        if v.is_empty() {
+            self.idp_url.trim_end_matches('/').to_string()
+        } else {
+            v.trim_end_matches('/').to_string()
+        }
+    }
+
+    /// Public `Host` header to present when the server-side base differs
+    /// from the browser-facing `idp_url` (demo/CI talk to the IdP's
+    /// plain-HTTP listener, which only serves the OIDC surface for its
+    /// external domain). None when no internal base is configured — the
+    /// request then naturally carries the public Host.
+    fn idp_public_host(&self) -> Option<String> {
+        if self.idp_internal_url.trim().is_empty() {
+            return None;
+        }
+        let rest = self.idp_url.split("://").nth(1)?;
+        let host = rest.split('/').next().unwrap_or(rest);
+        (!host.is_empty()).then(|| host.to_string())
+    }
+
     pub fn enabled(&self) -> bool {
         !self.idp_url.trim().is_empty()
             && !self.client_id.trim().is_empty()
@@ -428,20 +461,31 @@ struct UserinfoResponse {
 /// Exchange the authorization code for an access token and confirm the
 /// identity against the IdP's /userinfo — the one authoritative "this token
 /// is real" check (the JWT-signature equivalent, without JWKS parsing).
+///
+/// Server-side legs run against `idp_internal_base()` (plain HTTP inside
+/// the compose network in demo/CI). Those stacks' Zitadel only serves the
+/// OIDC surface for its EXTERNAL domain, so the public `Host` is sent
+/// explicitly; production (no internal base) keeps the default Host.
 async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserInfo, ExchangeError> {
-    let base = cfg.idp_url.trim_end_matches('/');
-    let token_resp = cfg
+    let base = cfg.idp_internal_base();
+    // Zitadel v4.19 serves the token endpoint at /oauth/v2/token (the
+    // discovery document, what every other integration uses) — /oidc/v1/
+    // is only userinfo + end_session. See AUTHORIZE_PATH for the same
+    // class of v1->v2 drift.
+    let mut token_req = cfg
         .http
-        .post(format!("{base}/oidc/v1/token"))
+        .post(format!("{base}/oauth/v2/token"))
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", cfg.redirect_uri().as_str()),
             ("client_id", cfg.client_id.as_str()),
             ("client_secret", cfg.client_secret.as_str()),
-        ])
-        .send()
-        .await
+        ]);
+    if let Some(host) = cfg.idp_public_host() {
+        token_req = token_req.header(reqwest::header::HOST, host);
+    }
+    let token_resp = token_req.send().await
         .map_err(|e| ExchangeError::Http(e.to_string()))?;
     if !token_resp.status().is_success() {
         return Err(ExchangeError::Status(token_resp.status().as_u16()));
@@ -453,12 +497,14 @@ async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserIn
     if token.access_token.is_empty() {
         return Err(ExchangeError::NoAccessToken);
     }
-    let user_resp = cfg
+    let mut user_req = cfg
         .http
         .get(format!("{base}/oidc/v1/userinfo"))
-        .bearer_auth(&token.access_token)
-        .send()
-        .await
+        .bearer_auth(&token.access_token);
+    if let Some(host) = cfg.idp_public_host() {
+        user_req = user_req.header(reqwest::header::HOST, host);
+    }
+    let user_resp = user_req.send().await
         .map_err(|e| ExchangeError::Userinfo(e.to_string()))?;
     if !user_resp.status().is_success() {
         return Err(ExchangeError::Userinfo(format!(
@@ -496,6 +542,7 @@ mod tests {
     fn cfg() -> SessionConfig {
         SessionConfig {
             idp_url: "https://auth.example".into(),
+            idp_internal_url: String::new(),
             portal_domain: "portal.example".into(),
             client_id: "opensme-portal".into(),
             client_secret: "client-secret".into(),
@@ -619,6 +666,7 @@ mod tests {
         let mut app = crate::tests::cfg_with("", None, "");
         let sc = SessionConfig {
             idp_url: idp_url.into(),
+            idp_internal_url: String::new(),
             portal_domain: app.session.portal_domain.clone(),
             client_id: "opensme-portal".into(),
             client_secret: "client-secret".into(),
@@ -767,7 +815,7 @@ mod tests {
         tokio::spawn(async move {
             let app = axum::Router::new()
                 .route(
-                    "/oidc/v1/token",
+                    "/oauth/v2/token",
                     axum::routing::post(
                         |axum::extract::Form(form): axum::extract::Form<
                             std::collections::HashMap<String, String>,
@@ -828,7 +876,7 @@ mod tests {
         tokio::spawn(async move {
             let app = axum::Router::new()
                 .route(
-                    "/oidc/v1/token",
+                    "/oauth/v2/token",
                     axum::routing::post(
                         |axum::extract::Form(form): axum::extract::Form<
                             std::collections::HashMap<String, String>,

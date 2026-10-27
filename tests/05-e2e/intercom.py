@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result, ensure_portal_routed
 from cloud_mock_support import CLOUD_NAME, CLOUD_PORT, start_cloud_standin, stop_cloud_standin
 # The portal's intercom/polls are authenticated surfaces: reuse run.py's
-# real OIDC login helper so this journey carries an OPENSMESESSION cookie.
+# real OIDC login helper so this journey carries an OPENSMEPORTALSESSION cookie.
 from run import E2EError, fetch_seeded, load_env_file, portal_login  # noqa: E402  (after T/helpers)
 
 import requests
@@ -163,7 +163,7 @@ def main() -> int:
         # then sign in for real, so every subsequent assertion exercises
         # the authenticated path (API + page rendering)
         if portal_login(session, portal, idp_base):
-            result.ok("portal OIDC login minted an OPENSMESESSION cookie")
+            result.ok("portal OIDC login minted an OPENSMEPORTALSESSION cookie")
         else:
             result.fail("portal login failed — cannot exercise the authenticated intercom surface")
             return 1

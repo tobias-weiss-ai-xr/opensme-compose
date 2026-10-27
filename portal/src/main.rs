@@ -1601,6 +1601,7 @@ mod tests {
             feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(""))),
             session: session::SessionConfig {
                 idp_url: "https://auth.example".into(),
+                idp_internal_url: String::new(),
                 portal_domain: "portal.example".into(),
                 client_id: "opensme-portal".into(),
                 client_secret: "client-secret".into(),

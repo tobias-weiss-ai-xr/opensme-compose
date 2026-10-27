@@ -85,6 +85,10 @@ services:
       # Demo is plain HTTP on :80; keep the landing-page service links alive
       # (OPENCLOUD_URL defaults to https in docker-compose.yml).
       OPENCLOUD_URL: http://${OPENCLOUD_DOMAIN:-cloud.opensme.local}
+      # Server-side OIDC legs (token/userinfo) hit the IdP's plain-HTTP
+      # listener on the compose network — Traefik's self-signed demo cert
+      # would fail reqwest's TLS verification on the public URL.
+      IDP_INTERNAL_URL: http://zitadel:8080
     ports:
       - "127.0.0.1:8080:8080"
     develop:

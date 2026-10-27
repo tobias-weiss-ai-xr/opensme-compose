@@ -34,10 +34,11 @@ import urllib3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result, ensure_portal_routed
 
 # Intercom is an authenticated surface: reuse run.py's real OIDC login so
-# the post-recreate content check carries a valid OPENSMESESSION cookie.
+# the post-recreate content check carries a valid OPENSMEPORTALSESSION cookie.
 from run import portal_login
 
 import requests

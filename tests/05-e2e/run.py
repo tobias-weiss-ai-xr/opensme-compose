@@ -394,7 +394,7 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
     proves). The portal mints an OAuth `state` and binds it in an HttpOnly
     cookie; the whole round trip must go through the real /api/auth/login →
     IdP (v2 sessions + password + finalize) → /api/auth/callback chain,
-    which lands the OPENSMESESSION cookie back in the requests session.
+    which lands the OPENSMEPORTALSESSION cookie back in the requests session.
 
     Falls back to the demo stack's .env configuration for the IdP
     credentials unless overrides are passed via env. Returns True on
@@ -457,13 +457,16 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         )
         echoed = (qs.get("state") or [None])[0]
         pre_cb = session.cookies.get("OPENSMESTATE")
-        # 3) callback with the portal's own state → OPENSMESESSION cookie
-        cb = f"{portal_base}/api/auth/callback?{urlencode(qs)}"
+        # 3) callback with the portal's own state → OPENSMEPORTALSESSION cookie
+        # urlencode with doseq=True: qs values are parse_qs LISTS (without it
+        # a list becomes str(['…']) and the IdP 'state' echo never matches
+        # the OPENSMESTATE cookie → the portal's CSRF check 400s the login)
+        cb = f"{portal_base}/api/auth/callback?{urlencode(qs, doseq=True)}"
         r = session.get(cb, allow_redirects=False, timeout=T)
-        if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMESESSION"):
+        if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMEPORTALSESSION"):
             stage = (
                 f"callback: HTTP {r.status_code}, "
-                f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}, "
+                f"cookie={'yes' if session.cookies.get('OPENSMEPORTALSESSION') else 'no'}, "
                 f"qs={sorted(qs) if qs else []}, "
                 f"state_cookie={'yes' if session.cookies.get('OPENSMESTATE') else 'no'}, "
                 f"post_login={'yes' if post_login else 'no'}, "
@@ -481,7 +484,7 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         stage = f"exception {type(exc).__name__}: {exc}"
         return False
     finally:
-        if os.environ.get("E2E_DEBUG") and not session.cookies.get("OPENSMESESSION"):
+        if os.environ.get("E2E_DEBUG") and not session.cookies.get("OPENSMEPORTALSESSION"):
             print(f"  [diag]   portal_login failed: {stage}", flush=True)
 
 

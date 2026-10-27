@@ -35,6 +35,7 @@ import urllib3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result, ensure_portal_routed
 
 import requests
@@ -130,6 +131,7 @@ def main() -> int:
         return 0
 
     portal = f"https://portal.{args.domain}"
+    idp_base = f"https://auth.{args.domain}"
     session = requests.Session()
     session.verify = False
     session.trust_env = False
@@ -137,6 +139,15 @@ def main() -> int:
     if not ensure_portal_routed(session, portal):
         result.fail("portal unreachable via traefik even after resync")
         return 1
+
+    # intercom is an authenticated surface — sign in for real so the
+    # hostile payloads exercise the AUTHENTICATED render path (403/401
+    # would prove nothing about rendering safety).
+    from run import portal_login
+    if not portal_login(session, portal, idp_base):
+        result.fail("portal login failed — cannot exercise the hostile input surface")
+        return 1
+    result.ok("portal OIDC login minted a session")
 
     # ── AC1: handler payloads render escaped, never raw ─────────────
     ac1_fail = []
@@ -226,7 +237,7 @@ def main() -> int:
     )
 
     # ── AC5: list stays bounded at MAX_MESSAGES ─────────────────────
-    overflow_ok, bounded = True, True
+    overflow_ok, bounded, count = True, True, -1
     for i in range(51):
         r = session.post(portal + "/api/intercom",
                          json={"text": f"overflow probe {i:03d}"}, timeout=T)
