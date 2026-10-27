@@ -25,6 +25,10 @@ Usage:
 """
 
 import argparse
+import base64
+import hashlib
+import hmac
+import json
 import re
 import shutil
 import socket
@@ -46,6 +50,46 @@ LOCALISH_SUFFIXES = (".local", ".localhost", ".test")
 DEMO_SET = "docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:profiles/demo.dev.yml"
 NEW_DOMAIN = "meine-firma.test"
 CLOUD_PORT = 8099
+
+
+def _b64url(data: bytes) -> str:
+    """URL_SAFE_NO_PAD base64, mirroring the Rust `b64` helper."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def mint_portal_session_cookie(secret: str) -> str:
+    """Mint an OPENSMEPORTALSESSION exactly as the Rust gate verifies it.
+
+    Token = URL_SAFE_NO_PAD base64(JSON {sub,name,email,exp}) "." URL_SAFE_NO_PAD
+    (HMAC-SHA256 keyed by LOGIN_SESSION_COOKIE_SECRET over the payload). The
+    payload carries no domain, so the same token keeps verifying after the
+    portal moves to another domain — which is the point of V3 below.
+    """
+    payload = json.dumps(
+        {"sub": "portability", "name": "Portability Probe",
+         "email": "portability@opensme.local", "exp": int(time.time()) + 3600},
+        separators=(",", ":"),
+    ).encode()
+    p = _b64url(payload)
+    s = _b64url(hmac.new(secret.encode(), p.encode(), hashlib.sha256).digest())
+    return f"{p}.{s}"
+
+
+def _env_dotenv(key: str) -> str:
+    """Env var first, then the repo-root `.env` (the demo stack persists them)."""
+    import os
+    val = os.environ.get(key)
+    if val:
+        return val
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    try:
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
 
 
 def compose_args() -> list[str]:
@@ -173,68 +217,87 @@ def main() -> int:
         if not cloud_up:
             result.skip("cloud stand-in container did not start")
         else:
+            # Intercom is fail-closed behind the portal auth gate (feat(auth)
+            # 0fb7428): an anonymous POST gets 401 before the allowlist is
+            # even consulted. Mint a valid OPENSMEPORTALSESSION — the same
+            # URL_SAFE_NO_PAD HMAC scheme + shared LOGIN_SESSION_COOKIE_SECRET
+            # the Rust gate verifies — so the derived allowlist itself is
+            # what's under test. The token is not domain-bound, so it stays
+            # valid after the portal moves to the .test domain.
+            session_secret = _env_dotenv("LOGIN_SESSION_COOKIE_SECRET")
+            session_token = (mint_portal_session_cookie(session_secret)
+                             if session_secret else None)
+            if not session_token:
+                result.skip("portal auth gate not configured "
+                            "(LOGIN_SESSION_COOKIE_SECRET unset) — the allowlist "
+                            "check needs a signed session")
+            cookie_headers = (
+                {"Cookie": f"OPENSMEPORTALSESSION={session_token}"}
+                if session_token else {})
             # give the alias a moment to propagate into the embedded DNS
             time.sleep(2)
-            # the portal POST races traefik's provider reload (the stand-in
-            # container events trigger a full router re-evaluation that can
-            # transiently drop the portal router in CI) — re-assert routing
-            # before every attempt instead of failing on a single 404
-            att = None
-            for attempt in range(6):
-                routed = ensure_portal_routed(session, new_portal)
-                print(f"  [diag] attempt {attempt}: routed={routed}", flush=True)
-                if not routed:
-                    import subprocess as _sp
-                    state = _sp.run(
-                        ["docker", "ps", "-a", "--filter", "name=opensme-portal",
-                         "--format", "{{.Names}} {{.Status}}"],
-                        capture_output=True, text=True, timeout=30)
-                    print(f"  [diag]   portal={state.stdout.strip() or 'NOT RUNNING'}",
-                          flush=True)
-                    continue
-                try:
-                    att = session.post(new_portal + "/api/intercom",
-                                       json={"text": "Domain-Migration klappt",
-                                             "attachment_url":
-                                                 f"http://cloud.{NEW_DOMAIN}/Angebot_2026.pdf"},
-                                       timeout=30)
-                    print(f"  [diag]   POST -> HTTP {att.status_code} "
-                          f"{att.text[:100]!r}", flush=True)
-                except requests.RequestException as exc:
-                    print(f"  [diag]   POST raised: {exc!r}", flush=True)
-                    att = None
+            if session_token:
+                # the portal POST races traefik's provider reload (the stand-in
+                # container events trigger a full router re-evaluation that can
+                # transiently drop the portal router in CI) — re-assert routing
+                # before every attempt instead of failing on a single 404
+                att = None
+                for attempt in range(6):
+                    routed = ensure_portal_routed(session, new_portal)
+                    print(f"  [diag] attempt {attempt}: routed={routed}", flush=True)
+                    if not routed:
+                        import subprocess as _sp
+                        state = _sp.run(
+                            ["docker", "ps", "-a", "--filter", "name=opensme-portal",
+                             "--format", "{{.Names}} {{.Status}}"],
+                            capture_output=True, text=True, timeout=30)
+                        print(f"  [diag]   portal={state.stdout.strip() or 'NOT RUNNING'}",
+                              flush=True)
+                        continue
+                    try:
+                        att = session.post(new_portal + "/api/intercom",
+                                           headers=cookie_headers,
+                                           json={"text": "Domain-Migration klappt",
+                                                 "attachment_url":
+                                                     f"http://cloud.{NEW_DOMAIN}/Angebot_2026.pdf"},
+                                           timeout=30)
+                        print(f"  [diag]   POST -> HTTP {att.status_code} "
+                              f"{att.text[:100]!r}", flush=True)
+                    except requests.RequestException as exc:
+                        print(f"  [diag]   POST raised: {exc!r}", flush=True)
+                        att = None
+                        time.sleep(5)
+                        continue
+                    if att.status_code != 404:
+                        break
                     time.sleep(5)
-                    continue
-                if att.status_code != 404:
-                    break
-                time.sleep(5)
-            print(f"  [diag] loop done: att={'None' if att is None else att.status_code}",
-                  flush=True)
-            if att is None or att.status_code != 201:
-                import subprocess as _sp2
-                env_out = _sp2.run(
-                    ["docker", "inspect", "opensme-portal",
-                     "--format",
-                     "{{range .Config.Env}}{{println .}}{{end}}"],
-                    capture_output=True, text=True, timeout=30)
-                keep = [line for line in env_out.stdout.splitlines()
-                        if any(k in line for k in
-                               ("OPENSME_DOMAIN", "OPENCLOUD_URL",
-                                "INTERCOM_ATTACHMENT_HOSTS",
-                                "INTERCOM_ALLOW_HTTP", "PORTAL_DOMAIN"))]
-                print("  [diag] portal env: " + " | ".join(keep), flush=True)
-                img = _sp2.run(["docker", "inspect", "opensme-portal",
-                                "--format", "{{.Image}}"],
-                               capture_output=True, text=True, timeout=30)
-                print(f"  [diag] portal image: {img.stdout.strip()[:20]}", flush=True)
-            v3 = att is not None and att.status_code == 201
-            (result.ok if v3 else result.fail)(
-                "derived allowlist follows the new domain (cloud.<domain> accepted)"
-                if v3
-                else f"default allowlist did not follow: "
-                     f"HTTP {att.status_code if att else 'unroutable'} "
-                     f"{att.text[:120] if att else ''}"
-            )
+                print(f"  [diag] loop done: att={'None' if att is None else att.status_code}",
+                      flush=True)
+                if att is None or att.status_code != 201:
+                    import subprocess as _sp2
+                    env_out = _sp2.run(
+                        ["docker", "inspect", "opensme-portal",
+                         "--format",
+                         "{{range .Config.Env}}{{println .}}{{end}}"],
+                        capture_output=True, text=True, timeout=30)
+                    keep = [line for line in env_out.stdout.splitlines()
+                            if any(k in line for k in
+                                   ("OPENSME_DOMAIN", "OPENCLOUD_URL",
+                                    "INTERCOM_ATTACHMENT_HOSTS",
+                                    "INTERCOM_ALLOW_HTTP", "PORTAL_DOMAIN"))]
+                    print("  [diag] portal env: " + " | ".join(keep), flush=True)
+                    img = _sp2.run(["docker", "inspect", "opensme-portal",
+                                    "--format", "{{.Image}}"],
+                                   capture_output=True, text=True, timeout=30)
+                    print(f"  [diag] portal image: {img.stdout.strip()[:20]}", flush=True)
+                v3 = att is not None and att.status_code == 201
+                (result.ok if v3 else result.fail)(
+                    "derived allowlist follows the new domain (cloud.<domain> accepted)"
+                    if v3
+                    else f"default allowlist did not follow: "
+                         f"HTTP {att.status_code if att else 'unroutable'} "
+                         f"{att.text[:120] if att else ''}"
+                )
 
         # V4: rollback — original env restores the original routing
         recreate_portal({})

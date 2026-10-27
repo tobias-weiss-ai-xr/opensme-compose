@@ -371,6 +371,14 @@ services:
       HTTPS_PROXY: ${PORTAL_HTTPS_PROXY:-}
       PORTAL_NO_PROXY: ${PORTAL_NO_PROXY:-}
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
+      # Portal sign-in for the authenticated surfaces (intercom/polls): the
+      # Rust backend validates OPENSMEPORTALSESSION itself, so it needs the
+      # same OIDC RP env as portal-web — without it the auth gate can never
+      # open on a compose-deployed stack (demo/CI), only on the ansible
+      # deployment. Fail-closed when unset (session.enabled() stays false).
+      LOGIN_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:-}
+      PORTAL_OIDC_CLIENT_ID: ${PORTAL_OIDC_CLIENT_ID:-}
+      PORTAL_OIDC_CLIENT_SECRET: ${PORTAL_OIDC_CLIENT_SECRET:-}
       AI_API_URL: ${AI_API_URL:-}
       AI_MODEL: ${AI_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
