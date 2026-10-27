@@ -447,18 +447,31 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
             stage = (f"authorize client mismatch: want {client_id!r} in "
                      f"{authz_url[:90]!r}")
             return False
+        # capture the state cookie + raw Set-Cookie exactly as the portal
+        # delivered them right after the login 303
+        post_login = session.cookies.get("OPENSMESTATE")
+        raw_sc = r.headers.get("set-cookie", "")[:120]
         # 2) IdP leg: v2 session + password check + finalize
         qs, _session = api_login(
             session, idp_base, lc_pat, client_uid, authz_url, client_uid, pw
         )
+        echoed = (qs.get("state") or [None])[0]
+        pre_cb = session.cookies.get("OPENSMESTATE")
         # 3) callback with the portal's own state → OPENSMESESSION cookie
         cb = f"{portal_base}/api/auth/callback?{urlencode(qs)}"
         r = session.get(cb, allow_redirects=False, timeout=T)
         if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMESESSION"):
-            stage = (f"callback: HTTP {r.status_code}, "
-                     f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}, "
-                     f"qs={sorted(qs) if qs else []}, "
-                     f"state_cookie={'yes' if session.cookies.get('OPENSMESTATE') else 'no'}")
+            stage = (
+                f"callback: HTTP {r.status_code}, "
+                f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}, "
+                f"qs={sorted(qs) if qs else []}, "
+                f"state_cookie={'yes' if session.cookies.get('OPENSMESTATE') else 'no'}, "
+                f"post_login={'yes' if post_login else 'no'}, "
+                f"pre_cb={'yes' if pre_cb else 'no'}, "
+                f"post_login_val={(post_login or '')[:6]!r}, "
+                f"echo_val={(echoed or '')[:6]!r}, "
+                f"sc_raw={raw_sc!r}"
+            )
             return False
         return True
     except (E2EError, KeyError, requests.RequestException) as exc:
