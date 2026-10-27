@@ -404,6 +404,11 @@ jobs:
           MAIL_DOMAIN: mail.opensme.local
           SOGO_DOMAIN: webmail.opensme.local
         run: |
+          # Rotate the Stalwart webadmin password — the compose default is a
+          # well-known CHANGEME_ literal that exists so the stack boots without
+          # env, and the no-public-admin-default-cred contract guards it. CI
+          # must exercise the ROTATED path, never green-light the default.
+          printf 'STALWART_ADMIN_PASSWORD=%s\n' "$(openssl rand -base64 24)" >> .env
           docker compose \
             -f docker-compose.yml -f idm/zitadel.yml \
             -f opencloud/opencloud.yml -f profiles/demo.dev.yml \

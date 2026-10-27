@@ -81,6 +81,35 @@ rules:
 
 ---
 
+name: no-public-admin-default-cred
+# A publicly-routed service (traefik Host(...) label) must never default an
+# ADMIN credential to a well-known CHANGEME_ value — the rotated value only
+# reaches the container if .env lists/rotates the var. This is the guard that
+# made mail/stalwart.yml's STALWART_ADMIN_PASSWORD land in .env.example.
+# (DB passwords and OIDC client secrets are deliberately out of scope: they
+# are not human-login surfaces on the public edge.)
+severity: error
+
+rules:
+  - type: no-public-admin-default-cred
+    compose_files:
+      - docker-compose.yml
+      - idm/zitadel.yml
+      - idm/casdoor.yml
+      - opencloud/opencloud.yml
+      - opencloud/minio.yml
+      - mail/stalwart.yml
+      - mail/sogo.yml
+      - services/invoice-ninja.yml
+      - services/paperless.yml
+      - services/cryptpad.yml
+      - services/synapse.yml
+      - services/element.yml
+      - services/notes.yml
+      - services/camunda.yml
+
+---
+
 name: image-pinned
 description: >
   All images must use an explicit tag (not :latest for production services).

@@ -110,6 +110,8 @@ OPENCLOUD_DOMAIN=cloud.home.opensme.graphwiz.ai
 POSTGRES_PASSWORD=$(pw)
 ZITADEL_DB_PASSWORD=$(pw)
 SOGO_DB_PASSWORD=$(pw)
+STALWART_ADMIN_PASSWORD=$(pw)   # Stalwart webadmin login (mail.* router)
+CASDOOR_ADMIN_PASSWORD=$(pw)   # Casdoor webadmin login (auth UI)
 
 # ── Zitadel ──
 ZITADEL_ADMIN=admin

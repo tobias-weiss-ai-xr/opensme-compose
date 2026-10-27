@@ -199,6 +199,91 @@ def check_no_changeme_in_compose(result, rule, loader):
         result.ok("no CHANGEME_ values in compose files")
 
 
+def check_no_public_admin_default_cred(result, rule, loader):
+    """Publicly-routed services must not fall back to CHANGEME_ admin creds.
+
+    The generic no-changeme rule deliberately tolerates `${VAR:-CHANGEME_...}`
+    defaults (they are rotated by scripts/init-env.sh / demo scripts). That
+    tolerance is only safe when the rotated value ACTUALLY reaches the
+    container — which requires the var to be listed in .env.example. Any
+    ADMIN credential on a service with a public `Host(...)` router is the
+    security boundary (webadmin login, IdP admin, OC admin): a well-known
+    default there means the whole surface is open with a published password.
+    DB passwords / OIDC client secrets behind the same router are excluded
+    (not human-login surfaces on the public edge).
+    """
+    compose_files = rule.get("compose_files", [])
+    admin_cred = re.compile(r"(?i)(ADMIN_(PASSWORD|PASS|SECRET|TOKEN)|ORG_HUMAN_PASSWORD)")
+    # .env.example membership = the rotation pipeline (init-env.sh / demo
+    # scripts) WILL rotate this var on a real deploy. Absence here is the
+    # security bug: the container silently falls to the well-known default.
+    env_keys = set()
+    env_path = ROOT / ".env.example"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            key = line.split("=", 1)[0].strip()
+            if key and not key.startswith("#"):
+                env_keys.add(key)
+    default_cred = re.compile(r"CHANGEME_")
+    public_router = re.compile(r"traefik\.http\.routers\.[^=]+rule=Host\(`")
+    found = False
+    warned = []
+    for cf in compose_files:
+        path = ROOT / cf
+        if not path.exists():
+            continue
+        with open(path) as f:
+            content = f.read()
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            result.fail(f"{cf}: cannot parse: {e}")
+            continue
+        for svc, svc_data in (data.get("services") or {}).items():
+            if not isinstance(svc_data, dict):
+                continue
+            labels = svc_data.get("labels") or []
+            if isinstance(labels, dict):
+                labels = list(labels.values())
+            if not any(public_router.search(str(l)) for l in labels):
+                continue  # not on the public edge
+            envs = svc_data.get("environment") or {}
+            envs_map = {}
+            if isinstance(envs, list):
+                for item in envs:
+                    if isinstance(item, dict):
+                        envs_map.update(item)
+                    elif isinstance(item, str) and "=" in item:
+                        k, _, v = item.partition("=")
+                        envs_map[k] = v
+            elif isinstance(envs, dict):
+                envs_map = envs
+            for k, v in envs_map.items():
+                v = str(v)
+                if not admin_cred.search(k) or not default_cred.search(v):
+                    continue
+                # ${VAR:-CHANGEME...} default: value comes from .env at runtime
+                m = re.search(r"\$\{([^}:}]+):-", v)
+                source = (m.group(1) if m else k).strip()
+                if source not in env_keys:
+                    found = True
+                    result.fail(
+                        f"{cf}:{svc} → {k} default '{v}' is a well-known admin "
+                        f"credential on a PUBLIC router and '{source}' is NOT in "
+                        f".env.example — rotation (init-env.sh/demo) can never "
+                        f"overwrite it. Add the var to .env.example."
+                    )
+                else:
+                    warned.append(f"{cf}:{svc} → {k}")
+    for w in warned:
+        result.warn(
+            f"{w}: public ADMIN credential still defaults to a CHANGEME_ value "
+            f"(rotation wiring exists via .env.example — verify prod .env rotates it)"
+        )
+    if not found:
+        result.ok("no public ADMIN credential is rotation-blind (all CHANGEME defaults reachable via .env.example)")
+
+
 def check_image_has_tag(result, rule, loader):
     """Check that all images use explicit tags (not :latest, unless allowed)."""
     allow_latest = set(rule.get("allow_latest", []))
@@ -347,6 +432,7 @@ CONTRACT_HANDLERS = {
     "no-host-network": check_no_host_network,
     "resource-limits-set": check_resource_limits_set,
     "no-changeme-in-compose": check_no_changeme_in_compose,
+    "no-public-admin-default-cred": check_no_public_admin_default_cred,
     "image-has-tag": check_image_has_tag,
     "kb_version-required": check_kb_version_required,
     "source-duty": check_source_duty,
