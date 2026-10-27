@@ -472,20 +472,19 @@ async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserIn
     // discovery document, what every other integration uses) — /oidc/v1/
     // is only userinfo + end_session. See AUTHORIZE_PATH for the same
     // class of v1->v2 drift.
-    let mut token_req = cfg
-        .http
-        .post(format!("{base}/oauth/v2/token"))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", cfg.redirect_uri().as_str()),
-            ("client_id", cfg.client_id.as_str()),
-            ("client_secret", cfg.client_secret.as_str()),
-        ]);
+    let mut token_req = cfg.http.post(format!("{base}/oauth/v2/token")).form(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", cfg.redirect_uri().as_str()),
+        ("client_id", cfg.client_id.as_str()),
+        ("client_secret", cfg.client_secret.as_str()),
+    ]);
     if let Some(host) = cfg.idp_public_host() {
         token_req = token_req.header(reqwest::header::HOST, host);
     }
-    let token_resp = token_req.send().await
+    let token_resp = token_req
+        .send()
+        .await
         .map_err(|e| ExchangeError::Http(e.to_string()))?;
     if !token_resp.status().is_success() {
         return Err(ExchangeError::Status(token_resp.status().as_u16()));
@@ -504,7 +503,9 @@ async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserIn
     if let Some(host) = cfg.idp_public_host() {
         user_req = user_req.header(reqwest::header::HOST, host);
     }
-    let user_resp = user_req.send().await
+    let user_resp = user_req
+        .send()
+        .await
         .map_err(|e| ExchangeError::Userinfo(e.to_string()))?;
     if !user_resp.status().is_success() {
         return Err(ExchangeError::Userinfo(format!(
