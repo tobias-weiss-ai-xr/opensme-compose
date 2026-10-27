@@ -428,15 +428,18 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         return False
 
     # 1) start the flow — capture the authorize Location + state cookie
+    stage = "start"
     try:
         r = session.get(
             portal_base + "/api/auth/login", allow_redirects=False, timeout=T
         )
         if r.status_code not in REDIRECTS or "Location" not in r.headers:
+            stage = f"authorize: HTTP {r.status_code}, no Location"
             return False
         authz_url = r.headers["Location"]
         if client_id and client_id not in authz_url:
-            # safety: the authorize URL must target the portal's own client
+            stage = (f"authorize client mismatch: want {client_id!r} in "
+                     f"{authz_url[:90]!r}")
             return False
         # 2) IdP leg: v2 session + password check + finalize
         qs, _session = api_login(
@@ -446,10 +449,16 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         cb = f"{portal_base}/api/auth/callback?{urlencode(qs)}"
         r = session.get(cb, allow_redirects=False, timeout=T)
         if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMESESSION"):
+            stage = (f"callback: HTTP {r.status_code}, "
+                     f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}")
             return False
         return True
-    except (E2EError, KeyError, requests.RequestException):
+    except (E2EError, KeyError, requests.RequestException) as exc:
+        stage = f"exception {type(exc).__name__}: {exc}"
         return False
+    finally:
+        if os.environ.get("E2E_DEBUG") and not session.cookies.get("OPENSMESESSION"):
+            print(f"  [diag]   portal_login failed: {stage}", flush=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

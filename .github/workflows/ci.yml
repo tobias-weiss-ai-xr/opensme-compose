@@ -344,10 +344,16 @@ jobs:
       - name: Run portability journey (portal migrates to another domain)
         run: python3 tests/05-e2e/portability.py opensme.local
       - name: Run intercom journey (notes + cloud attachments, SSRF guard)
+        env:
+          E2E_DEBUG: "1"
         run: python3 tests/05-e2e/intercom.py opensme.local
       - name: Run hostile input journey (nothing breaks out of the renderer)
+        env:
+          E2E_DEBUG: "1"
         run: python3 tests/05-e2e/hostile_input.py opensme.local
       - name: Run concurrent writers journey (the intercom store under contention)
+        env:
+          E2E_DEBUG: "1"
         run: python3 tests/05-e2e/concurrent_writers.py opensme.local
       - name: Run rolling recreate journey (deploy without turbulence)
         run: python3 tests/05-e2e/rolling_recreate.py opensme.local
