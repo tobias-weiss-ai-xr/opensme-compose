@@ -410,7 +410,11 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         client_id = cfg("PORTAL_OIDC_CLIENT_ID", "opensme-portal")
     login_name = cfg("E2E_ZITADEL_LOGIN_NAME", "zitadel-admin")
     pw = cfg("ZITADEL_ADMIN_PASSWORD")
-    lc_pat = cfg("E2E_ZITADEL_LOGINCLIENT_PAT")
+    # The E2E_* overrides are optional: on a booted stack the seeded
+    # login-client PAT rides the v2 Session API (same source the
+    # logout/lifecycle journeys use). Without this fallback portal_login
+    # bails out on stock demo/Ci stacks where .env has no E2E_* overrides.
+    lc_pat = cfg("E2E_ZITADEL_LOGINCLIENT_PAT") or fetch_seeded("/machinekey/login-client.pat")
     if not (pw and lc_pat):
         return False
     pat = cfg("E2E_ZITADEL_PAT") or fetch_seeded("/machinekey/pat")
@@ -423,7 +427,9 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
             ).json()
         except requests.RequestException:
             return False
-    client_uid = resolve_user_id(session, idp_base, lc_pat, login_name)
+    # Prefer the machine PAT (admin) for the Management-API user lookup —
+    # the login-client PAT may be too narrow-privileged to resolve users.
+    client_uid = resolve_user_id(session, idp_base, pat or lc_pat, login_name)
     if not client_uid:
         return False
 
