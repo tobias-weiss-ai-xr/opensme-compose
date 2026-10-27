@@ -250,11 +250,21 @@ pub async fn require_session(
     }
 }
 
+/// IdP authorize path for the portal's OIDC client.
+///
+/// Zitadel v2 (the shipped IdP, idm/zitadel.yml, pinned v4.19) serves the
+/// OIDC authorize endpoint at `/oauth/v2/authorize` — the same path the
+/// OpenCloud/Notes/webmail integrations and every e2e journey use via
+/// discovery (`authorization_endpoint`). The legacy `/oidc/v1/authorize`
+/// returns Zitadel's `404 page not found`, which silently broke real
+/// portal login on compose-deployed stacks.
+pub const AUTHORIZE_PATH: &str = "/oauth/v2/authorize";
+
 /// IdP authorize URL for the portal's OIDC client.
 pub fn authorize_url(cfg: &SessionConfig, state: &str) -> String {
     let base = cfg.idp_url.trim_end_matches('/');
     format!(
-        "{base}/oidc/v1/authorize?response_type=code&client_id={}&redirect_uri={}\
+        "{base}{AUTHORIZE_PATH}?response_type=code&client_id={}&redirect_uri={}\
          &scope={}&state={}",
         urlencode(&cfg.client_id),
         urlencode(&cfg.redirect_uri()),
@@ -563,7 +573,7 @@ mod tests {
     fn authorize_url_shape() {
         let c = cfg();
         let url = authorize_url(&c, "state-xyz");
-        assert!(url.starts_with("https://auth.example/oidc/v1/authorize?"));
+        assert!(url.starts_with("https://auth.example/oauth/v2/authorize?"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("client_id=opensme-portal"));
         assert!(url.contains("redirect_uri=https%3A%2F%2Fportal.example%2Fapi%2Fauth%2Fcallback"));
@@ -728,7 +738,7 @@ mod tests {
         let res = one(req, router);
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         let loc = res.headers().get(LOCATION).unwrap().to_str().unwrap();
-        assert!(loc.starts_with("https://auth.example/oidc/v1/authorize?"));
+        assert!(loc.starts_with("https://auth.example/oauth/v2/authorize?"));
         assert!(loc.contains("client_id=opensme-portal"));
         let sc = res.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
         assert!(sc.starts_with("OPENSMESTATE="));
