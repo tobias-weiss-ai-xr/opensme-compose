@@ -37,6 +37,7 @@ if [ -f "$TEMPLATE" ]; then
     -e "s|\${OPENSME_DOMAIN}|${OPENSME_DOMAIN:-opensme.graphwiz.ai}|g" \
     -e "s|\${TZ}|${TZ:-Europe/Berlin}|g" \
     -e "s|\${ZITADEL_DOMAIN}|${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}|g" \
+    -e "s|\${ZITADEL_OIDC_URL}|${ZITADEL_OIDC_URL:-https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration}|g" \
     -e "s|\${SOGO_OIDC_CLIENT_ID}|${SOGO_OIDC_CLIENT_ID:-}|g" \
     -e "s|\${SOGO_OIDC_CLIENT_SECRET}|${SOGO_OIDC_CLIENT_SECRET:-}|g" \
     "$TEMPLATE" > "$OUTPUT"

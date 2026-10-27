@@ -164,16 +164,20 @@ services:
       # initdb scripts run INSIDE this container and only see env passed
       # here (the script's :-changeme fallbacks otherwise win, and the
       # profile-gated service then fails auth against a 'changeme' user).
-      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD:-changeme}
-      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD:-changeme}
-      PAPERLESS_DB_PASSWORD: ${PAPERLESS_DB_PASSWORD:-changeme}
-      INVOICENINJA_DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-changeme}
-      NOTES_DB_PASSWORD: ${NOTES_DB_PASSWORD:-changeme}
-      NOSDESK_DB_PASSWORD: ${NOSDESK_DB_PASSWORD:-changeme}
-      CAMUNDA_DB_PASSWORD: ${CAMUNDA_DB_PASSWORD:-changeme}
+      # Defaults aligned with the per-service compose files (e.g.
+      # services/paperless.yml uses ${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}).
+      # If these defaults diverge, postgres-init creates the user with one
+      # password and the service tries to connect with another → auth failure.
+      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD:-CHANGEME_casdoor}
+      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD:-CHANGEME_synapse}
+      PAPERLESS_DB_PASSWORD: ${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}
+      INVOICENINJA_DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}
+      NOTES_DB_PASSWORD: ${NOTES_DB_PASSWORD:-CHANGEME_notes}
+      NOSDESK_DB_PASSWORD: ${NOSDESK_DB_PASSWORD:-CHANGEME_nosdesk_db}
+      CAMUNDA_DB_PASSWORD: ${CAMUNDA_DB_PASSWORD:-CHANGEME_camunda}
       # SOGo (mail/sogo.yml) connects as sogo_user, not as the superuser —
       # its DB password is generated separately from POSTGRES_PASSWORD.
-      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-changeme}
+      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo}
     # Production tuning for up to 500 users (via CLI args)
     command:
       - "-c"

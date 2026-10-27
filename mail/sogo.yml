@@ -50,8 +50,18 @@ services:
       # empty defaults render an empty client id and SSO fails loudly at the
       # IdP — by design (no fixed default secret is ever shipped).
       ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
+      # OIDC discovery URL — defaults to the Traefik-fronted https URL.
+      # Override to http://auth.opensme.local:8080/.well-known/openid-configuration
+      # when running without Traefik (e.g. port conflict with sogo6-nginx) so
+      # SOGo reaches Zitadel directly via the Docker network alias.
+      ZITADEL_OIDC_URL: ${ZITADEL_OIDC_URL:-https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration}
       SOGO_OIDC_CLIENT_ID: ${SOGO_OIDC_CLIENT_ID:-}
       SOGO_OIDC_CLIENT_SECRET: ${SOGO_OIDC_CLIENT_SECRET:-}
+      # Bypass corporate HTTP proxy for internal Docker traffic (OIDC to
+      # Zitadel, Postgres, memcached, Stalwart). Without this, SOGo routes
+      # OIDC discovery through the proxy which can't resolve .opensme.local.
+      NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,172.16.0.0/12,.opensme.local}
+      no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,172.16.0.0/12,.opensme.local}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:

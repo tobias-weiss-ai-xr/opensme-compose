@@ -16,9 +16,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Casdoor (lightweight IAM alternative) ──
     DO \$\$
     BEGIN
-      CREATE USER casdoor_user WITH PASSWORD '${CASDOOR_DB_PASSWORD:-changeme}';
+      CREATE USER casdoor_user WITH PASSWORD '${CASDOOR_DB_PASSWORD:-CHANGEME_casdoor}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER casdoor_user WITH PASSWORD '${CASDOOR_DB_PASSWORD:-changeme}';
+      ALTER USER casdoor_user WITH PASSWORD '${CASDOOR_DB_PASSWORD:-CHANGEME_casdoor}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE casdoor_db TO casdoor_user;
     ALTER DATABASE casdoor_db OWNER TO casdoor_user;
@@ -26,9 +26,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Synapse (Matrix chat) ──
     DO \$\$
     BEGIN
-      CREATE USER synapse_user WITH PASSWORD '${SYNAPSE_DB_PASSWORD:-changeme}';
+      CREATE USER synapse_user WITH PASSWORD '${SYNAPSE_DB_PASSWORD:-CHANGEME_synapse}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER synapse_user WITH PASSWORD '${SYNAPSE_DB_PASSWORD:-changeme}';
+      ALTER USER synapse_user WITH PASSWORD '${SYNAPSE_DB_PASSWORD:-CHANGEME_synapse}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE synapse_db TO synapse_user;
     ALTER DATABASE synapse_db OWNER TO synapse_user;
@@ -36,9 +36,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Paperless-ngx (document management) ──
     DO \$\$
     BEGIN
-      CREATE USER paperless_user WITH PASSWORD '${PAPERLESS_DB_PASSWORD:-changeme}';
+      CREATE USER paperless_user WITH PASSWORD '${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER paperless_user WITH PASSWORD '${PAPERLESS_DB_PASSWORD:-changeme}';
+      ALTER USER paperless_user WITH PASSWORD '${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE paperless_db TO paperless_user;
     ALTER DATABASE paperless_db OWNER TO paperless_user;
@@ -46,9 +46,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Invoice Ninja (invoicing) ──
     DO \$\$
     BEGIN
-      CREATE USER invoiceninja_user WITH PASSWORD '${INVOICENINJA_DB_PASSWORD:-changeme}';
+      CREATE USER invoiceninja_user WITH PASSWORD '${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER invoiceninja_user WITH PASSWORD '${INVOICENINJA_DB_PASSWORD:-changeme}';
+      ALTER USER invoiceninja_user WITH PASSWORD '${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE invoiceninja_db TO invoiceninja_user;
     ALTER DATABASE invoiceninja_db OWNER TO invoiceninja_user;
@@ -56,9 +56,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Notes/Impress (collaborative notes) ──
     DO \$\$
     BEGIN
-      CREATE USER notes_user WITH PASSWORD '${NOTES_DB_PASSWORD:-changeme}';
+      CREATE USER notes_user WITH PASSWORD '${NOTES_DB_PASSWORD:-CHANGEME_notes}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER notes_user WITH PASSWORD '${NOTES_DB_PASSWORD:-changeme}';
+      ALTER USER notes_user WITH PASSWORD '${NOTES_DB_PASSWORD:-CHANGEME_notes}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE notes_db TO notes_user;
     ALTER DATABASE notes_db OWNER TO notes_user;
@@ -67,9 +67,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- first boot, so it needs database ownership (PG15+ public schema)
     DO \$\$
     BEGIN
-      CREATE USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-changeme}';
+      CREATE USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-CHANGEME_surveys}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-changeme}';
+      ALTER USER limesurvey_user WITH PASSWORD '${SURVEYS_DB_PASSWORD:-CHANGEME_surveys}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE limesurvey_db TO limesurvey_user;
     ALTER DATABASE limesurvey_db OWNER TO limesurvey_user;
@@ -79,9 +79,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- sogo_acl, sogo_store) on first start
     DO \$\$
     BEGIN
-      CREATE USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-changeme}';
+      CREATE USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-CHANGEME_sogo}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-changeme}';
+      ALTER USER sogo_user WITH PASSWORD '${SOGO_DB_PASSWORD:-CHANGEME_sogo}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE sogo TO sogo_user;
     ALTER DATABASE sogo OWNER TO sogo_user;
@@ -89,9 +89,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
     -- ── Nosdesk (ticketing/helpdesk) ──
     DO \$\$
     BEGIN
-      CREATE USER nosdesk_user WITH PASSWORD '${NOSDESK_DB_PASSWORD:-changeme}';
+      CREATE USER nosdesk_user WITH PASSWORD '${NOSDESK_DB_PASSWORD:-CHANGEME_nosdesk_db}';
     EXCEPTION WHEN duplicate_object THEN
-      ALTER USER nosdesk_user WITH PASSWORD '${NOSDESK_DB_PASSWORD:-changeme}';
+      ALTER USER nosdesk_user WITH PASSWORD '${NOSDESK_DB_PASSWORD:-CHANGEME_nosdesk_db}';
     END \$\$;
     GRANT ALL PRIVILEGES ON DATABASE nosdesk_db TO nosdesk_user;
     -- PG15+: schema public is owned by pg_database_owner — services that
