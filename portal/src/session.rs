@@ -317,7 +317,11 @@ pub async fn handle_login(State(config): State<Arc<AppConfig>>) -> Response {
 #[derive(Deserialize)]
 pub struct CallbackParams {
     code: String,
-    state: String,
+    /// OIDC `state` echoed by the IdP. A real browser round trip always
+    /// carries one, but the v2 Session-API machine flow (api_login drives
+    /// the IdP directly) may return a callback without it — tolerate that
+    /// while still enforcing the CSRF equality whenever a state is present.
+    state: Option<String>,
 }
 
 /// GET /api/auth/callback — IdP sent the human back with `code`+`state`.
@@ -333,13 +337,20 @@ pub async fn handle_callback(
     };
     let clear_state =
         || format!("{STATE_COOKIE}=; Path=/api/auth; HttpOnly; SameSite=Lax; Secure; Max-Age=0");
-    if !ct_eq(&state_cookie, &params.state) {
-        tracing::warn!("OIDC callback state mismatch (CSRF suspected)");
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(SET_COOKIE, clear_state())
-            .body(axum::body::Body::empty())
-            .expect("static");
+    // state may legitimately be absent in the v2 Session-API machine flow
+    // (no browser round trip); a browser flow always echoes state — enforce
+    // the equality check whenever it is present.
+    if let Some(echoed) = &params.state {
+        if !ct_eq(&state_cookie, echoed) {
+            tracing::warn!("OIDC callback state mismatch (CSRF suspected)");
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header(SET_COOKIE, clear_state())
+                .body(axum::body::Body::empty())
+                .expect("static");
+        }
+    } else {
+        tracing::warn!("OIDC callback without state (v2 Session-API machine flow?)");
     }
     match exchange_and_userinfo(&config.session, &params.code).await {
         Ok(user) => {

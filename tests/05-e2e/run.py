@@ -456,7 +456,9 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         r = session.get(cb, allow_redirects=False, timeout=T)
         if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMESESSION"):
             stage = (f"callback: HTTP {r.status_code}, "
-                     f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}")
+                     f"cookie={'yes' if session.cookies.get('OPENSMESESSION') else 'no'}, "
+                     f"qs={sorted(qs) if qs else []}, "
+                     f"state_cookie={'yes' if session.cookies.get('OPENSMESTATE') else 'no'}")
             return False
         return True
     except (E2EError, KeyError, requests.RequestException) as exc:
