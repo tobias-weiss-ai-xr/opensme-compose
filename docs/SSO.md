@@ -69,14 +69,14 @@ Paar in `.env` unter den Schlüsseln der jeweiligen App).
 
 ## Status-Tabelle
 
-Stand: **2026-10-26, live verifiziert auf opensme.graphwiz.ai**.
+Stand: **2026-10-27** (CI-verifiziert auf HEAD; Live-Zeile so weit wie möglich).
 
 | Dienst | Client | Status | Anmerkung |
 |---|---|---|---|
 | OpenCloud (Dateien/ocis) | `opencloud` (`OC_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Headless-Beweis: authorize → v2 Session API → JWT → OCS `/ocs/v1.php/cloud/user` 200 **+** WebDAV 200 als `zitadel-admin@opensme.auth.home.opensme.graphwiz.ai`. Braucht zwingend `OIDC_TOKEN_TYPE_JWT` + Backchannel-Pin + Autoprovisioning (Abschnitte unten). |
 | Chat (Element/Synapse) | `opensme-synapse` (`SYNAPSE_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Synapse-SSO: `/login/sso/redirect` → 302 auf Zitadel-Authorize mit PKCE. Element: `base_url` **und** `server_name` sind beide `matrix.home.opensme.graphwiz.ai` — `server_name` wird im Entrypoint aus `ELEMENT_DEFAULT_SERVER_URL` abgeleitet (kein `ELEMENT_HOMESERVER_NAME`), kann also nicht desyncen. |
 | Notes (Impress) | `opensme-notes` (`NOTES_OIDC_CLIENT_ID`) | 🟡 verdrahtet | Client registriert, Redirect auf den IdP funktioniert; **positiver Flow-Test (Login durchspielen) steht noch aus.** |
-| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | ❌ nicht OIDC-verdrahtet | Registrierungs-Branch + e2e-Journey (`tests/05-e2e/webmail.py`) existieren für den Demo-Stack; auf der Live-Instanz ist SSO (noch) nicht aktiv. |
+| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟡 verdrahtet, Demo verifiziert | Client registriert via `scripts/zitadel-client.sh --app sogo`; der echte SSO-Flow (authorize → IdP-Session-API → Webmail-Session) wird von `tests/05-e2e/webmail.py` im CI-Job „E2E — mail profile (Stalwart + SOGo webmail)“ grün durchlaufen. Live-Aktivierung auf opensme.graphwiz.ai steht noch aus — nach dem (wedge-gated) Deploy erneut verifizieren. |
 | Paperless | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
 | Invoice (Invoice-Ninja) | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
 | Operaton (Camunda-Nachfolger) | — | ❌ nicht OIDC-verdrahtet | Kein Client registriert. |
