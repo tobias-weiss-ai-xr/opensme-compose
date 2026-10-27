@@ -41,6 +41,17 @@ services:
       PAPERLESS_DBUSER: paperless_user
       PAPERLESS_DBPASS: ${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}
       PAPERLESS_URL: https://paperless.${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      # ── SSO via the central IdP (optional — register the client with
+      #    scripts/zitadel-client.sh --app paperless; issuer defaults to the
+      #    auth.<domain> discovery URL) ──
+      # django-allauth generic OIDC provider (slug 'openid_connect'): the
+      # browser callback is /accounts/openid_connect/login/callback/. PKCE is
+      # required by Zitadel; fetch_userinfo maps the identity claims.
+      PAPERLESS_APPS: "allauth.socialaccount.providers.openid_connect"
+      PAPERLESS_SOCIAL_AUTO_SIGNUP: "true"
+      PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS: "true"
+      PAPERLESS_LOGOUT_REDIRECT_URL: ${PAPERLESS_OIDC_LOGOUT_URL:-}
+      PAPERLESS_SOCIALACCOUNT_PROVIDERS: "{\"openid_connect\":{\"OAUTH_PKCE_ENABLED\":true,\"APPS\":[{\"provider_id\":\"zitadel\",\"name\":\"openSME SSO\",\"client_id\":\"${PAPERLESS_OIDC_CLIENT_ID:-}\",\"secret\":\"${PAPERLESS_OIDC_CLIENT_SECRET:-}\",\"settings\":{\"server_url\":\"https://auth.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/.well-known/openid-configuration\",\"fetch_userinfo\":true}}],\"SCOPE\":[\"openid\",\"profile\",\"email\"]}}"
       PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:-CHANGEME_generate_64_chars}
       PAPERLESS_TIME_ZONE: ${TZ:-Europe/Berlin}
       PAPERLESS_OCR_LANGUAGE: deu+eng

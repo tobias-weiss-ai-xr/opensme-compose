@@ -96,9 +96,9 @@ Modes:
 
 Options:
   --app NAME         which client to ensure/remove: opencloud (default),
-                     portal, notes, synapse, ticketing or sogo — selects the
-                     redirect URIs and the .env keys the Zitadel-issued
-                     credentials are persisted under
+                     portal, notes, synapse, ticketing, sogo or paperless —
+                     selects the redirect URIs and the .env keys the
+                     Zitadel-issued credentials are persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -127,7 +127,7 @@ while [[ $# -gt 0 ]]; do
     --remove)   MODE=remove; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -267,8 +267,24 @@ case "$APP_KIND" in
     # root are registered for both protocol faces.
     base_paths=("/SOGo" "/SOGo/")
     ;;
+  paperless)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-paperless"
+    CLIENT_ID_KEY="PAPERLESS_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="PAPERLESS_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
+    # Paperless-ngx logs in through django-allauth's GENERIC OIDC provider
+    # (provider slug 'openid_connect'): the browser lands back at
+    # /accounts/openid_connect/login/callback/ (services/paperless.yml sets
+    # PAPERLESS_SOCIALACCOUNT_PROVIDERS with OAUTH_PKCE_ENABLED + the
+    # issuer discovery URL).
+    app_domain="$(env_get PAPERLESS_DOMAIN "paperless.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get PAPERLESS_OIDC_CLIENT_ID opensme-paperless)"
+    base_paths=("/accounts/openid_connect/login/callback/")
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless)"
     exit 1
     ;;
 esac

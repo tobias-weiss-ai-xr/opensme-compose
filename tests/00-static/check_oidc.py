@@ -77,6 +77,7 @@ COMPOSE_CANDIDATES = [
     "services/ticketing.yml",
     "services/notes.yml",
     "services/synapse.yml",
+    "services/paperless.yml",
 ]
 
 
