@@ -60,8 +60,10 @@ services:
       # Bypass corporate HTTP proxy for internal Docker traffic (OIDC to
       # Zitadel, Postgres, memcached, Stalwart). Without this, SOGo routes
       # OIDC discovery through the proxy which can't resolve .opensme.local.
-      NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,172.16.0.0/12,.opensme.local}
-      no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,172.16.0.0/12,.opensme.local}
+      # To also cover the Docker bridge subnet (e.g. 172.16.0.0/12) in proxy
+      # environments, set SOGO_NO_PROXY in your .env (gitignored).
+      NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,.opensme.local}
+      no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,.opensme.local}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:
