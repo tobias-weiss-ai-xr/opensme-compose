@@ -1,0 +1,54 @@
+# openSME — Blackbox exporter configuration (blueprint)
+# ------------------------------------------------------
+# Monitors every component of an openSME deployment "from the outside":
+# the probe always goes through the public entry point (reverse proxy),
+# so a wrong router, stale container IP, dead backend or wedged daemon
+# shows up as probe_success == 0 — exactly the failure class that hit
+# the apex and home 502s on 2026-10-27.
+#
+# Adjust here: add/remove modules or tweak valid_status_codes / markers.
+modules:
+  # ── Tier 1: reachability / routing health ──────────────────────────
+  # Any 2xx, any 3xx (redirects — e.g. login or locale jumps) and 401
+  # (auth-gated) are VALID. 404/400/403/405/429 are NOT: they mean a
+  # broken router / missing route / misconfigured backend.
+  http_avail:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 201, 202, 204, 301, 302, 303, 307, 308, 401]
+
+  # ── Tier 2: strict 2xx (deep checks like /health must not redirect) ─
+  http_200:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 201, 202, 204]
+
+  # ── Tier 3: content check (200 + an expected marker in the body) ───
+  # The marker must be unique to YOUR page (adjust below; one module per
+  # marker). Use for the marketing site so a 200 empty/error page still
+  # alerts.
+  http_content:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      # ADJUST ME — put a stable string your site always renders, e.g.
+      # the <title> or a footer slogan of the marketing page.
+      fail_if_body_not_matches_regexp: ["openSME"]
+
+  # ── Tier 4: TCP reachability (SMTP/IMAP/POP3 — Stalwart etc.) ──────
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+
+  # ── Tier 5: ICMP (only where you are allowed to ping the host) ─────
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4

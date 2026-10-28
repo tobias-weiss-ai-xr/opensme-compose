@@ -1,0 +1,25 @@
+# openSME — blackbox alert rules (mount into your Prometheus rule_files).
+#
+# probe_success == 0 means the public probe of a component failed (2xx/3xx/401
+# not returned). probe_duration_seconds catches pages that answer but crawl.
+groups:
+  - name: opensme-blackbox
+    rules:
+      - alert: OpenSMEComponentDown
+        expr: probe_success{job=~"opensme-blackbox.*"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "openSME component unreachable: {{ $labels.instance }}"
+          description: >-
+            Blackbox probe for {{ $labels.instance }} failed. Check the
+            reverse-proxy router, the target container and the backend —
+            this is the failure class of the 2026-10-27 apex/home 502s.
+      - alert: OpenSMEComponentSlow
+        expr: probe_duration_seconds{job=~"opensme-blackbox.*"} > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "openSME component slow: {{ $labels.instance }} ({{ $value }}s)"

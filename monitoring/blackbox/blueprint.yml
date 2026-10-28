@@ -1,0 +1,125 @@
+# openSME — Blackbox monitoring blueprint (target inventory)
+# ==========================================================
+# This is the single "adjust here" surface for blackbox monitoring.
+# Every http target resolves to:
+#
+#     <scheme>://<fqdn><path>
+#     fqdn = <full>                                     if `full` is set
+#          = <sub>.<MONITOR_SUBDOMAIN_BASE><OPENSME_DOMAIN>   otherwise
+#
+# The `env:` hint (optional) names a *_DOMAIN env var that, WHEN SET,
+# overrides the fqdn for that entry (e.g. a live deployment that answers
+# under a non-standard subdomain). Disable an entry you don't run with
+# `enabled: false`.
+#
+# Render to Prometheus scrape configs:
+#   python3 monitoring/blackbox/generate-scrape.py --env-file .env --print
+#   python3 monitoring/blackbox/generate-scrape.py --env-file .env -o opensme-scrape.yml
+# See monitoring/blackbox/README.md.
+
+scheme: https
+
+# Shared subdomain prefix for `sub:` entries.
+#   ""      → svc.<OPENSME_DOMAIN>            (vanilla compose scheme)
+#   "home." → svc.home.<OPENSME_DOMAIN>       (live homelab scheme)
+sub_base: "{{ MONITOR_SUBDOMAIN_BASE }}"
+
+# Common fallback for any `env:` hint if the variable is unset.
+targets:
+  # ── Entry points (absolute, no sub_base applied) ─────────────────────
+  - name: marketing (apex)
+    full: "{{ OPENSME_DOMAIN }}"
+    module: http_content
+    comment: "Promo/marketing site (Traefik file-router or nginx on 127.0.0.1:8095); content marker keeps a 200 error page from passing"
+  - name: portal (UI)
+    full: "{{ PORTAL_DOMAIN }}"
+    module: http_avail
+    comment: "Next.js portal UI"
+  - name: portal (health)
+    full: "{{ PORTAL_DOMAIN }}"
+    path: /health
+    module: http_200
+    comment: "Deep check — Rust backend must answer 200"
+  - name: webmail (SOGo6)
+    sub: webmail
+    env: WEBMAIL_DOMAIN
+    path: /en
+    module: http_200
+    comment: "Deep check on the locale landing page (200). Avoid /SOGo — it 307-chains to /en/SOGo which 404s; root / already 307→/en (http_avail)"
+
+  # ── Suite services under sub_base + <OPENSME_DOMAIN> ─────────────────
+  - name: idp (Zitadel)
+    sub: auth
+    env: AUTH_DOMAIN
+    module: http_avail
+  - name: opencloud
+    sub: cloud
+    env: CLOUD_DOMAIN
+    module: http_avail
+    comment: "Login redirect (302/200) is valid"
+  - name: mail (Stalwart, webadmin)
+    sub: mail
+    env: MAIL_DOMAIN
+    module: http_avail
+    enabled: false
+    comment: "Operator UI — stalwart binds the http listener on [::]:8080, which stalls v4-mapped HTTP from the host; mail availability is carried by the TCP probes below."
+  - name: notes
+    sub: notes
+    env: NOTES_DOMAIN
+    module: http_avail
+  - name: chat (Synapse/Element)
+    sub: chat
+    env: CHAT_DOMAIN
+    module: http_avail
+  - name: matrix (federation client API)
+    sub: matrix
+    env: MATRIX_DOMAIN
+    path: /_matrix/client/versions
+    module: http_200
+  - name: paperless
+    sub: paperless
+    env: PAPERLESS_DOMAIN
+    module: http_avail
+  - name: bpm (Operaton/Camunda)
+    sub: bpm
+    env: BPM_DOMAIN
+    module: http_avail
+  - name: surveys (LimeSurvey)
+    sub: surveys
+    env: SURVEYS_DOMAIN
+    module: http_avail
+  - name: collabora
+    sub: collabora
+    env: COLLABORA_DOMAIN
+    module: http_avail
+  - name: invoices (Invoice Ninja)
+    sub: invoices
+    env: INVOICES_DOMAIN
+    module: http_avail
+  - name: registry
+    sub: registry
+    env: REGISTRY_DOMAIN
+    module: http_avail
+    comment: "401 without a token is valid; REGISTRY_DOMAIN overrides (e.g. registry.openedusuite.org)"
+  - name: helpdesk (Nosdesk)
+    sub: help
+    env: NOSDESK_DOMAIN
+    module: http_avail
+    enabled: false
+    comment: "Enable only if you run the ticketing/Nosdesk service"
+
+# Port-level checks (SMTP / IMAP / submission against Stalwart — these are
+# the authoritative mail surfaces; stalwart publishes 25, 143 and 587).
+tcp:
+  - name: smtp (Stalwart :25)
+    sub: mail
+    env: MAIL_DOMAIN
+    port: 25
+  - name: imap (Stalwart :143)
+    sub: mail
+    env: MAIL_DOMAIN
+    port: 143
+  - name: submission (Stalwart :587)
+    sub: mail
+    env: MAIL_DOMAIN
+    port: 587

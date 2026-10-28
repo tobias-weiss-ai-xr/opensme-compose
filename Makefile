@@ -189,6 +189,17 @@ logs-size:
 	@echo -e "$(GREEN)✓ See docs/PERFORMANCE.md for log retention settings$(NC)"
 
 # ---------------------------------------------------------------------------
+# Monitoring blueprint (monitoring/blackbox) — render blackbox scrape configs
+# ---------------------------------------------------------------------------
+monitoring-render:    ## Render blackbox scrape config from .env (standalone mode)
+	@echo -e "$(BLUE)── blackbox blueprint: resolved probes ──$(NC)"
+	@$(PYTHON) monitoring/blackbox/generate-scrape.py --env-file .env --print 2>&1
+	@echo -e "$(BLUE)── writing monitoring/blackbox/standalone-prometheus.yml ──$(NC)"
+	@$(PYTHON) monitoring/blackbox/generate-scrape.py --env-file .env --mode full \
+		-o monitoring/blackbox/standalone-prometheus.yml
+	@echo -e "$(GREEN)✓ rendered. See monitoring/blackbox/README.md (BLACKBOX_ADDR for central mode)$(NC)"
+
+# ---------------------------------------------------------------------------
 # Benchmark (tests/07-bench) — optional live-host measurements
 # ---------------------------------------------------------------------------
 bench:
