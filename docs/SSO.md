@@ -380,8 +380,33 @@ Container-Restart behoben:
 Rest-Gap (bekannt, kein Edge-Fix möglich): Webmail/SOGo6 — `/api/user/v1/system`
 antwortet 412 `S000001 "Sogo Has Not Been Configured Yet"`; der Server hat
 keine `SOGO_LDAP_URI` und im Stack existiert kein LDAP-User-Source
-(SOGo6 kann nur gegen LDAP authentifizieren). Benötigt nach Wedge-Ende:
-Init-JSONs (`SOGO_INIT_SYSTEM_SETTINGS_PATH`/`DOMAIN_SETTINGS_PATH`) oder
-Admin-API-Bootstrap (`/api/admin/v1/auth/login` → `PATCH /config/system` +
-`/config/domain-default`) **plus** einen erreichbaren LDAP-Server mit den
-Suite-Nutzern.
+(SOGo6 kann nur gegen LDAP authentifizieren).
+
+**Lösung ohne LDAP: relationale SQL-User-Source (umgesetzt).** SOGo6-server
+(„PostgreSQL user source“) authentifiziert Webmail-Logins gegen eine kleine
+`users`-Tabelle **in derselben relationalen Datenbank**, die der Server
+ohnehin nutzt (`opensme-sogo6-postgres`, db `sogo`; leerer
+`US_SQL_USER_URL` ⇒ Single-DB-Fallback auf die App-DB). Kein zweites
+System-of-Record, kein LDAP:
+
+- `app/manager/user_source/ClientPostgreSQLUserSource.py` — implementiert
+  den `ClientUserSource`-Vertrag (`check_login`): uid+password gegen
+  `users`, Kontakt (`cn`/`mail`) aus derselben Zeile; fail-closed
+  Passwortprüfung (`{bcrypt}` / `{pbkdf2-sha256}`, unbekannte Schemata ⇒
+  Login schlägt fehl, nie ein 500); `US_SQL_DOMAIN_FIELD` für
+  Domain-Filterung; Tabelle/Spalten über die User-Source-Settings.
+- `ModuleUserSource` routet `postgresql` jetzt über die dedizierten
+  `MAP_KEY_AUTH_*` (Adressbuch-MAP unverändert; SQL-*Directory*-Suche
+  bleibt dokumentierter Stub).
+- Init-Default: `scripts/init/domain_settings.json` seedet eine
+  `postgresql`-User-Source (`users_table`) statt des LDAP-Beispiels —
+  frische Installationen booten LDAP-frei.
+- Wiring (wedge-gated, siehe Deploy): `sogo6-users-init.sql` in
+  `roles/opensme_suite/files/` (idempotentes `CREATE TABLE IF NOT EXISTS
+  users …`, in `mail-sogo6.yml` unter `sogo6-postgres` gemountet) + Neuanlage
+  der Demo-Webmail-User über `scripts/provision-demo-users.sh --component
+  sogo6` (pbkdf2-sha256, Identität `<user>@<DOMAIN>` = uid = mail =
+  IdP-Email-Claim, sodass Plain-Login und Webmail-SSO eine Identität teilen).
+- Nach Wedge-Ende: Tabelle in der Live-`sogo`-DB anlegen, Domain-Settings
+  per Admin-API auf die `postgresql`-User-Source zeigen, Provisioning
+  laufen lassen — dann Webmail-Login statt 412 verifizieren.

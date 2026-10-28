@@ -51,7 +51,7 @@ VERBOSE=false
 IN_DOCKER=false
 COMPONENT="zitadel"
 
-ALL_COMPONENTS="zitadel operaton synapse paperless stalwart"
+ALL_COMPONENTS="zitadel operaton synapse paperless stalwart sogo6"
 
 # ── argument parsing ──────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -527,6 +527,70 @@ sogo_password_hash() {
         "$(openssl passwd -6 -salt "$(openssl rand -hex 8)" "$1")"
 }
 
+# SOGo6 SQL user source password: {pbkdf2-sha256}$iterations$salt_b64$digest_b64.
+# Stdlib hashlib (no external deps); SOGo6-server verify_password supports this
+# exact scheme. A fresh 16-byte salt per call keeps re-runs valid.
+sogo6_users_password_hash() {
+    python3 - "$1" <<'PY'
+import base64, hashlib, os, sys
+pw = sys.argv[1].encode()
+iterations = 100_000
+salt = os.urandom(16)
+digest = base64.b64encode(hashlib.pbkdf2_hmac('sha256', pw, salt, iterations)).decode()
+print('{pbkdf2-sha256}%d$%s$%s' % (iterations, base64.b64encode(salt).decode(), digest))
+PY
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# SOGO6 (webmail SQL user source, users table) — single relational DB
+#
+# SOGo6-server authenticates webmail logins against a small `users` table
+# living in the SAME relational DB the server already uses
+# (opensme-sogo6-postgres, db `sogo`) — no LDAP anywhere. A demo user needs
+# one row here with the identity form <user>@<DOMAIN> (uid == mail == the
+# IdP email claim), so plain login and the webmail SSO share one identity.
+# The password is a {pbkdf2-sha256} hash; ON CONFLICT preserves an existing
+# password (a re-run is not a password reset).
+# ══════════════════════════════════════════════════════════════════════
+SOGO6_PG_CONTAINER="${SOGO6_PG_CONTAINER:-opensme-sogo6-postgres}"
+
+main_sogo6_users() {
+    load_config || return 1
+    info "[sogo6] Provisioning webmail users (SQL user source) for: $COMPANY (@$DOMAIN)"
+    $DRY_RUN && { info "[sogo6] would write rows in $SOGO6_PG_CONTAINER (sogo.users); IMAP/IdP identities = <user>@$DOMAIN"; return 0; }
+
+    local pg_user
+    pg_user=$(docker exec "$SOGO6_PG_CONTAINER" printenv POSTGRES_USER 2>/dev/null || true)
+    pg_user="${pg_user:-sogo}"
+    if ! docker exec "$SOGO6_PG_CONTAINER" psql -U "$pg_user" -d sogo -tAc \
+            'select 1 from users limit 1' >/dev/null 2>&1; then
+        err "[sogo6] table sogo.users is not readable — apply the sogo6 users-init SQL first"
+        return 1
+    fi
+
+    local written=0 failures=0
+    while IFS= read -r user; do
+        local un pw cn email
+        un=$(echo "$user" | jq -r '.username')
+        pw=$(echo "$user" | jq -r '.password')
+        cn=$(echo "$user" | jq -r '.displayName')
+        email="$un@$DOMAIN"
+        if docker exec "$SOGO6_PG_CONTAINER" psql -U "$pg_user" -d sogo -q -v ON_ERROR_STOP=1 \
+                -c "INSERT INTO users (uid, cn, mail, domain, password, enabled)
+                    VALUES ('$email', '$cn', '$email', '$DOMAIN', '$(sogo6_users_password_hash "$pw")', TRUE)
+                    ON CONFLICT (uid) DO UPDATE
+                       SET cn = EXCLUDED.cn, mail = EXCLUDED.mail, domain = EXCLUDED.domain" >/dev/null 2>&1; then
+            written=$((written+1))
+            $VERBOSE && info "  ✓ $email"
+        else
+            err "  $email: sogo6 users row could not be written"
+            failures=$((failures+1))
+        fi
+    done < <(jq -c '.users[]' "$USERS_JSON")
+    info "[sogo6] done: $written webmail users in $SOGO6_PG_CONTAINER (sogo.users)"
+    [[ $failures -eq 0 ]]
+}
+
 main_stalwart() {
     load_config || return 1
     info "[stalwart] Provisioning mail accounts for: $COMPANY (@$STALWART_MAIL_DOMAIN)"
@@ -731,6 +795,7 @@ run_components() {
             synapse)   main_synapse   || failures=$((failures+1)) ;;
             paperless) main_paperless || failures=$((failures+1)) ;;
             stalwart)  main_stalwart  || failures=$((failures+1)) ;;
+            sogo6)     main_sogo6_users || failures=$((failures+1)) ;;
             invoice)   info "[invoice] not wired: Invoice Ninja users are company-bound; demo ships a single admin" ;;
             *)         err "Unknown component: $c (known: $ALL_COMPONENTS)"; failures=$((failures+1)) ;;
         esac
