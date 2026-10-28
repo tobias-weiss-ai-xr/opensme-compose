@@ -17,7 +17,7 @@ RUN cd /tmp \
     && test -n "$BIN" \
     && install -m 0755 "$BIN" /usr/local/bin/raisfast
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates wget
 COPY --from=fetch /usr/local/bin/raisfast /raisfast
 # SQLite database + uploads live under /data (single-dir contract)
