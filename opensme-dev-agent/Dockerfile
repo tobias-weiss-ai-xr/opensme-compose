@@ -9,7 +9,7 @@ COPY internal ./internal
 COPY opensme-knowledge ./opensme-knowledge
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent .
 
-FROM alpine:3.19
+FROM alpine:3.24
 # docker-cli: the checker/healer shell out to the docker CLI over the
 # read-only socket — no SDK, works on any base image.
 RUN apk add --no-cache docker-cli ca-certificates tzdata
