@@ -315,3 +315,73 @@ python3 tests/00-static/check_oidc.py      # R1–R7: Registrierung, Login-UI,
                                            # Backchannel-Pin, Autoprovisioning,
                                            # Element server_name
 ```
+
+## Portal-Login (OIDC-RP) — Live-Provisionierung
+
+Der Portal-Rust (Rust `portal/`) ist ein eigener OIDC-Client und schaltet
+seinen Login **fail-closed** ab, solange eine der folgenden Env-Variablen
+fehlt (`GET /api/auth/login` → 503 "login is not configured", Header zeigt
+nie "Anmelden"):
+
+- `IDP_URL` (Issuer, extern erreichbar)
+- `IDP_INTERNAL_URL` (optional — server-seitige Basis für Token/Discovery;
+  leer ⇒ dieselbe externe Basis)
+- `PORTAL_OIDC_CLIENT_ID` / `PORTAL_OIDC_CLIENT_SECRET`
+- `LOGIN_SESSION_COOKIE_SECRET` (≥32 Bytes, rotiert)
+
+Client registrieren (idempotent, schreibt die Credentials in `.env`):
+
+```sh
+scripts/zitadel-client.sh --app portal
+# → Redirect-URIs: https://<PORTAL_DOMAIN>/api/auth/callback (+ http)
+#   Post-Logout:   https://<PORTAL_DOMAIN>/logged-out
+```
+
+Endpunkte:
+
+- `GET /api/auth/login` → 303 an Zitadels `/oidc/v1/authorize`
+  (**nur legacy/404**) bzw. `/oauth/v2/authorize` — der Autorize-Pfad muss
+  aus der Discovery stammen; ein hartkodiertes `/oidc/v1/authorize` landet
+  auf Zitadels "404 page not found" (fix: d9b7eab).
+- `GET /api/session` → immer 200: `{"authenticated":false}` oder
+  `{"authenticated":true,"user":{sub,name,email}}`; der Header zeigt
+  anhand dessen **Anmelden** (anonym) bzw. **Abmelden** (Session).
+
+Blockierter Container (Wedge/runc-EOF): Login live freischalten über den
+Host-Standin des Rust-Binaries (`docker create` → `docker cp` → Host-Start
+mit `PORTAL_PORT` + erweitertem Env; `docker cp` braucht keinen
+Container-Start). Env des laufenden Containers via `docker inspect`.
+
+## OpenCloud — Edge/Live-Fixes (2026-10-28)
+
+Zwei Fehler machten den OC-Login unbrauchbar, beide ohne
+Container-Restart behoben:
+
+1. **CSP blockt OIDC-Discovery.** OC-web deploys eine harte
+   `connect-src 'self' blob: …`-CSP (kein Config-Knopf im Image); die
+   Login-Seite holt die Discovery vom IdP (`auth.home…`/
+   `.well-known/openid-configuration`) → CSP-Refusal → [JsonService]
+   Network Error → leere "Anmeldung erlaubt?"-Seite. Edge-Fix: Traefik-
+   Datei-Router (Priority > Label-Router) auf `cloud.home…` override-t die
+   CSP-Header-Zeile und erlaubt die IdP-Origin in `connect-src` (Rest
+   byte-identisch). Siehe VM `/root/git/docker-traefik/dynamic/cloud-csp.yml`.
+2. **OC-web braucht einen Public/PKCE-Client.** OC-web (oidc-client-ts)
+   tauscht den Code **browser-seitig** mit `client_id` + `code_verifier`,
+   aber **ohne** Client-Secret; ein confidencial registrierter Zitadel-Client
+   antwortet `invalid_client: empty client secret` → Callback hängt auf
+   `/web-oidc-callback`. Fix: Zitadel-App auf `authMethodType:
+   OIDC_AUTH_METHOD_TYPE_NONE` (Public/PKCE) ziehen:
+   `PUT $IDP/management/v1/projects/{pid}/apps/{aid}/oidc_config` mit
+   `{"appType":"OIDC_APP_TYPE_PKCE","authMethodType":"OIDC_AUTH_METHOD_TYPE_NONE",…}`
+   (v1-Flat-Body, siehe `scripts/zitadel-client.sh` für die API-/PAT-Ingredienzen;
+   PAT nur via `docker compose cp zitadel:/machinekey/pat` lesbar — NULs
+   strippen). Danach: Cloud-Login → Personal-Files.
+
+Rest-Gap (bekannt, kein Edge-Fix möglich): Webmail/SOGo6 — `/api/user/v1/system`
+antwortet 412 `S000001 "Sogo Has Not Been Configured Yet"`; der Server hat
+keine `SOGO_LDAP_URI` und im Stack existiert kein LDAP-User-Source
+(SOGo6 kann nur gegen LDAP authentifizieren). Benötigt nach Wedge-Ende:
+Init-JSONs (`SOGO_INIT_SYSTEM_SETTINGS_PATH`/`DOMAIN_SETTINGS_PATH`) oder
+Admin-API-Bootstrap (`/api/admin/v1/auth/login` → `PATCH /config/system` +
+`/config/domain-default`) **plus** einen erreichbaren LDAP-Server mit den
+Suite-Nutzern.

@@ -319,6 +319,30 @@ fn urlencode(s: &str) -> String {
     out
 }
 
+/// GET /api/session — public session probe for the UI chrome.
+///
+/// Always answers 200 so the header can tell "anonymous" from "signed in"
+/// without an error path: `{"authenticated":false}` when no valid portal
+/// session cookie is present, or `{"authenticated":true,"user":{...}}`
+/// otherwise. Deliberately leaks only: authenticated boolean + the identity
+/// the cookie itself vouches for (sub/name/email — nothing secret).
+pub async fn handle_session(State(config): State<Arc<AppConfig>>, headers: HeaderMap) -> Response {
+    let session = if config.session.enabled() {
+        cookie_value(&headers, PORTAL_SESSION_COOKIE)
+            .and_then(|v| verify_session(&config.session, &v))
+    } else {
+        None
+    };
+    let body = match session {
+        Some(s) => serde_json::json!({
+            "authenticated": true,
+            "user": { "sub": s.sub, "name": s.name, "email": s.email },
+        }),
+        None => serde_json::json!({ "authenticated": false }),
+    };
+    (StatusCode::OK, Json(body)).into_response()
+}
+
 /// GET /api/auth/login — start the OIDC flow. 303 to the IdP with a fresh
 /// `state` bound in an HttpOnly short-lived cookie; the callback verifies it.
 pub async fn handle_login(State(config): State<Arc<AppConfig>>) -> Response {
@@ -568,6 +592,66 @@ mod tests {
         assert!(!c.enabled()); // fail-closed while a placeholder
         c.session_secret = SECRET.as_bytes().to_vec();
         assert!(c.enabled());
+    }
+
+    #[test]
+    fn session_probe_anonymous_is_200_false() {
+        let sc = cfg();
+        let mut app = crate::tests::cfg_with("https://auth.example", None, "");
+        app.session = sc;
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/session")
+            .body(Body::from(""))
+            .unwrap();
+        let res = one(
+            req,
+            Router::new()
+                .route("/api/session", get(handle_session))
+                .with_state(std::sync::Arc::new(app)),
+        );
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(axum::body::to_bytes(res.into_body(), usize::MAX))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["authenticated"], false);
+    }
+
+    #[test]
+    fn session_probe_signed_in_returns_user() {
+        let sc = cfg();
+        let cookie_v = mint_session(&sc, "sub-1", "Ada Demo", "ada@example");
+        let mut app = crate::tests::cfg_with("https://auth.example", None, "");
+        app.session = sc;
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/session")
+            .header("cookie", format!("{PORTAL_SESSION_COOKIE}={cookie_v}"))
+            .body(Body::from(""))
+            .unwrap();
+        let res = one(
+            req,
+            Router::new()
+                .route("/api/session", get(handle_session))
+                .with_state(std::sync::Arc::new(app)),
+        );
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(axum::body::to_bytes(res.into_body(), usize::MAX))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["authenticated"], true);
+        assert_eq!(body["user"]["name"], "Ada Demo");
+        assert_eq!(body["user"]["email"], "ada@example");
     }
 
     #[test]

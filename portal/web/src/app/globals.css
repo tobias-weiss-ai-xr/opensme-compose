@@ -286,3 +286,12 @@ body {
   background: #8e1f1f;
   border-color: #8e1f1f;
 }
+
+.btn-login {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-login:hover {
+  filter: brightness(0.92);
+}

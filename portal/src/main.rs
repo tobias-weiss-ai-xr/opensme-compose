@@ -939,6 +939,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/announcements", get(handle_announcements))
         .route("/api/feeds", get(handle_feeds))
         .route("/api/auth/login", get(session::handle_login))
+        .route("/api/session", get(session::handle_session))
         .route("/api/auth/callback", get(session::handle_callback))
         .route("/api/logout", post(logout::handle_logout))
         .route("/logged-out", get(logout::handle_logged_out));
