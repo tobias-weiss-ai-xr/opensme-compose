@@ -407,19 +407,17 @@ System-of-Record, kein LDAP:
   der Demo-Webmail-User über `scripts/provision-demo-users.sh --component
   sogo6` (pbkdf2-sha256, Identität `<user>@<DOMAIN>` = uid = mail =
   IdP-Email-Claim, sodass Plain-Login und Webmail-SSO eine Identität teilen).
-- Nach Wedge-Ende: **Image aktualisieren + Container neu erstellen** — seit
-  `4a79647` ist im Runtime-Image `scripts/init/*.json` enthalten und
-  `SOGO_INIT_SYSTEM_SETTINGS_PATH`/`SOGO_INIT_DOMAIN_SETTINGS_PATH` zeigen
-  auf sie, sodass der Server beim ersten Boot **selbst bootstrappt**
-  (system + default-domain, User-Source = postgresql users table, kein
-  LDAP) statt im `S000001`-Zustand zu parken. **Ein Befehl dafür:**
-  `bash scripts/sogo6-webmail-activate.sh [--load sogo6-server.img]`
-  (auf der VM, als root): lädt das Image, prüft den runc-Keil (bricht
-  mit Exit 42 statt halb zu deployen), fährt die Suite per `docker compose`
-  mit exakt der Ansible-Chain hoch und verifiziert HTTP-200 statt 412 auf
-  `/api/user/v1/system`. Die `users`-Tabelle existiert auf der Live-sogo6-DB
-  bereits; danach Webmail-Login als `testuer@…`/`Eval2026` verifizieren.
-  Fallback ohne Image-Neubau:
-  Admin-API-Bootstrap (`POST /api/admin/v1/auth/login` (admin/…)
-  → `PATCH /config/system` + `/config/domain-default` mit derselben
-  postgresql-USER_SOURCE).
+- **Webmail-Login ist LIVE (2026-10-29 Abend):** `testuer@…`/`Eval2026` → 200
+  (JWT), falsches Passwort → 401, `/api/user/v1/system` → 200 statt 412.
+  Realisiert per **Hot-Patch des laufenden Containers** (runc-Keil blockte
+  jeden Recreate): `git archive HEAD app scripts/init` → `docker cp` →
+  Init via `docker exec … python` mit `SOGO_INIT_*`-Env → `kill -HUP 1`
+  (gunicorn-Reload). Zwei Folge-Bugs dabei behoben: (1) init-JSON hatte
+  `US_UID="users_table"` (Quellen-ID) statt der uid-**Spalte** `uid`
+  (gefixt `f60ffdd`) — sonst „table/column missing“ → 401; (2) der
+  manuell geseedete Hash war malformed (keine `$`-Separatoren) — neu
+  geseedet im kanonischen `{pbkdf2-sha256}$iter$salt$digest`-Format
+  (Generator: `provision-demo-users.sh` `sogo6_users_password_hash`).
+  Beim Keil-Ende startet der Wedge-Watcher paperless/promo und **überspringt**
+  die sogo6-Aktivierung (Skip-Guard: 200). Ein Recreate auf Image
+  `f60ffdd+` ist damit optional/nachholen.
