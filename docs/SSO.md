@@ -412,9 +412,14 @@ System-of-Record, kein LDAP:
   `SOGO_INIT_SYSTEM_SETTINGS_PATH`/`SOGO_INIT_DOMAIN_SETTINGS_PATH` zeigen
   auf sie, sodass der Server beim ersten Boot **selbst bootstrappt**
   (system + default-domain, User-Source = postgresql users table, kein
-  LDAP) statt im `S000001`-Zustand zu parken. Die `users`-Tabelle existiert
-  auf der Live-sogo6-DB bereits; danach Webmail-Login als
-  `testuer@…`/`Eval2026` verifizieren. Fallback ohne Image-Neubau:
+  LDAP) statt im `S000001`-Zustand zu parken. **Ein Befehl dafür:**
+  `bash scripts/sogo6-webmail-activate.sh [--load sogo6-server.img]`
+  (auf der VM, als root): lädt das Image, prüft den runc-Keil (bricht
+  mit Exit 42 statt halb zu deployen), fährt die Suite per `docker compose`
+  mit exakt der Ansible-Chain hoch und verifiziert HTTP-200 statt 412 auf
+  `/api/user/v1/system`. Die `users`-Tabelle existiert auf der Live-sogo6-DB
+  bereits; danach Webmail-Login als `testuer@…`/`Eval2026` verifizieren.
+  Fallback ohne Image-Neubau:
   Admin-API-Bootstrap (`POST /api/admin/v1/auth/login` (admin/…)
   → `PATCH /config/system` + `/config/domain-default` mit derselben
   postgresql-USER_SOURCE).
