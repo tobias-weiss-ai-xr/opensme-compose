@@ -407,6 +407,14 @@ System-of-Record, kein LDAP:
   der Demo-Webmail-User über `scripts/provision-demo-users.sh --component
   sogo6` (pbkdf2-sha256, Identität `<user>@<DOMAIN>` = uid = mail =
   IdP-Email-Claim, sodass Plain-Login und Webmail-SSO eine Identität teilen).
-- Nach Wedge-Ende: Tabelle in der Live-`sogo`-DB anlegen, Domain-Settings
-  per Admin-API auf die `postgresql`-User-Source zeigen, Provisioning
-  laufen lassen — dann Webmail-Login statt 412 verifizieren.
+- Nach Wedge-Ende: **Image aktualisieren + Container neu erstellen** — seit
+  `4a79647` ist im Runtime-Image `scripts/init/*.json` enthalten und
+  `SOGO_INIT_SYSTEM_SETTINGS_PATH`/`SOGO_INIT_DOMAIN_SETTINGS_PATH` zeigen
+  auf sie, sodass der Server beim ersten Boot **selbst bootstrappt**
+  (system + default-domain, User-Source = postgresql users table, kein
+  LDAP) statt im `S000001`-Zustand zu parken. Die `users`-Tabelle existiert
+  auf der Live-sogo6-DB bereits; danach Webmail-Login als
+  `testuer@…`/`Eval2026` verifizieren. Fallback ohne Image-Neubau:
+  Admin-API-Bootstrap (`POST /api/admin/v1/auth/login` (admin/…)
+  → `PATCH /config/system` + `/config/domain-default` mit derselben
+  postgresql-USER_SOURCE).
