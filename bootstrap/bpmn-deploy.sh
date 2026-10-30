@@ -36,18 +36,21 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 # ── Resolve the engine URL ─────────────────────────
-# 1. Explicit BPM_URL env var (e.g. https://bpm.example.org)
-# 2. Docker exec into the opensme-camunda container (localhost:8080 inside)
+# 1. A locally RUNNING opensme-camunda container (docker exec) — preferred:
+#    immune to edge quirks (the fleet Traefik answers multipart deployment
+#    POSTs with 418/parse-mangling; seen live 2026-10-30) and to BPM_URL
+#    leakage from a sourced .env (BPM_URL is the E2E suite's public URL).
+# 2. Explicit BPM_URL env var (e.g. https://bpm.example.org) — remote engine
 # 3. Fallback: http://localhost:8080 (works if port is published)
 
 BPM_URL="${BPM_URL:-}"
 USE_DOCKER_EXEC=false
 
-if [ -n "$BPM_URL" ]; then
-  echo "Using BPM_URL: ${BPM_URL}"
-elif docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^opensme-camunda$'; then
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^opensme-camunda$'; then
   echo "Found opensme-camunda container — deploying via docker exec"
   USE_DOCKER_EXEC=true
+elif [ -n "$BPM_URL" ]; then
+  echo "Using BPM_URL: ${BPM_URL}"
 else
   BPM_URL="http://localhost:8080"
   echo "Using default BPM_URL: ${BPM_URL}"
