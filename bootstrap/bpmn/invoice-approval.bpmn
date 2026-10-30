@@ -94,12 +94,13 @@
     </serviceTask>
     <sequenceFlow id="flow-9" sourceRef="archive-invoice" targetRef="invoice-approved" />
 
-    <!-- Error definition (needed for boundary event) -->
-    <error id="aiError" name="AIServiceError" errorCode="ai.failure" />
-
     <!-- End events -->
     <endEvent id="invoice-approved" name="Invoice approved" />
     <endEvent id="invoice-rejected" name="Invoice rejected" />
 
   </process>
+
+  <!-- Error definition: MUST live at definitions level (BPMN 2.0 XSD),
+       referenced by the ai-categorize-error boundary event via errorRef. -->
+  <error id="aiError" name="AIServiceError" errorCode="ai.failure" />
 </definitions>
