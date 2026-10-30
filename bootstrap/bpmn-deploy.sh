@@ -100,7 +100,12 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     raise SystemExit(0)
-data = d.get("data") or d.get("result") or []
+# the engine answers /deployment with a bare JSON array (NOT an object
+# with data/result — that shape broke undeploys silently until 2026-10-30)
+if isinstance(d, list):
+    data = d
+else:
+    data = d.get("data") or d.get("result") or []
 for dep in data:
     print("%s\t%s" % (dep.get("id",""), dep.get("name","")))
 ' 2>/dev/null || true)"
