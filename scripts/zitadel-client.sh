@@ -19,6 +19,8 @@
 #              → NOSDESK_OIDC_CLIENT_ID/SECRET
 #   sogo       webmail.<domain>/SOGo[/] (webmail SSO, code lands on
 #              /SOGo/?code=...) → SOGO_OIDC_CLIENT_ID/SECRET
+#   operaton   bpm.<domain>/login/oauth2/code/operaton (Operaton webapps,
+#              native spring-security OAuth2) → OPERATON_OIDC_CLIENT_ID/SECRET
 #
 # SECRET-DRIVEN: Zitadel's Management API takes no client_id / client_secret
 # input — it mints both and returns them (verified against the v4.19 proto;
@@ -96,9 +98,9 @@ Modes:
 
 Options:
   --app NAME         which client to ensure/remove: opencloud (default),
-                     portal, notes, synapse, ticketing, sogo or paperless —
-                     selects the redirect URIs and the .env keys the
-                     Zitadel-issued credentials are persisted under
+                     portal, notes, synapse, ticketing, sogo, paperless or
+                     operaton — selects the redirect URIs and the .env keys
+                     the Zitadel-issued credentials are persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -127,7 +129,7 @@ while [[ $# -gt 0 ]]; do
     --remove)   MODE=remove; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless|operaton)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -283,8 +285,27 @@ case "$APP_KIND" in
     CLIENT_ID_LABEL="$(env_get PAPERLESS_OIDC_CLIENT_ID opensme-paperless)"
     base_paths=("/accounts/openid_connect/login/callback/")
     ;;
+  operaton)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-operaton"
+    CLIENT_ID_KEY="OPERATON_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="OPERATON_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
+    # Operaton's native spring-security OAuth2 auto-configuration: the
+    # authorization-code callback is /login/oauth2/code/{registrationId}
+    # with registrationId=operaton (SPRING_SECURITY_OAUTH2_CLIENT_
+    # REGISTRATION_OPERATON_*). Zitadel matches the redirect URI exactly.
+    app_domain="$(env_get CAMUNDA_DOMAIN "bpm.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get OPERATON_OIDC_CLIENT_ID opensme-operaton)"
+    base_paths=("/login/oauth2/code/operaton")
+    # SLO: spring-security lands back at {baseUrl} on logout; Zitadel
+    # validates post_logout_redirect_uri, so the app root is registered
+    # explicitly next to the callback path.
+    POST_LOGOUT_OVERRIDE=("https://${app_domain}/" "https://${app_domain}/login/oauth2/code/operaton")
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless|operaton)"
     exit 1
     ;;
 esac
@@ -431,11 +452,13 @@ enforce_token_type() {
   esac
 }
 
-# ── persist a KEY=value into .env (upsert, atomic via temp file) ────────────
+# ── persist a KEY=value into .env (upsert) ──────────────────────────────────
+# NOTE: /opt/opensme-compose/.env is a symlink onto compose/.env — a rename
+# (mv) would replace the symlink with a regular file. Write through instead.
 set_env() {
   local key="$1" val="$2"
   local tmp="$PROJECT_DIR/.env.tmp.$$"
-  if [[ ! -f .env ]]; then
+  if [[ ! -e .env ]]; then
     err ".env missing — cannot persist ${key}"
     return 1
   fi
@@ -444,7 +467,9 @@ set_env() {
   else
     { cat .env; printf '\n%s=%s\n' "$key" "$val"; } > "$tmp"
   fi
-  mv "$tmp" .env
+  # write through the (possibly symlinked) .env: cat > follows the link,
+  # so /opt/opensme-compose/.env stays a symlink onto compose/.env.
+  cat "$tmp" > .env && rm -f "$tmp"
 }
 
 # ── --dry-run: print the plan, touch nothing ────────────────────────────────

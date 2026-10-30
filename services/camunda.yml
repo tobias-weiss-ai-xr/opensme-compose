@@ -38,6 +38,18 @@ services:
     <<: *service-defaults
     image: ${CAMUNDA_IMAGE:-operaton/operaton:2.1.5}
     container_name: opensme-camunda
+    # Run launcher flags: without ANY flag it enables REST+Webapps+Example,
+    # but NOT the OAuth2 starter. --oauth2 --rest --webapps pulls in the
+    # spring-security jars (/operaton/internal/oauth2) + webapps + engine-rest;
+    # the example is intentionally left out (no second engine context).
+    command: ["./operaton.sh", "--oauth2", "--rest", "--webapps"]
+    # docker DNS maps ${ZITADEL_DOMAIN} to the zitadel container (hostname
+    # trick) where only :8080/http listens -> OIDC issuer discovery on
+    # https:443 fails from inside. Route the FQDN to the compose gateway
+    # instead: traefik (host network, :443) terminates TLS and routes by
+    # Host header back to zitadel; the Let's Encrypt chain is JRE-trusted.
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     restart: unless-stopped
     profiles: ["camunda"]
     environment:
@@ -48,8 +60,35 @@ services:
       WAIT_FOR: postgres:5432
       WAIT_FOR_TIMEOUT: "60"
       TZ: ${TZ:-Europe/Berlin}
+      # ── ZITADEL SSO (native OAuth2) ──────────────────────────────────
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_CLIENT_ID: ${OPERATON_OIDC_CLIENT_ID:?OPERATON_OIDC_CLIENT_ID must be set in .env}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_CLIENT_SECRET: ${OPERATON_OIDC_CLIENT_SECRET:?OPERATON_OIDC_CLIENT_SECRET must be set in .env}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_CLIENT_AUTHENTICATION_METHOD: client_secret_basic
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_AUTHORIZATION_GRANT_TYPE: authorization_code
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_REDIRECT_URI: "{baseUrl}/login/oauth2/code/operaton"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OPERATON_SCOPE: "openid,profile,email"
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_OPERATON_ISSUER_URI: "https://${ZITADEL_DOMAIN:?ZITADEL_DOMAIN must be set in .env}"
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_OPERATON_USER_NAME_ATTRIBUTE: preferred_username
+      OPERATON_BPM_OAUTH2_USER_NAME_ATTRIBUTE: preferred_username
+      OPERATON_BPM_OAUTH2_SSO_LOGOUT_ENABLED: "true"
+      OPERATON_BPM_OAUTH2_IDENTITY_PROVIDER_ENABLED: "false"
+      # The bundled invoice example app builds a SECOND engine context
+      # (same crash vector) -- disable for production/SSO.
+      OPERATON_BPM_RUN_EXAMPLE_ENABLED: "false"
+      # Trust Traefik X-Forwarded-* so the OAuth2 redirect_uri/baseUrl keeps
+      # https behind the reverse proxy (else authorize lands with http://).
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # ── ZITADEL identity provider plugin ─────────────────────────────
+      PLUGIN_IDENTITY_ZITADEL_APIURL: "https://${ZITADEL_DOMAIN:?ZITADEL_DOMAIN must be set in .env}"
+      PLUGIN_IDENTITY_ZITADEL_PAT: ${ZITADEL_PAT:?ZITADEL_PAT must be set in .env}
+      PLUGIN_IDENTITY_ZITADEL_USEUSERNAMEASOPERATONUSERID: "true"
+      PLUGIN_IDENTITY_ZITADEL_ADMINISTRATORROLEKEY: operaton-admin
+      PLUGIN_IDENTITY_ZITADEL_ADMINISTRATORGROUPNAME: camunda-admin
     volumes:
       - camunda-data:/operaton/configuration/userlib
+      # ReadOnly IdP: image default.yml bakes admin-user(id=demo) which
+      # crashes engine build (user query outside command context).
+      - ./services/operaton-default.yml:/operaton/configuration/default.yml:ro
     depends_on:
       postgres:
         condition: service_healthy
