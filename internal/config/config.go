@@ -42,11 +42,15 @@ type LLMConfig struct {
 // FromEnv builds a Config from the environment, applying spec defaults.
 func FromEnv() (*Config, error) {
 	c := &Config{
-		Interval:   60 * time.Second,
-		Watch:      []string{"opensme-compose"},
-		StateDir:   "/var/lib/opensme/bot",
-		AllowHeal:  false,
-		APIAddr:    "0.0.0.0:8082",
+		Interval:  60 * time.Second,
+		Watch:     []string{"opensme-compose"},
+		StateDir:  "/var/lib/opensme/bot",
+		AllowHeal: false,
+		// The API has NO request auth (by design: local maintenance agent).
+		// Loopback by default so a stray container can't own it; deployments
+		// that need it reachable (compose-network) must override APIAddr
+		// deliberately and keep the network on a trust boundary.
+		APIAddr:    "127.0.0.1:8082",
 		HistoryMax: 100,
 		LLM:        LLMConfig{Backend: "none"},
 	}

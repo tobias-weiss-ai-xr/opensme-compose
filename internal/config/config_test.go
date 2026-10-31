@@ -30,8 +30,8 @@ func TestDefaults(t *testing.T) {
 	if c.LLM.Backend != "none" {
 		t.Errorf("llm backend default = %s, want none", c.LLM.Backend)
 	}
-	if c.APIAddr != "0.0.0.0:8082" {
-		t.Errorf("api addr default = %s", c.APIAddr)
+	if c.APIAddr != "127.0.0.1:8082" {
+		t.Errorf("api addr default = %s, want loopback (no-auth private API)", c.APIAddr)
 	}
 }
 

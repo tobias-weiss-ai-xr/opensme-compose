@@ -919,6 +919,11 @@ Heal via API (dry-run receipt without consent):
 curl -X POST http://<bot>:8082/heal -d '{"action":"restart","target":"opensme-sogo-1"}'
 ```
 
+> ⚠️ **The :8082 API is UNAUTHENTICATED by design.** `DEV_AGENT_ALLOW_HEAL=true`
+> turns `/heal` + `/draft/{id}/approve` into remote `docker restart` for ANY
+> caller that can reach the port (compose-network or host). Keep it on a trust
+> boundary / loopback; never publish it to a public interface.
+
 If you maintain this repo with pi, the bundled extension exposes the bot as
 `/status`, `/heal` (with confirmation prompt) and `/diag` — see
 [`.pi/extensions/opensme-dev-agent.ts`](.pi/extensions/opensme-dev-agent.ts),

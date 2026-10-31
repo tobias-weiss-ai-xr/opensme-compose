@@ -126,6 +126,12 @@ services:
       DEV_AGENT_WATCH: ${DEV_AGENT_WATCH:-opensme}
       DEV_AGENT_STATE_DIR: /var/lib/opensme/bot
       DEV_AGENT_ALLOW_HEAL: ${DEV_AGENT_ALLOW_HEAL:-false}
+      # !!! NO AUTH on this API (by design). 0.0.0.0 exposes /heal, /draft/
+      # {id}/approve, state + evidence to EVERY peer on the compose network.
+      # With DEV_AGENT_ALLOW_HEAL=true that means remote `docker restart` on
+      # any container. Keep this network on a trust boundary; prefer
+      # 127.0.0.1:8082 unless the operator's curl/extension path needs the
+      # bridge address.
       DEV_AGENT_API_ADDR: 0.0.0.0:8082
       DEV_AGENT_HOSTNAMES: ${DEV_AGENT_HOSTNAMES:-}
       # Draft TTL (HITL queue hygiene, opt-in): pending drafts older than
