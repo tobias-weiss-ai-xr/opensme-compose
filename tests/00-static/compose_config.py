@@ -94,6 +94,13 @@ MATRIX = [
 # Extra env per MATRIX label (see run_config).
 MATRIX_ENV: dict[str, dict[str, str]] = {
     "registry": {"REGISTRY_PROXY_PASSWORD": "dummy-for-config-validation-only"},
+    # Operaton SSO secrets are deployment secrets deliberately absent from
+    # .env.example — shape-only dummies let the base+camunda render gate pass.
+    "base+camunda": {
+        "OPERATON_OIDC_CLIENT_ID": "dummy-for-config-validation-only",
+        "OPERATON_OIDC_CLIENT_SECRET": "dummy-for-config-validation-only",
+        "ZITADEL_PAT": "dummy-for-config-validation-only",
+    },
 }
 
 

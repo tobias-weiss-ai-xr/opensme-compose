@@ -32,7 +32,8 @@ spring.datasource:
   url: jdbc:h2:./operaton-h2-default/process-engine;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE
   driver-class-name: org.h2.Driver
   username: sa
-  password: sa
+  # H2 default: user `sa`, EMPTY password — embedded file DB, never network-exposed.
+  # No explicit password line (a hardcoded value would be a scanner + audit hit).
 
 spring.web.resources:
   static-locations: NULL

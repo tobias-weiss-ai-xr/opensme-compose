@@ -85,7 +85,7 @@ Usage
     Blackbox exporter, e.g. the homelab central instance):
     ```sh
     # BLACKBOX_ADDR must be the exporter address AS SEEN BY prometheus
-    BLACKBOX_ADDR=192.168.42.20:9115 \
+    BLACKBOX_ADDR=198.51.100.20:9115 \
       python3 monitoring/blackbox/generate-scrape.py --env-file .env --mode fragment
     ```
     Append the emitted `scrape_configs` entries to your existing

@@ -24,7 +24,7 @@ Environment
   BLACKBOX_ADDR            address of the blackbox exporter as seen by
                            Prometheus (default "blackbox:9115" — the
                            standalone compose network; set e.g.
-                           192.168.42.20:9115 for central scraping)
+                           198.51.100.20:9115 for central scraping)
 """
 from __future__ import annotations
 
