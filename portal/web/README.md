@@ -38,8 +38,29 @@ build time by Next.js.
 
 ## Deployment
 
-The image is built on the workstation and transferred (the 1blu host cannot
-reach npm reliably), same as the Rust portal:
+Two paths exist; the LIVE one (verified 2026-10-31) is a **host process**, not
+a container:
+
+```bash
+# live: build standalone on the workstation, transfer to the 1blu host
+npm run build                                      # .next/standalone + .next/static
+rsync -az .next/standalone/ root@HOST:/opt/opensme-portal-web/
+rsync -az .next/static/     root@HOST:/opt/opensme-portal-web/.next/static/
+# on the host: restart the Next process (the watchdog relaunches it too)
+#   setsid nohup env PORT=3001 HOSTNAME=127.0.0.1 \
+#     BACKEND_URL="http://127.0.0.1:8087" NODE_ENV=production \
+#     /opt/node-host/bin/node /opt/opensme-portal-web/server.js &>> /var/log/opensme-portal-web.log
+```
+
+Live wiring (2026-10-31): Traefik file-provider `portal-standin.yml` routes
+`home.opensme.graphwiz.ai` → `127.0.0.1:3001` (this Next root at
+`/opt/opensme-portal-web`, standalone `server.js`), which proxies `/api/*` to
+the host Rust portal `127.0.0.1:8087` (`/opt/opensme-portal-rust/run.sh` +
+`env.list` — owns login/session/logout). `/opt/opensme-host-services-watch.sh`
+relaunches both. The compose `portal-web` container (profile `web`) stays
+wedge-blocked; the compose `portal` container on `:8080` is a separate instance.
+
+Container path (documented alt, only when the host process is superseded):
 
 ```bash
 docker build -t compose-portal-web:latest -f portal/web/Dockerfile portal/web
