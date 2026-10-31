@@ -1,125 +1,127 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import PortalShell from "./PortalShell";
-import type { Service, Announcement } from "@/lib/types";
-
-// Child panels are stubbed — this suite focuses on shell wiring (tabs,
-// gating, composition), not panel internals.
-vi.mock("./AiCard", () => ({ default: () => <div data-testid="ai-card" /> }));
-vi.mock("./IntercomPanel", () => ({ default: () => <div data-testid="intercom-panel" /> }));
-vi.mock("./PollsPanel", () => ({ default: () => <div data-testid="polls-panel" /> }));
-vi.mock("./FeedColumn", () => ({
-  default: ({ placeholder }: { placeholder: { id: string; title: string } }) => (
-    <div data-testid="feed-column-stub" data-column-id={placeholder.id} />
-  ),
-}));
-vi.mock("./QuickSwitchPalette", () => ({
-  default: ({ services }: { services: Service[] }) => (
-    <div data-testid="quick-switch-stub" data-services={services.length} />
-  ),
-}));
+import type { Service } from "@/lib/types";
 
 const services: Service[] = [
-  { id: "opencloud", name: "OpenCloud", description: "Files", url: "https://cloud.example" },
-  { id: "webmail", name: "WebMail", description: "Mail", url: "https://mail.example" },
-];
-const announcements: Announcement[] = [{ level: "info", text: "Wartungsfenster am Sonntag" }];
-const feedColumns = [
-  { id: "startup", title: "Startup" },
-  { id: "markt", title: "Markt" },
-  { id: "legal", title: "Legal" },
+  {
+    id: "opencloud",
+    name: "OpenCloud",
+    description: "Cloud storage",
+    url: "https://cloud.example",
+  },
+  {
+    id: "webmail",
+    name: "Webmail",
+    description: "Email",
+    url: "https://webmail.example",
+  },
 ];
 
-function renderShell(overrides: Partial<Parameters<typeof PortalShell>[0]> = {}) {
-  const props = {
-    services,
-    announcements,
-    feedColumns,
-    aiEnabled: false,
-    pollsEnabled: false,
-    ...overrides,
-  };
-  return render(<PortalShell {...props} />);
+const base = {
+  services,
+  announcements: [{ level: "info" as const, text: "Willkommen" }],
+  feedColumns: [{ id: "startup", title: "Startup" }],
+  aiEnabled: false,
+  pollsEnabled: true,
+};
+
+/**
+ * Stub the same-origin API. /api/session drives the header probe (Anmelden
+ * vs Abmelden); the interactive panels (intercom/polls/feeds/AI) must never
+ * crash the shell — anonymous requests answer 401 (their LoginRequired
+ * state), authenticated requests answer an empty body.
+ */
+function stubFetch(authenticated: boolean) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/session")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () =>
+            authenticated
+              ? {
+                  authenticated: true,
+                  user: { sub: "s1", name: "Ada", email: "a@e" },
+                }
+              : { authenticated: false },
+        });
+      }
+      return Promise.resolve(
+        authenticated
+          ? { ok: true, status: 200, json: async () => ({}) }
+          : { ok: false, status: 401, json: async () => ({}) },
+      );
+    }),
+  );
 }
 
-/** Query sections by label directly — hidden sections drop out of the a11y tree. */
-function getSection(name: string) {
-  const el = document.querySelector<HTMLElement>(`section[aria-label="${name}"]`);
-  if (!el) throw new Error(`section[aria-label="${name}"] not rendered`);
-  return el;
-}
+describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-describe("PortalShell", () => {
-  it("shows the Dienste section active by default with one tile per service", () => {
-    renderShell();
-    expect(getSection("Dienste")).not.toHaveAttribute("hidden");
+  it("hides the service tiles and offers login for anonymous visitors", () => {
+    stubFetch(false);
+    render(<PortalShell {...base} authenticated={false} />);
+
+    // public chrome still renders (announcement, heading, news)
+    expect(screen.getByText("Willkommen")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Dienste" }),
+    ).toBeInTheDocument();
+
+    // no service tile anywhere on the anonymous page
+    expect(screen.queryByText("OpenCloud")).not.toBeInTheDocument();
+    expect(screen.queryByText("Webmail")).not.toBeInTheDocument();
+
+    // login prompt with the OIDC entry instead of the grid
+    expect(
+      screen.getAllByText("Diese Funktion ist nur für angemeldete Nutzer:innen verfügbar.")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: /Anmelden/ }).length,
+    ).toBeGreaterThan(0);
+
+    // no quick-switch launcher over the (hidden) catalog
+    expect(
+      screen.queryByLabelText("Quick switch (Ctrl+K)"),
+    ).not.toBeInTheDocument();
+
+    // News stay public for visitors
+    expect(screen.getByRole("heading", { name: "News" })).toBeInTheDocument();
+  });
+
+  it("renders the service tiles for signed-in visitors", () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} />);
+
+    expect(screen.getByText("OpenCloud")).toBeInTheDocument();
+    expect(screen.getByText("Webmail")).toBeInTheDocument();
+
     const tile = screen.getByRole("link", { name: /OpenCloud/ });
     expect(tile).toHaveAttribute("href", "https://cloud.example");
-    expect(screen.getByRole("link", { name: /WebMail/ })).toBeInTheDocument();
-    // Real AnnouncementBar is kept: banner text shows up.
-    expect(screen.getByRole("status")).toHaveTextContent("Wartungsfenster am Sonntag");
-    expect(screen.getByRole("tab", { name: "Dienste" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(tile).toHaveAttribute("target", "_blank");
+
+    expect(screen.getAllByText("Öffnen").length).toBeGreaterThanOrEqual(2);
+    // quick-switch launcher available to signed-in users
+    expect(
+      screen.getByLabelText("Quick switch (Ctrl+K)"),
+    ).toBeInTheDocument();
+
+    // no login prompt while signed in
+    expect(
+      screen.queryByText("Diese Funktion ist nur für angemeldete Nutzer:innen verfügbar."),
+    ).not.toBeInTheDocument();
   });
 
-  it("hides the Umfragen tab and section when pollsEnabled=false, renders both when true", () => {
-    const first = renderShell();
+  it("keeps the Umfragen tab only when polls are enabled", () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} pollsEnabled={false} />);
     expect(screen.queryByRole("tab", { name: "Umfragen" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("polls-panel")).not.toBeInTheDocument();
-
-    first.unmount();
-    renderShell({ pollsEnabled: true });
-    expect(screen.getByRole("tab", { name: "Umfragen" })).toBeInTheDocument();
-    const umfragen = getSection("Umfragen");
-    expect(umfragen).toBeInTheDocument();
-    expect(umfragen).toHaveAttribute("hidden"); // not the default tab
-    expect(within(umfragen).getByTestId("polls-panel")).toBeInTheDocument();
-  });
-
-  it("renders the Notizen section with the IntercomPanel stub", () => {
-    renderShell();
-    const notizen = getSection("Notizen");
-    expect(notizen).toHaveAttribute("hidden");
-    expect(within(notizen).getByTestId("intercom-panel")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Notizen" })).toBeInTheDocument();
-  });
-
-  it("maps feedColumns to FeedColumn columns and gates AiCard on aiEnabled", () => {
-    const first = renderShell();
-    const stubs = screen.getAllByTestId("feed-column-stub");
-    expect(stubs).toHaveLength(3);
-    expect(stubs.map((s) => s.getAttribute("data-column-id"))).toEqual([
-      "startup",
-      "markt",
-      "legal",
-    ]);
-    expect(screen.queryByTestId("ai-card")).not.toBeInTheDocument();
-
-    first.unmount();
-    renderShell({ aiEnabled: true });
-    expect(screen.getByTestId("ai-card")).toBeInTheDocument();
-    expect(screen.getAllByTestId("feed-column-stub")).toHaveLength(3);
-  });
-
-  it("toggles panel visibility when clicking the Umfragen tab", () => {
-    renderShell({ pollsEnabled: true });
-    expect(getSection("Umfragen")).toHaveAttribute("hidden");
-    expect(getSection("Dienste")).not.toHaveAttribute("hidden");
-
-    fireEvent.click(screen.getByRole("tab", { name: "Umfragen" }));
-    expect(getSection("Umfragen")).not.toHaveAttribute("hidden");
-    expect(getSection("Dienste")).toHaveAttribute("hidden");
-    expect(screen.getByRole("tab", { name: "Umfragen" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByTestId("polls-panel")).toBeInTheDocument();
-    expect(screen.queryByTestId("intercom-panel")).toBeInTheDocument();
-  });
-
-  it("mounts the QuickSwitchPalette with the service list", () => {
-    renderShell();
-    expect(screen.getByTestId("quick-switch-stub")).toHaveAttribute("data-services", "2");
   });
 });

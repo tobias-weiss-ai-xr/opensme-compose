@@ -5,6 +5,7 @@ import Header from "./Header";
 import Footer from "./Footer";
 import ServiceTile from "./ServiceTile";
 import AnnouncementBar from "./AnnouncementBar";
+import LoginRequired from "./LoginRequired";
 import AiCard from "./AiCard";
 import FeedColumn from "./FeedColumn";
 import IntercomPanel from "./IntercomPanel";
@@ -19,6 +20,8 @@ interface PortalShellProps {
   feedColumns: FeedColumnSpec[];
   aiEnabled: boolean;
   pollsEnabled: boolean;
+  /** True when the visitor holds a valid portal session (SSR probe, session.ts). */
+  authenticated: boolean;
 }
 
 const TABS = [
@@ -39,6 +42,7 @@ export default function PortalShell({
   feedColumns,
   aiEnabled,
   pollsEnabled,
+  authenticated,
 }: PortalShellProps) {
   const [tab, setTab] = useState("dienste");
   const tabs = TABS.filter((t) => (t.id === "umfragen" ? pollsEnabled : true));
@@ -50,16 +54,20 @@ export default function PortalShell({
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
         <section className="tab-panel" hidden={tab !== "dienste"} aria-label="Dienste">
           <h2 className="mb-4 text-xl font-bold">Dienste</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {services.map((s) => (
-              <ServiceTile key={s.id} service={s} />
-            ))}
-            {aiEnabled && (
-              <div className="func-card w-full sm:w-auto" style={{ gridColumn: "span 1" }}>
-                <AiCard />
-              </div>
-            )}
-          </div>
+          {authenticated ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {services.map((s) => (
+                <ServiceTile key={s.id} service={s} />
+              ))}
+              {aiEnabled && (
+                <div className="func-card w-full sm:w-auto" style={{ gridColumn: "span 1" }}>
+                  <AiCard />
+                </div>
+              )}
+            </div>
+          ) : (
+            <LoginRequired label="Dienste" />
+          )}
         </section>
 
         {pollsEnabled && (
@@ -82,7 +90,7 @@ export default function PortalShell({
         </section>
       </main>
       <Footer />
-      <QuickSwitchPalette services={services} />
+      {authenticated && <QuickSwitchPalette services={services} />}
     </div>
   );
 }

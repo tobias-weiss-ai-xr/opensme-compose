@@ -1,4 +1,5 @@
 import PortalShell from "@/components/PortalShell";
+import { probeSession } from "@/lib/session";
 import {
   SITE,
   buildServices,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/config";
 import type { Announcement, Service } from "@/lib/types";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 
 export const metadata: Metadata = {
   title: SITE.title,
@@ -53,10 +55,22 @@ async function fetchServices(): Promise<Service[]> {
 }
 
 export default async function HomePage() {
-  const [services, announcements] = await Promise.all([
-    fetchServices(),
-    Promise.resolve(parseAnnouncements(serverEnv("PORTAL_ANNOUNCEMENTS"))),
-  ]);
+  const base = serverEnv("BACKEND_URL", "http://localhost:8080");
+  // The Dienste tile grid is only for signed-in visitors. The backend owns
+  // the session (HMAC cookie), so the server probes /api/session with the
+  // request's cookies, fail-closed. Anonymous pages render no tiles at all
+  // (and skip the /api/services fetch).
+  const authenticated = await probeSession(base, (await cookies()).toString());
+
+  const [services, announcements] = authenticated
+    ? await Promise.all([
+        fetchServices(),
+        Promise.resolve(parseAnnouncements(serverEnv("PORTAL_ANNOUNCEMENTS"))),
+      ])
+    : [
+        [] as Service[],
+        parseAnnouncements(serverEnv("PORTAL_ANNOUNCEMENTS")),
+      ];
 
   const feedColumns = loadFeedColumns();
   const aiEnabled = Boolean(serverEnv("AI_API_URL").trim());
@@ -70,6 +84,7 @@ export default async function HomePage() {
       feedColumns={feedColumns}
       aiEnabled={aiEnabled}
       pollsEnabled={pollsEnabled}
+      authenticated={authenticated}
     />
   );
 }
