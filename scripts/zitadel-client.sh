@@ -202,6 +202,11 @@ case "$APP_KIND" in
   opencloud)
     APP_PROJECT="opencloud"
     APP_NAME="opencloud"
+    # The OpenCloud SPA is a PUBLIC (PKCE) OIDC client — it must never be
+    # created/enforced as confidential (BASIC): the browser's code+PKCE
+    # token exchange is then answered with "invalid_client: empty client
+    # secret". 2026-10-30: a re-registration as BASIC hard-broke the login.
+    USE_PUBLIC_AUTH=1
     CLIENT_ID_KEY="OC_OIDC_CLIENT_ID"
     CLIENT_SECRET_KEY="OC_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY="OC_OIDC_SECRET"   # legacy alias kept in sync
@@ -452,6 +457,34 @@ enforce_token_type() {
   esac
 }
 
+# ── public (PKCE) auth-method enforcement ───────────────────────────────────
+enforce_auth_method_none() {
+  # enforce_auth_method_none PID APP_ID — force OIDC_AUTH_METHOD_TYPE_NONE
+  # (public client, PKCE) on an app. Used for the OpenCloud SPA: a
+  # confidential (BASIC) app makes the browser's code+PKCE token exchange
+  # fail with "invalid_client: empty client secret". Same endpoint and
+  # 200/204 or 'No changes' semantics as enforce_token_type.
+  local pid="$1" app_id="$2"
+  local resp code
+  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
+             '{"authMethodType":"OIDC_AUTH_METHOD_TYPE_NONE"}' 2>/dev/null || true)"
+  code="$(api_http)"
+  case "$code" in
+    2??)
+      ok "OpenCloud app is public/PKCE (auth method NONE) (HTTP ${code})" ;;
+    *)
+      if [[ "$resp" == *"No changes"* ]]; then
+        ok "OpenCloud app already public/PKCE — Zitadel: 'no changes' (HTTP ${code})"
+      else
+        err "Could not set OpenCloud auth method NONE (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
+        err "The OpenCloud SPA will fail OIDC login until the app is public — fix via"
+        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
+        return 1
+      fi
+      ;;
+  esac
+}
+
 # ── persist a KEY=value into .env (upsert) ──────────────────────────────────
 # NOTE: /opt/opensme-compose/.env is a symlink onto compose/.env — a rename
 # (mv) would replace the symlink with a regular file. Write through instead.
@@ -611,6 +644,12 @@ if [[ -n "$FOUND_APP" ]]; then
   # JWKS-validating backend rejects — flip it here on every run instead
   # of the manual/live-only fix of 2026-10-26.
   enforce_token_type "$FOUND_PROJECT" "$FOUND_APP" || exit 1
+  # OpenCloud's SPA additionally requires the PUBLIC auth method (PKCE); a
+  # confidential/BASIC app makes its browser token exchange fail with
+  # "empty client secret". Enforce it here on every run.
+  if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
+    enforce_auth_method_none "$FOUND_PROJECT" "$FOUND_APP" || exit 1
+  fi
   info "Client credentials in .env are the working ones — idempotent beyond the token type."
   exit 0
 fi
@@ -634,6 +673,7 @@ fi
 
 app_body="$(jq -nc --arg name "$APP_NAME" \
   --arg tokentype "$TOKEN_TYPE" \
+  --argjson pub "$( [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && echo true || echo false )" \
   --argjson redirects "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
   --argjson logout "$(printf '%s\n' "${POST_LOGOUT[@]}" | jq -R . | jq -s -c .)" \
   '{ name: $name,
@@ -643,7 +683,7 @@ app_body="$(jq -nc --arg name "$APP_NAME" \
      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
      appType: "OIDC_APP_TYPE_WEB",
-     authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+     authMethodType: (if $pub then "OIDC_AUTH_METHOD_TYPE_NONE" else "OIDC_AUTH_METHOD_TYPE_BASIC" end),
      devMode: true }')"
 
 info "Registering OIDC app '${APP_NAME}' in project '${APP_PROJECT}'..."
@@ -657,17 +697,28 @@ esac
 
 new_client_id="$(printf '%s' "$app_resp" | jq -r '.clientId // empty' 2>/dev/null)"
 new_secret="$(printf '%s' "$app_resp" | jq -r '.clientSecret // empty' 2>/dev/null)"
-if [[ -z "$new_client_id" || -z "$new_secret" ]]; then
-  err "Zitadel did not return clientId/clientSecret for the new app (authMethod BASIC should return both)."
+if [[ -z "$new_client_id" ]]; then
+  err "Zitadel did not return a clientId for the new app."
+  exit 1
+fi
+if [[ "${USE_PUBLIC_AUTH:-0}" != 1 && -z "$new_secret" ]]; then
+  err "Confidential app returned no clientSecret (authMethod BASIC should return one)."
   exit 1
 fi
 
 # ── 4) persist the Zitadel-issued credentials into .env ──────────────────
+# Public (PKCE) clients carry NO secret — persist an empty value so the
+# OC_OIDC_CLIENT_SECRET env key still exists for overlays that reference it.
 set_env "$CLIENT_ID_KEY" "$new_client_id"
-set_env "$CLIENT_SECRET_KEY" "$new_secret"
-if [[ -n "$SECRET_ALIAS_KEY" ]] && grep -q "^${SECRET_ALIAS_KEY}=" .env; then
-  # legacy alias kept in sync for older .env files / overlay consumers
-  set_env "$SECRET_ALIAS_KEY" "$new_secret"
+if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
+  set_env "$CLIENT_SECRET_KEY" ""
+  info "Public app (${APP_NAME}): no client secret persisted (PKCE flow)."
+else
+  set_env "$CLIENT_SECRET_KEY" "$new_secret"
+  if [[ -n "$SECRET_ALIAS_KEY" ]] && grep -q "^${SECRET_ALIAS_KEY}=" .env; then
+    # legacy alias kept in sync for older .env files / overlay consumers
+    set_env "$SECRET_ALIAS_KEY" "$new_secret"
+  fi
 fi
 
 # ── 5) enforce the access-token type on the freshly registered app ────────
@@ -679,6 +730,9 @@ new_app_id="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev
   | jq -r --arg cid "$new_client_id" '.result[]? | select((.oidcConfig.clientId // "") == $cid) | .id' 2>/dev/null | head -1 || true)"
 if [[ -n "${new_app_id:-}" ]]; then
   enforce_token_type "$pid" "$new_app_id" || exit 1
+  if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
+    enforce_auth_method_none "$pid" "$new_app_id" || exit 1
+  fi
 else
   warn "Could not re-resolve the new app id — skipping token-type enforcement (app was created with ${TOKEN_TYPE})."
 fi

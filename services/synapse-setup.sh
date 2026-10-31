@@ -107,7 +107,14 @@ oidc_providers:
     # and crashes synapse at import time)
     user_mapping_provider:
       config:
-        localpart_template: "{{ user.preferred_username }}"
+        # ID tokens here carry only basic claims (Zitadel instance behavior
+        # observed 2026-10-30: no email/name/preferred_username in the ID
+        # token; profile claims only via /userinfo). Deriving a localpart
+        # from any of those leaves it EMPTY for some apps. Use the numeric
+        # subject with a letter prefix: always valid, unique, no claims.
+        # (previously: preferred_username/email split -> "localpart is
+        # invalid:"; pure sub -> "Numeric user IDs are reserved".)
+        localpart_template: "u_{{ user.sub }}"
         display_name_template: "{{ user.name }}"
 SYNAPSE_OIDC_EOF
     ;;
