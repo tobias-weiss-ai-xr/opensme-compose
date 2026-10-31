@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildServices, envOr, loadFeedColumns, loadServiceSpecs, serverEnv } from "./config";
+import { buildServices, catalogEnvConfigured, envOr, loadFeedColumns, loadServiceSpecs, serverEnv } from "./config";
 
 /**
  * Suite for the server-side service catalog (config.ts).
@@ -283,5 +283,38 @@ describe("SITE", () => {
     const { SITE } = await freshConfig();
     expect(SITE.domain).toBe("portal.corp.example.com");
     expect(SITE.title).toBe("openSME-Portal");
+  });
+});
+
+describe("catalogEnvConfigured", () => {
+  it("is false when no catalog URL vars are set (live host process env)", () => {
+    for (const key of [
+      "OPENCLOUD_URL",
+      "MAIL_URL",
+      "BPM_URL",
+      "INVOICE_URL",
+      "PAPERLESS_URL",
+      "CHAT_URL",
+      "NOTES_URL",
+      "SURVEYS_URL",
+      "TICKETING_URL",
+      "CMS_URL",
+      "SHOP_URL",
+    ]) {
+      delete process.env[key];
+    }
+    expect(catalogEnvConfigured()).toBe(false);
+  });
+
+  it("is false for whitespace-only values", () => {
+    delete process.env.PAPERLESS_URL;
+    process.env.OPENCLOUD_URL = "   ";
+    expect(catalogEnvConfigured()).toBe(false);
+  });
+
+  it("is true when at least one catalog URL is explicitly configured", () => {
+    delete process.env.OPENCLOUD_URL;
+    process.env.PAPERLESS_URL = "https://paperless.example";
+    expect(catalogEnvConfigured()).toBe(true);
   });
 });

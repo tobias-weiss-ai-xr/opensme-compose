@@ -19,6 +19,31 @@ export function envOr(key: string, fallback: string): string {
   return serverEnv(key, fallback);
 }
 
+/**
+ * True when the operator explicitly configured at least one catalog URL
+ * (OPENCLOUD_URL / MAIL_URL / … ). Used to decide whether the env-based
+ * catalog may serve as a fallback when the /api/services backend is down.
+ * A bare default fallback without any operator intent would render bogus
+ * placeholder URLs (https://cloud.<OPENSME_DOMAIN> etc.) — e.g. the live
+ * host process runs with only BACKEND_URL set — so without any explicit
+ * URL the fallback must stay empty.
+ */
+export function catalogEnvConfigured(): boolean {
+  return [
+    "OPENCLOUD_URL",
+    "MAIL_URL",
+    "BPM_URL",
+    "INVOICE_URL",
+    "PAPERLESS_URL",
+    "CHAT_URL",
+    "NOTES_URL",
+    "SURVEYS_URL",
+    "TICKETING_URL",
+    "CMS_URL",
+    "SHOP_URL",
+  ].some((k) => serverEnv(k).trim() !== "");
+}
+
 const DOMAIN = envOr("PORTAL_DOMAIN", "home.opensme.graphwiz.ai");
 const OPENSME = envOr("OPENSME_DOMAIN", "opensme.graphwiz.ai");
 

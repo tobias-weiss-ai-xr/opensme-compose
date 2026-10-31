@@ -3,6 +3,7 @@ import { probeSession } from "@/lib/session";
 import {
   SITE,
   buildServices,
+  catalogEnvConfigured,
   loadFeedColumns,
   loadServiceSpecs,
   serverEnv,
@@ -51,7 +52,10 @@ async function fetchServices(): Promise<Service[]> {
   } catch {
     // fall through to env-based catalog
   }
-  return buildServices(loadServiceSpecs());
+  // Only fall back to the env catalog when the operator actually configured
+  // catalog URLs — otherwise the live host process (BACKEND_URL only) would
+  // render placeholder defaults (https://cloud.<OPENSME_DOMAIN> …) as tiles.
+  return catalogEnvConfigured() ? buildServices(loadServiceSpecs()) : [];
 }
 
 export default async function HomePage() {
