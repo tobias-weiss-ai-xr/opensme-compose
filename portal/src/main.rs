@@ -12,7 +12,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
-use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 
 mod feeds;
@@ -926,11 +925,12 @@ async fn track_metrics(
 }
 
 fn build_router(config: Arc<AppConfig>) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
+    // NO permissive CORS layer: every browser path is same-origin (the
+    // Next.js portal-web proxies /api/* server-side, and the legacy Rust UI
+    // serves its own /app.js from the same origin). allow_origin(Any) here
+    // previously let any website read /api/* responses whenever the backend
+    // was directly reachable (e.g. a mis-exposed container port). Same-origin
+    // only: no Access-Control-Allow-* headers are emitted at all.
     let mut router = Router::new()
         .route("/", get(handle_root))
         .route("/app.js", get(handle_app_js))
@@ -981,7 +981,6 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/metrics", get(handle_metrics))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(track_metrics))
-        .layer(cors)
         .with_state(config)
 }
 
