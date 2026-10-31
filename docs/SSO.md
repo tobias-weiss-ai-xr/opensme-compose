@@ -76,7 +76,7 @@ Stand: **2026-10-27** (CI-verifiziert auf HEAD; Live-Zeile so weit wie möglich)
 | OpenCloud (Dateien/ocis) | `opencloud` (`OC_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Headless-Beweis: authorize → v2 Session API → JWT → OCS `/ocs/v1.php/cloud/user` 200 **+** WebDAV 200 als `zitadel-admin@opensme.auth.home.opensme.graphwiz.ai`. Braucht zwingend `OIDC_TOKEN_TYPE_JWT` + Backchannel-Pin + Autoprovisioning (Abschnitte unten). **Regression 2026-10-30: Browser-Login brach am Token-Endpoint (`invalid_client: empty client secret`) — die SPA-App war als confidential/BASIC angelegt**, ein öffentliches PKCE-SPA kann das nie nutzen. Fix: `OIDC_AUTH_METHOD_TYPE_NONE` via `PUT …/apps/{id}/oidc_config`; `scripts/zitadel-client.sh` erzwingt das dauerhaft (opencloud-Branch `USE_PUBLIC_AUTH=1` → `enforce_auth_method_none`). **Re-verifiziert 2026-10-30 im Browser: Login → `/files/spaces/personal/testuer@…` (pers. Raum, 1 Item).** |
 | Chat (Element/Synapse) | `opensme-synapse` (`SYNAPSE_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Synapse-SSO: `/login/sso/redirect` → 302 auf Zitadel-Authorize mit PKCE. Element: `base_url` **und** `server_name` sind beide `matrix.home.opensme.graphwiz.ai` — `server_name` wird im Entrypoint aus `ELEMENT_DEFAULT_SERVER_URL` abgeleitet (kein `ELEMENT_HOMESERVER_NAME`), kann also nicht desyncen. **Regression 2026-10-30: OIDC-Callback „localpart is invalid“ → „Numeric user IDs are reserved“ — Zitadel-ID-Token tragen hier keine email/name/preferred_username-Claims** (nur `sub`+Metadata; Profile-Claims kommen ausschließlich über `/oidc/v1/userinfo`). Fix in `services/synapse-setup.sh`: `localpart_template: "u_{{ user.sub }}"` (claim-unabhängig, valid). **Re-verifiziert 2026-10-30 im Browser: Element `#/home` als `@u_397215662709145620`.** |
 | Notes (Impress) | `opensme-notes` (`NOTES_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Client registriert, Redirect auf den IdP funktioniert; **Browser-SSO-Flow 2026-10-30 verifiziert: Zitadel-Login als testuer → Backend-Board gelandet.** |
-| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟢 **live: echter OIDC-SSO end-to-end verifiziert** | Client registriert via `scripts/zitadel-client.sh --app sogo` (registriert auch den sogo6-Callback `{PUBLIC_BASE}/api/user/v1/auth/callback/{domain}` als Redirect-URI). **Stand 2026-10-31 (SSO-Ticket geschlossen):** sogo6 ist ein echtes OIDC-RP — `POST /de/ → email` triggert `kind:"sso"` + authorize-URL (`/api/user/v1/auth/mode`), Browser geht automatisch zu Zitadel `/ui/v2/login`, nach Login → Callback → JWT-Voucher (`302 → /auth/callback#token=<jwt>`, uid = Zitadel-`loginName`) → Frontend-Pickup → **`/de/u/0/INBOX` (Session via `/api/sse` 200, testuer authentifiziert)**. Voraussetzungen live: (a) Zitadel-App `397489856642613268` + `SOGO_OIDC_CLIENT_ID/SECRET` in `/opt/opensme-compose/.env`; (b) DB `AUTH_SETTINGS` = `openid` + CONFIG_URL `https://auth.home…` + Client-Name/-Secret (Patch in Live-DB); (c) `extra_hosts: auth.home…:host-gateway` am sogo6-server (OIDC-Discovery/Token holt Router „Traefik offline AFAIA bastelt nicht“ — Nachbau: siehe weiter unten); (d) **UI-Proxy-Fix** (SOGo6-UI `route.ts`): `fetch(...,{redirect:'manual'})` — sonst frisst die Next-Proxy-Schicht die Backend-302 und verliert das `#token`, der Browser bleibt am Callback hängen (Live-Bundle-Hotpatch liegt ein, Image-Rebuild aus dem fix gebauten Repo ersetzt ihn). **Weiterhin offen (pre-existing Open Item):** die **Postfach-UI rendert nicht** — sogo6→Stalwart-IMAP-LOGIN wird abgelehnt (Stalwart-Directory=`oidc` = Plain nur App-Passwörter; XOAUTH2/OAUTHBEARER bräuchte das IdP-Zugriffstoken, das im `user.password` steckt, aber der Webmail-IMAP-Client sendet Plain). Nebenbefund früher behoben: Domain-Settings zeigten auf toten Hostname `sogo6-stalwart:993` → `stalwart:143`/`587`/STARTTLS (Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`). Optionen: App-Passwörter seeden **oder** IMAP-OAUTHBEARER (siehe `docs/operaton-sso.md`-Muster). |
+| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟢 **live: echter OIDC-SSO end-to-end verifiziert** | Client registriert via `scripts/zitadel-client.sh --app sogo` (registriert auch den sogo6-Callback `{PUBLIC_BASE}/api/user/v1/auth/callback/{domain}` als Redirect-URI). **Stand 2026-10-31 (SSO-Ticket geschlossen):** sogo6 ist ein echtes OIDC-RP — `POST /de/ → email` triggert `kind:"sso"` + authorize-URL (`/api/user/v1/auth/mode`), Browser geht automatisch zu Zitadel `/ui/v2/login`, nach Login → Callback → JWT-Voucher (`302 → /auth/callback#token=<jwt>`, uid = Zitadel-`loginName`) → Frontend-Pickup → **`/de/u/0/INBOX` (Session via `/api/sse` 200, testuer authentifiziert)**. Voraussetzungen live: (a) Zitadel-App `397489856642613268` + `SOGO_OIDC_CLIENT_ID/SECRET` in `/opt/opensme-compose/.env`; (b) DB `AUTH_SETTINGS` = `openid` + CONFIG_URL `https://auth.home…` + Client-Name/-Secret (Patch in Live-DB); (c) `extra_hosts: auth.home…:host-gateway` am sogo6-server (OIDC-Discovery/Token holt Router „Traefik offline AFAIA bastelt nicht“ — Nachbau: siehe weiter unten); (d) **UI-Proxy-Fix** (SOGo6-UI `route.ts`): `fetch(...,{redirect:'manual'})` — sonst frisst die Next-Proxy-Schicht die Backend-302 und verliert das `#token`, der Browser bleibt am Callback hängen (Live-Bundle-Hotpatch liegt ein, Image-Rebuild aus dem fix gebauten Repo ersetzt ihn). **Weiterhin offen (pre-existing Open Item):** die **Postfach-UI rendert nicht** — sogo6→Stalwart-IMAP-LOGIN wird abgelehnt (Stalwart-Directory=`oidc` = Plain nur App-Passwörter; XOAUTH2/OAUTHBEARER bräuchte das IdP-Zugriffstoken, das im `user.password` steckt, aber der Webmail-IMAP-Client sendet Plain). Nebenbefund früher behoben: Domain-Settings zeigten auf toten Hostname `sogo6-stalwart:993` → `stalwart:143`/`587`/STARTTLS (Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`). Optionen: App-Passwörter seeden **oder** IMAP-OAUTHBEARER (siehe `docs/operaton-sso.md`-Muster). **✅ RESOLUT 2026-10-31 (sogo→stalwart-App-Passwort-Seeding):** Postfach rendert end-to-end — (e) `SOGO_D_{IMAP,SMTP,SIEVE}_AUTH_MECH=xoauth2` (Access-Token als XOAUTH2 statt Plain; Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`), (f) UI-Image `sogo6-ui:latest` aus Main `31538d2b` neu gebaut (im alten 10-26-Build fehlte der `memo`-Fix `8ae412be` → Client-Crash `memo is not defined`), (g) App-Passwörter via Stalwart-0.15-REST `POST/GET /api/account/auth` (self-service, Bearer = OIDC-Token) — Skript `scripts/stalwart-app-password.sh`. Verifikation: Browser-E2E → INBOX „1 Nachricht“, SMTP-XOAUTH2 `235`, IMAP-LOGIN mit App-Passwort OK (Details: Abschnitt „Stalwart App-Passwörter (sogo→stalwart)“). |
 | Paperless | `opensme-paperless` (`PAPERLESS_OIDC_CLIENT_ID`) | 🟡 verdrahtet | Client registrierbar via `scripts/zitadel-client.sh --app paperless`; `services/paperless.yml` aktiviert django-allauth generisches OIDC (PKCE, Auto-Signup, Issuer `https://auth.<domain>`). Positiver Login-Flow-Test steht noch aus — lokal an `/tmp/reprodemo` nachholbar (Live-Container 🟥 steht hinter dem runc-EOF-Keil). |
 | Invoice (Invoice-Ninja) | — | ❌ nicht nativ OIDC-fähig | Selfhosted Invoice-Ninja hat kein generisches OIDC (nur Google/Microsoft-Socialite; Feature-Request [#10839](https://github.com/invoiceninja/invoiceninja/issues/10839) offen). SSO bedarf eines eigenen Patches oder Reverse-Proxy-Auth — bewusst noch kein Client registriert. |
 | Operaton (Camunda-Nachfolger) | `opensme-camunda` (`operaton.bpm.oauth2.*` + Plugin) | 🟢 **live: SSO-Login + Admin-Cockpit verifiziert** | Operaton 2.x CE ist **nativ OIDC-fähig** (spring-security-oauth2); eigener ZITADEL-`ReadOnlyIdentityProvider`-Plugin (Repo `operaton-zitadel`, 34 Tests grün, Gruppen = ZITADEL-Project-Rollen aus User-Grants, Admin via `operaton-admin`-Grant → `camunda-admin`). Live: OIDC-Client `397414680370348052`, Cockpit-Login als `tweiss` → Cockpit mit Admin-Rechten (12 Instanzen, 9 Tasks, 4 Defs); `--oauth2 --rest --webapps`-Launcher, Issuer via `host-gateway`-extra_hosts, `default.yml`-Override ohne `admin-user`; Details + Verifikation in `docs/operaton-sso.md`. |
@@ -350,9 +350,64 @@ erreichte den IdP nicht. Der Flow ist jetzt end-to-end grün
    aus dem gefixten Repo ersetzt den Hotpatch dauerhaft.
 5. **Verifikation** — `/api/user/v1/auth/mode?username=…` liefert `kind:"sso"`
    + authorize-URL; kompletter Browser-Flow (email → auto-redirect IdP →
-   Login → Callback → `/de/u/0/INBOX`, `/api/sse` 200). Die **Postfach-UI**
-   bleibt Open Item (IMAP-Plain mit Access-Token wird von Stalwart
-   `directory=oidc` abgelehnt — siehe Status-Tabelle).
+   Login → Callback → `/de/u/0/INBOX`, `/api/sse` 200). **Seit 2026-10-31
+   rendert die Postfach-UI vollständig** (IMAP/SMTP/Sieve-Mechs auf `xoauth2`
+   gedreht, UI-Image aus Main neu gebaut, App-Passwort-Seeding etabliert —
+   siehe nächster Abschnitt).
+
+## Stalwart App-Passwörter (sogo→stalwart) — Live-Fixes (2026-10-31)
+
+Ticket „app-passwort-seeding sogo->stalwart”: Webmail-Postfach crashte mit
+„This page couldn't load”, Root-Cause war zweigeteilt — (1) falscher
+Auth-Mechanismus, (2) veralteter UI-Build. Beide behoben + Seeding-Mechanik
+etabliert.
+
+**Stalwart-0.15-Fakt:** App-Passwörter werden NICHT über JMAP
+(`x:AppPassword` = 0.16+), sondern über den **REST-Endpunkt
+`GET/POST /api/account/auth`** verwaltet (self-service). Authentifizierung mit
+`Authorization: Bearer <OIDC-Access-Token>` des Nutzers; Body ist ein flaches
+Ops-Array:
+
+```json
+[{"type":"addAppPassword", "name":"<base64(label$ISO8601)>", "password":"<sha512-crypt-Hash>"}]
+[{"type":"removeAppPassword", "name":"<base64(...)>"}]
+```
+
+Das Secret wird clientseitig erzeugt und als `$6$…`-Hash übergeben; `GET`
+listet Namen (base64) unter `data.appPasswords[]`.
+
+**Fixes live umgesetzt (alle 2026-10-31):**
+1. **Mechanismen auf `xoauth2`** (Access-Token als XOAUTH2 statt Plain):
+   Live-DB `sogo6_sogo_settings.settings_domain_default.MAIL_SETTINGS` →
+   `SOGO_D_IMAP_AUTH_MECH`/`SOGO_D_SMTP_AUTH_MECH`/`SOGO_D_SIEVE_AUTH_MECH`
+   alle `xoauth2`; gespiegelt in SOGo6-server-Repo
+   `scripts/init/domain_settings.json`. Die Clients (`ClientImap`,
+   `ClientSmtp`, `ClientSieve`) unterstützen `xoauth2` (Login als
+   `user=<email>\x01auth=Bearer <token>`); Stalwart (`directory=oidc`)
+   validiert das Token via Zitadel-userinfo.
+2. **UI-Image `sogo6-ui:latest` neu gebaut** aus SOGo6-UI `main` (`31538d2b`):
+   behebt den **`memo is not defined`-Client-Crash** (`ReferenceError` im
+   Notes-Modul des Mail-Panels; Fix stammt aus origin/`8ae412be` „add missing
+   memo import to NotesList and NotesEditor“) im alten 2026-10-26-Build und
+   ersetzt die früheren Bundle-Hotpatches. Bau: lokal `docker build -f
+   Dockerfile.prod` → `docker save|gzip` → Host → `docker load` → Compose
+   `up -d --no-deps --force-recreate sogo6-ui` (netns blieb 29).
+3. **Seeding-Skript** `scripts/stalwart-app-password.sh <email> [label]` (siehe
+   Skript-Header): liest den OIDC-Token des Nutzers aus der SOGo6-Redis-Session
+   (`user_oidc_session:<email>`), mintet Secret + `$6$`-Hash, POST
+   `addAppPassword`, verifiziert `IMAP LOGIN`, gibt das Secret einmal aus.
+
+**Live verifiziert (testuer@opensme.auth.home.opensme.graphwiz.ai):**
+- `AUTH XOAUTH2` stalwart:143 → **OK**; SMTP `AUTH XOAUTH2` (587, STARTTLS) →
+  `235 Authentication succeeded`; Test-Mail versendet → **Postfach zeigt
+  „1 Nachricht“** (Browser-E2E, `PAGEERRORS: []`).
+- App-Passwort `sogo-webmail` (bei Bedarf neu seeden via Skript) →
+  `IMAP LOGIN` **OK**, `INBOX (MESSAGES 1)`; Ops `addAppPassword`/
+  `removeAppPassword` → 200.
+
+**Hinweis:** Webmail nutzt den SSO-Token (XOAUTH2); App-Passwörter sind für
+direkte IMAP/SMTP-Clients (Thunderbird/Mobile). Zitadel-Access-Tokens laufen
+ab — erneuter Webmail-Login verlängert die Session.
 
 ## Portal-Login (OIDC-RP) — Live-Provisionierung
 
