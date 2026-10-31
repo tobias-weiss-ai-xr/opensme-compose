@@ -272,7 +272,14 @@ case "$APP_KIND" in
     # the redirect_uri from the request host, and Zitadel matches redirect
     # URIs as exact strings — so both the slash and no-slash form of the app
     # root are registered for both protocol faces.
-    base_paths=("/SOGo" "/SOGo/")
+    #
+    # sogo6 (this stack) never uses those: its OIDC RP (ModuleOIDC,
+    # InterfaceAuthSSO) builds the callback as
+    #   {SOGO_P_PUBLIC_BASE_URL}/api/user/v1/auth/callback/{domain}
+    # and get_login_mech hands that authorize URL to the frontend. Register
+    # the real callback (per domain) alongside the legacy /SOGo forms.
+    oidc_domain="$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)"
+    base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback/${oidc_domain}")
     ;;
   paperless)
     APP_PROJECT="opensme"

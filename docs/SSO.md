@@ -76,7 +76,7 @@ Stand: **2026-10-27** (CI-verifiziert auf HEAD; Live-Zeile so weit wie möglich)
 | OpenCloud (Dateien/ocis) | `opencloud` (`OC_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Headless-Beweis: authorize → v2 Session API → JWT → OCS `/ocs/v1.php/cloud/user` 200 **+** WebDAV 200 als `zitadel-admin@opensme.auth.home.opensme.graphwiz.ai`. Braucht zwingend `OIDC_TOKEN_TYPE_JWT` + Backchannel-Pin + Autoprovisioning (Abschnitte unten). **Regression 2026-10-30: Browser-Login brach am Token-Endpoint (`invalid_client: empty client secret`) — die SPA-App war als confidential/BASIC angelegt**, ein öffentliches PKCE-SPA kann das nie nutzen. Fix: `OIDC_AUTH_METHOD_TYPE_NONE` via `PUT …/apps/{id}/oidc_config`; `scripts/zitadel-client.sh` erzwingt das dauerhaft (opencloud-Branch `USE_PUBLIC_AUTH=1` → `enforce_auth_method_none`). **Re-verifiziert 2026-10-30 im Browser: Login → `/files/spaces/personal/testuer@…` (pers. Raum, 1 Item).** |
 | Chat (Element/Synapse) | `opensme-synapse` (`SYNAPSE_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Synapse-SSO: `/login/sso/redirect` → 302 auf Zitadel-Authorize mit PKCE. Element: `base_url` **und** `server_name` sind beide `matrix.home.opensme.graphwiz.ai` — `server_name` wird im Entrypoint aus `ELEMENT_DEFAULT_SERVER_URL` abgeleitet (kein `ELEMENT_HOMESERVER_NAME`), kann also nicht desyncen. **Regression 2026-10-30: OIDC-Callback „localpart is invalid“ → „Numeric user IDs are reserved“ — Zitadel-ID-Token tragen hier keine email/name/preferred_username-Claims** (nur `sub`+Metadata; Profile-Claims kommen ausschließlich über `/oidc/v1/userinfo`). Fix in `services/synapse-setup.sh`: `localpart_template: "u_{{ user.sub }}"` (claim-unabhängig, valid). **Re-verifiziert 2026-10-30 im Browser: Element `#/home` als `@u_397215662709145620`.** |
 | Notes (Impress) | `opensme-notes` (`NOTES_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Client registriert, Redirect auf den IdP funktioniert; **Browser-SSO-Flow 2026-10-30 verifiziert: Zitadel-Login als testuer → Backend-Board gelandet.** |
-| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟡 verdrahtet, Demo verifiziert | Client registriert via `scripts/zitadel-client.sh --app sogo`; der echte SSO-Flow (authorize → IdP-Session-API → Webmail-Session) wird von `tests/05-e2e/webmail.py` im CI-Job „E2E — mail profile (Stalwart + SOGo webmail)“ grün durchlaufen. **Stand 2026-10-30 (E2E-Sweep):** zweistufiges Login (email → „Weiter“ → Passwort) funktioniert end-to-end bis `/de/u/0/INBOX`; die **Postfach-UI rendert aber nicht**, Grund: sogo6-server→Stalwart-IMAP-LOGIN wird abgelehnt — Stalwart-Directory ist `oidc` („Plain-Passwörter = App-Passwörter only“), XOAUTH2/OAUTHBEARER bräuchte ein IdP-Zugriffstoken in der Webmail-Session, das der Form-Login nicht hat. Nebenbefund behoben: Domain-Settings zeigten auf Hostname `sogo6-stalwart:993` (DNS-Tot) — in der Live-DB (`sogo6_sogo_settings.settings_domain_default → MAIL_SETTINGS`) und im SOGo6-server-Repo (`scripts/init/domain_settings.json`) auf `stalwart:143`/`587`/STARTTLS korrigiert. Offen: App-Passwörter seeden **oder** Webmail-SSO + OAUTHBEARER (siehe `docs/operaton-sso.md`-Muster). |
+| Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟢 **live: echter OIDC-SSO end-to-end verifiziert** | Client registriert via `scripts/zitadel-client.sh --app sogo` (registriert auch den sogo6-Callback `{PUBLIC_BASE}/api/user/v1/auth/callback/{domain}` als Redirect-URI). **Stand 2026-10-31 (SSO-Ticket geschlossen):** sogo6 ist ein echtes OIDC-RP — `POST /de/ → email` triggert `kind:"sso"` + authorize-URL (`/api/user/v1/auth/mode`), Browser geht automatisch zu Zitadel `/ui/v2/login`, nach Login → Callback → JWT-Voucher (`302 → /auth/callback#token=<jwt>`, uid = Zitadel-`loginName`) → Frontend-Pickup → **`/de/u/0/INBOX` (Session via `/api/sse` 200, testuer authentifiziert)**. Voraussetzungen live: (a) Zitadel-App `397489856642613268` + `SOGO_OIDC_CLIENT_ID/SECRET` in `/opt/opensme-compose/.env`; (b) DB `AUTH_SETTINGS` = `openid` + CONFIG_URL `https://auth.home…` + Client-Name/-Secret (Patch in Live-DB); (c) `extra_hosts: auth.home…:host-gateway` am sogo6-server (OIDC-Discovery/Token holt Router „Traefik offline AFAIA bastelt nicht“ — Nachbau: siehe weiter unten); (d) **UI-Proxy-Fix** (SOGo6-UI `route.ts`): `fetch(...,{redirect:'manual'})` — sonst frisst die Next-Proxy-Schicht die Backend-302 und verliert das `#token`, der Browser bleibt am Callback hängen (Live-Bundle-Hotpatch liegt ein, Image-Rebuild aus dem fix gebauten Repo ersetzt ihn). **Weiterhin offen (pre-existing Open Item):** die **Postfach-UI rendert nicht** — sogo6→Stalwart-IMAP-LOGIN wird abgelehnt (Stalwart-Directory=`oidc` = Plain nur App-Passwörter; XOAUTH2/OAUTHBEARER bräuchte das IdP-Zugriffstoken, das im `user.password` steckt, aber der Webmail-IMAP-Client sendet Plain). Nebenbefund früher behoben: Domain-Settings zeigten auf toten Hostname `sogo6-stalwart:993` → `stalwart:143`/`587`/STARTTLS (Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`). Optionen: App-Passwörter seeden **oder** IMAP-OAUTHBEARER (siehe `docs/operaton-sso.md`-Muster). |
 | Paperless | `opensme-paperless` (`PAPERLESS_OIDC_CLIENT_ID`) | 🟡 verdrahtet | Client registrierbar via `scripts/zitadel-client.sh --app paperless`; `services/paperless.yml` aktiviert django-allauth generisches OIDC (PKCE, Auto-Signup, Issuer `https://auth.<domain>`). Positiver Login-Flow-Test steht noch aus — lokal an `/tmp/reprodemo` nachholbar (Live-Container 🟥 steht hinter dem runc-EOF-Keil). |
 | Invoice (Invoice-Ninja) | — | ❌ nicht nativ OIDC-fähig | Selfhosted Invoice-Ninja hat kein generisches OIDC (nur Google/Microsoft-Socialite; Feature-Request [#10839](https://github.com/invoiceninja/invoiceninja/issues/10839) offen). SSO bedarf eines eigenen Patches oder Reverse-Proxy-Auth — bewusst noch kein Client registriert. |
 | Operaton (Camunda-Nachfolger) | `opensme-camunda` (`operaton.bpm.oauth2.*` + Plugin) | 🟢 **live: SSO-Login + Admin-Cockpit verifiziert** | Operaton 2.x CE ist **nativ OIDC-fähig** (spring-security-oauth2); eigener ZITADEL-`ReadOnlyIdentityProvider`-Plugin (Repo `operaton-zitadel`, 34 Tests grün, Gruppen = ZITADEL-Project-Rollen aus User-Grants, Admin via `operaton-admin`-Grant → `camunda-admin`). Live: OIDC-Client `397414680370348052`, Cockpit-Login als `tweiss` → Cockpit mit Admin-Rechten (12 Instanzen, 9 Tasks, 4 Defs); `--oauth2 --rest --webapps`-Launcher, Issuer via `host-gateway`-extra_hosts, `default.yml`-Override ohne `admin-user`; Details + Verifikation in `docs/operaton-sso.md`. |
@@ -315,6 +315,44 @@ python3 tests/00-static/check_oidc.py      # R1–R7: Registrierung, Login-UI,
                                            # Backchannel-Pin, Autoprovisioning,
                                            # Element server_name
 ```
+
+### Webmail (SOGo6) SSO — Live-Fixes (2026-10-31)
+
+Ticket „sogo sso not working“: sogo6 war zwar als RP kodiert, aber live fehlten
+Client/Secret, der Domain-Eintrag stand auf `plain`, und die OIDC-Discovery
+erreichte den IdP nicht. Der Flow ist jetzt end-to-end grün
+(Status-Tabelle, Zeile Webmail). Reproduktionschronik:
+
+1. **Zitadel-Client** — `./scripts/zitadel-client.sh --app sogo` registriert
+   eine App (live: Client `397489856642613268`) und schreibt
+   `SOGO_OIDC_CLIENT_ID`/`SOGO_OIDC_CLIENT_SECRET` in die `.env`, die der
+   Aufrufer nutzt (live: `/opt/opensme-compose/.env`, **nicht** `compose/.env`).
+   Der sogo-Branch registriert die sogo6-Callback-URI
+   `{SOGO6_PUBLIC_URL}/api/user/v1/auth/callback/{OPENSME_DOMAIN}` (auch http).
+2. **Domain-Einstellungen (DB)** — `opensme-sogo6-postgres`/db `sogo`,
+   `sogo6_sogo_settings.settings_domain_default` → `AUTH_SETTINGS`
+   (Patch im Live-SQL, Credentials aus der richtigen `.env`):
+   - `SOGO_D_AUTH_TYPE=openid`, `SOGO_D_OPENID_CONFIG_URL=
+     https://auth.<domain>`, `SOGO_D_OPENID_CLIENT_NAME/SECRET` = Zitadel-Client,
+     `SOGO_D_OPENID_ALLOW_REDIRECT` = beide Callback-URIs.
+3. **IdP-Erreichbarkeit** — DNS im Compose-Netz zeigt für `auth.<domain>` auf
+   einen toten Bridge-Alias (Traefik läuft host-net). Fix wie Camunda:
+   `extra_hosts: ["auth.<domain>:host-gateway"]` am Service `sogo6-server`
+   (live: `compose/mail/sogo6.yml`; kein Recreate nötig wenn `/etc/hosts`
+   ephemere pin nur beim nächsten Image-Rebuild wirkt — tatsächlich zwingend
+   Recreate, da `/etc/hosts` read-only ist).
+4. **UI-Proxy `redirect:'manual'`** — der Next-Proxy
+   (`SOGo6-UI src/app/api/[[...path]]/route.ts`) folgt der Backend-302 selbst
+   und verliert das `#token=`-Fragment → Browser bleibt am Callback hängen.
+   Fix: `fetch(...,{redirect:'manual'})` + rohe Location-Weitergabe. Live ist
+   der Hotpatch in den gebauten Chunks eingespielt
+   (`_0ub05ha._.js`, `[root-of-the-server]__1up58lg._.js`); ein Image-Rebuild
+   aus dem gefixten Repo ersetzt den Hotpatch dauerhaft.
+5. **Verifikation** — `/api/user/v1/auth/mode?username=…` liefert `kind:"sso"`
+   + authorize-URL; kompletter Browser-Flow (email → auto-redirect IdP →
+   Login → Callback → `/de/u/0/INBOX`, `/api/sse` 200). Die **Postfach-UI**
+   bleibt Open Item (IMAP-Plain mit Access-Token wird von Stalwart
+   `directory=oidc` abgelehnt — siehe Status-Tabelle).
 
 ## Portal-Login (OIDC-RP) — Live-Provisionierung
 
