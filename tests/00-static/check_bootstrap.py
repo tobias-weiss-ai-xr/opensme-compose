@@ -391,6 +391,59 @@ def check_lifecycle_tooling(result: Result) -> None:
             result.ok(f"Makefile provides 'make {target}'")
 
 
+def check_bootstrap_tooling(result: Result) -> None:
+    """Bootstrap robustness tooling: preflight / verify / seed-deploy must be
+    shipped, executable, parse and answer --help; their entry points must be
+    wired into bootstrap.sh (preflight + verify + resume), provision.sh
+    (content component) and the Makefile; resume checkpoints must be
+    gitignored."""
+    tools = {
+        "scripts/preflight.sh": "host/stack readiness fail-fast",
+        "scripts/verify-stack.sh": "post-bootstrap container/endpoint/SSO verify",
+        "bootstrap/seed-deploy.sh": "seed-content -> Paperless (idempotent)",
+    }
+    for rel, purpose in tools.items():
+        path = ROOT / rel
+        if not path.is_file():
+            result.fail(f"{rel} missing ({purpose})")
+            continue
+        if not path.stat().st_mode & 0o111:
+            result.fail(f"{rel} is not executable")
+            continue
+        run = subprocess.run(
+            ["bash", rel, "--help"], cwd=ROOT,
+            capture_output=True, text=True,
+        )
+        if run.returncode != 0:
+            result.fail(f"{rel} --help exit={run.returncode}: {run.stderr.strip()}")
+        else:
+            result.ok(f"{rel} present, executable, --help ok ({purpose})")
+
+    bootstrap = (ROOT / "scripts/bootstrap.sh").read_text()
+    for flag in ("--preflight", "--skip-preflight", "--verify", "--resume"):
+        if flag not in bootstrap:
+            result.fail(f"scripts/bootstrap.sh missing {flag} handling")
+        else:
+            result.ok(f"scripts/bootstrap.sh supports {flag}")
+    if ".bootstrap-state" not in (ROOT / ".gitignore").read_text():
+        result.fail(".bootstrap-state not in .gitignore (resume checkpoints would be committed)")
+    else:
+        result.ok(".bootstrap-state ignored by git")
+
+    provision = (ROOT / "scripts/provision.sh").read_text()
+    if "content" not in re.findall(r"\b\w+\b", provision.split("ALL_COMPONENTS=")[1].split(")")[0]):
+        result.fail("provision.sh ALL_COMPONENTS lacks the 'content' component")
+    else:
+        result.ok("provision.sh ships the 'content' component (seed docs)")
+
+    makefile = (ROOT / "Makefile").read_text()
+    for target in ("preflight", "verify", "seed", "seed-delete"):
+        if not re.search(rf"^{target}:", makefile, re.M):
+            result.fail(f"Makefile missing '{target}' target")
+        else:
+            result.ok(f"Makefile provides 'make {target}'")
+
+
 def main() -> int:
     result = Result("bootstrap-seed-data")
     if not BPMN_DIR.is_dir():
@@ -407,6 +460,7 @@ def main() -> int:
     check_seed_content(result)
     check_demo_users(result)
     check_lifecycle_tooling(result)
+    check_bootstrap_tooling(result)
     return 0 if result.summary() else 1
 
 

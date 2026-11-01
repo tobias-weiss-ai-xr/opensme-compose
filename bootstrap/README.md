@@ -18,6 +18,25 @@ Both processes are engine-native (Operaton namespace
 side-effect service tasks plus `operaton:historyTimeToLive` for history
 cleanup.
 
+## seed-deploy (content provisioning)
+
+`bootstrap/seed-deploy.sh` imports `seed-content/*.md` into Paperless so a
+fresh stack ships with real documents, not just identity rows. It drops the
+files into the container's internal consumption directory (paperless only
+consumes supported extensions, so the seed markdown lands as `.txt` — the
+title stays the same) and confirms the import server-side via `manage.py`;
+no API token is created or exposed. Idempotent by exact title.
+
+```bash
+bash bootstrap/seed-deploy.sh         # import/new-stack provisioning
+bash bootstrap/seed-deploy.sh --delete # remove exactly the seeded documents
+make seed                              # same as the first command
+```
+
+It is also provisioned automatically via
+`scripts/provision.sh --components content` (skipped when the paperless
+profile is not running) and therefore part of `./scripts/bootstrap.sh`.
+
 ### Deploying
 
 ```bash

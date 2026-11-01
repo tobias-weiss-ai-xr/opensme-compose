@@ -4,13 +4,15 @@
 # Safe to re-run at any time — every component is a no-op when already done.
 #
 #   oidc     register every OIDC client (opencloud, portal, notes, synapse,
-#            ticketing, sogo) — scripts/zitadel-client.sh --app <name>
+#            ticketing, sogo, paperless) — scripts/zitadel-client.sh --app <name>
 #   users    seed the 12-person demo company into every user store
 #            (scripts/provision-demo-users.sh --component all)
 #   mail     Zitadel + Stalwart rows the SSO/mail legs need
 #            (scripts/provision-demo-users.sh --component zitadel,stalwart)
 #   bpmn     deploy seed BPMN processes (bootstrap/bpmn-deploy.sh)
 #   surveys  seed the example LimeSurvey (bootstrap/survey-deploy.sh)
+#   content  import bootstrap/seed-content/*.md into Paperless
+#            (bootstrap/seed-deploy.sh)
 #
 # Components whose stack slice isn't running are skipped with a hint
 # (e.g. bpmn needs the opensme-camunda container; surveys needs postgres).
@@ -35,8 +37,8 @@ err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-ALL_COMPONENTS=(oidc users mail bpmn surveys)
-declare -A ENABLED=( [oidc]=true [users]=true [mail]=true [bpmn]=true [surveys]=true )
+ALL_COMPONENTS=(oidc users mail bpmn surveys content)
+declare -A ENABLED=( [oidc]=true [users]=true [mail]=true [bpmn]=true [surveys]=true [content]=true )
 DRY_RUN=false
 
 usage() {
@@ -51,6 +53,7 @@ Components (default: all):
   mail      Zitadel + Stalwart rows the SSO/mail legs need
   bpmn      deploy seed BPMN processes (needs the camunda profile)
   surveys   seed the example LimeSurvey (needs the surveys overlay)
+  content   import seed docs into Paperless (needs the paperless profile)
 
 Options:
   --components LIST   comma-separated subset, e.g. oidc,users
@@ -75,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --skip-mail)     ENABLED[mail]=false;     shift ;;
     --skip-bpmn)     ENABLED[bpmn]=false;     shift ;;
     --skip-surveys)  ENABLED[surveys]=false;  shift ;;
+    --skip-content)  ENABLED[content]=false;  shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     --help|-h)       usage; exit 0 ;;
     *)               err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -97,7 +101,7 @@ running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
 
 # ── components ────────────────────────────────────────────────────────────
 comp_oidc() {
-  local apps=(opencloud portal notes synapse ticketing sogo)
+  local apps=(opencloud portal notes synapse ticketing sogo paperless)
   local a
   for a in "${apps[@]}"; do
     if [[ "$DRY_RUN" == true ]]; then
@@ -157,6 +161,18 @@ comp_surveys() {
     bash bootstrap/survey-deploy.sh
   else
     warn "opensme-postgres not running — skipping surveys (start with --profile surveys)"
+  fi
+}
+
+comp_content() {
+  if [[ "$DRY_RUN" == true ]]; then
+    info "  would import bootstrap/seed-content/*.md into Paperless"
+    return 0
+  fi
+  if running opensme-paperless; then
+    bash bootstrap/seed-deploy.sh || warn "seed-content provisioning incomplete"
+  else
+    warn "opensme-paperless not running — skipping content (start with --profile paperless)"
   fi
 }
 

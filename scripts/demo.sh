@@ -425,7 +425,8 @@ fi
 
 if [[ "$WITH_SEED_CONTENT" == true ]]; then
   info "Seed content available in bootstrap/seed-content/"
-  info "  Load manually via your preferred service (OpenCloud, Paperless, etc.)"
+  info "  Auto-import into Paperless: ./bootstrap/seed-deploy.sh (or make seed)"
+  info "  Load manually via your preferred service (OpenCloud, Team Notes, etc.)"
 fi
 
 # ── Get admin password ────────────────────────

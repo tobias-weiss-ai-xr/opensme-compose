@@ -27,6 +27,7 @@
         specs contracts yaml-lint \
         container smoke integration e2e saga security \
         bootstrap bootstrap-all provision deprovision \
+        preflight verify seed seed-delete \
         bpm-deploy bpm-undeploy survey-deploy survey-delete survey-up clean help \
         up down status logs pull upgrade \
         mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
@@ -460,6 +461,19 @@ survey-up:
 bootstrap-all:
 	@bash scripts/bootstrap.sh
 
+preflight:
+	@bash scripts/preflight.sh
+
+verify:
+	@bash scripts/verify-stack.sh
+
+seed:
+	@echo -e "$(BLUE)── importing seed documents into Paperless ──$(NC)"
+	@bash bootstrap/seed-deploy.sh
+
+seed-delete:
+	@bash bootstrap/seed-deploy.sh --delete
+
 provision:
 	@bash scripts/provision.sh
 
@@ -506,8 +520,12 @@ help:
 	@echo "    make up                  Start stack (PROFILE=soho|small|medium)"
 	@echo "    make up-all              Start with ALL optional services"
 	@echo "    make bootstrap-all       Greenfield: .env + ALL services + provision"
+	@echo "    make preflight          Host/stack readiness checks (fail-fast)"
+	@echo "    make verify             Verify stack: containers + endpoints + SSO"
+	@echo "    make seed               Seed demo documents into Paperless"
 	@echo "    make provision           Idempotently provision OIDC clients, demo"
 	@echo "                             users, mail rows, BPMN + example survey"
+	@echo "                             + seed content (paperless profile)"
 	@echo "    make deprovision         Reverse provision (state; --data wipes volumes)"
 	@echo "    make down                Stop stack"
 	@echo "    make down-volumes        Stop + remove volumes (data loss!)"

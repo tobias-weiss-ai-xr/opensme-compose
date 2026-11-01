@@ -2,8 +2,13 @@
 
 Human-readable sample documents you can load into openSME services to make
 a fresh deployment feel real — and to demonstrate the product end-to-end.
-Everything here is **plain Markdown**, deliberate and small; nothing is
-consumed by the demo boot or by CI, so it never breaks the test suite.
+Everything here is **plain Markdown**, deliberate and small; CI validates
+presence, size and safety (see `tests/00-static/check_bootstrap.py`).
+
+> **Deployment:** `bootstrap/seed-deploy.sh` imports these documents into
+> Paperless automatically (also part of `scripts/provision.sh --components
+> content` and `./scripts/bootstrap.sh`). `--delete` removes exactly what
+> was seeded.
 
 > Unlike the BPMN files in `../bpmn/` (which are deployed to the workflow
 > engine), these are *content* — the kind of files real members create.

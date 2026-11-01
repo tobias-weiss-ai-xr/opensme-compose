@@ -4,6 +4,9 @@
 !.env.example
 !.env.demo
 
+# Bootstrap checkpoint markers (scripts/bootstrap.sh --resume)
+.bootstrap-state
+
 # Digest-pinned image manifest (environment-specific, produced by --generate).
 # Keep manifests/pinned-images.env.example tracked; never commit the real one.
 manifests/pinned-images.env
