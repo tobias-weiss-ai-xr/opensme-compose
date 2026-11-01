@@ -37,7 +37,7 @@ services:
       # at import — pin the Production configuration class.
       DJANGO_SETTINGS_MODULE: impress.settings
       DJANGO_CONFIGURATION: Production
-      DJANGO_SECRET_KEY: ${NOTES_DJANGO_SECRET_KEY:-CHANGEME_notes}
+      DJANGO_SECRET_KEY: ${NOTES_DJANGO_SECRET_KEY:?NOTES_DJANGO_SECRET_KEY must be set in .env}
       DJANGO_ALLOWED_HOSTS: "notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai},notes-backend"
       DATA_DIR: /data
       DB_ENGINE: django.db.backends.postgresql
@@ -45,10 +45,10 @@ services:
       DB_PORT: "5432"
       DB_NAME: notes_db
       DB_USER: notes_user
-      DB_PASSWORD: ${NOTES_DB_PASSWORD:-CHANGEME_notes}
+      DB_PASSWORD: ${NOTES_DB_PASSWORD:?NOTES_DB_PASSWORD must be set in .env}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/1
       OIDC_RP_CLIENT_ID: ${NOTES_OIDC_CLIENT_ID:-opensme-notes}
-      OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:-CHANGEME_notes_oidc}
+      OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:?NOTES_OIDC_CLIENT_SECRET must be set in .env}
       OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration/jwks"
       OIDC_OP_AUTHORIZATION_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/authorize"
       OIDC_OP_TOKEN_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/token"
@@ -59,12 +59,12 @@ services:
       LOGIN_REDIRECT_URL: "https://notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
       COLLABORATION_API_URL: "https://notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/collaboration/api/"
       COLLABORATION_WS_URL: "wss://notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/collaboration/ws/"
-      COLLABORATION_SERVER_SECRET: ${NOTES_COLLABORATION_SECRET:-CHANGEME_notes_collab}
+      COLLABORATION_SERVER_SECRET: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
       Y_PROVIDER_API_BASE_URL: http://notes-y-provider:4444
-      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:-CHANGEME_notes_collab}
+      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
       AWS_S3_ENDPOINT_URL: "http://minio:9000"
       AWS_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
-      AWS_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:-CHANGEME_minio}
+      AWS_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set in .env}
       AWS_STORAGE_BUCKET_NAME: notes-media
     volumes:
       - notes-data:/data
@@ -151,7 +151,7 @@ services:
     restart: unless-stopped
     profiles: ["notes"]
     environment:
-      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:-CHANGEME_notes_collab}
+      Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
     networks:
       - opensme-net
     healthcheck:

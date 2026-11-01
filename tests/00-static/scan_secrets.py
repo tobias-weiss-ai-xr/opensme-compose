@@ -67,7 +67,8 @@ INTERNAL_PATTERNS = [
     (r'\b169\.254\.\d{1,3}\.\d{1,3}\b', "link-local IPv4 (169.254/16)"),
 ]
 
-# CHANGEME_ values are OK in .env.example but NOT in compose files
+# CHANGEME_ values are OK in .env.example but NOT in compose files ("safe"
+# defaults like ${VAR:-CHANGEME_...} are still known secrets — never allow them)
 CHANGEME_PATTERN = re.compile(r'CHANGEME_[a-z_]+', re.IGNORECASE)
 
 # Files to scan
@@ -134,13 +135,18 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                 if stripped.startswith("#"):
                     continue
 
-                # Check for CHANGEME_ in compose files (not .env.example)
-                # But skip CHANGEME_ when it's a default value: ${VAR:-CHANGEME_...}
+                # Check for CHANGEME_ in compose files (not .env.example). This
+                # INCLUDES ${VAR:-CHANGEME_...} inline defaults: those are
+                # universally-known secrets that get rendered into running
+                # containers whenever an operator forgets the .env entry (hit
+                # paperless/invoice-ninja/notes, 2026-11-01 — scanner previously
+                # stripped the "${..:-CHANGEME_..}" shape, so CI stayed green
+                # while known fallbacks silently shipped). Prefer fail-fast
+                # ${VAR:?must go in .env} or an inherently-safe empty default
+                # ${VAR:-} — never a real value as a default.
                 if filepath.suffix in (".yml", ".yaml"):
-                    # Remove ${VAR:-CHANGEME_...} patterns before checking
-                    cleaned = re.sub(r'\$\{[^}]*:-CHANGEME_[^}]*\}', '', line)
-                    if CHANGEME_PATTERN.search(cleaned):
-                        findings.append((i, "CHANGEME in compose file", line.rstrip()))
+                    if CHANGEME_PATTERN.search(line):
+                        findings.append((i, "CHANGEME in compose file (incl. :-defaults)", line.rstrip()))
 
                 # Check for secret patterns
                 if not in_tests and not is_env_sample:

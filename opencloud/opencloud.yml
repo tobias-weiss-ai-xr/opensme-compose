@@ -73,7 +73,7 @@ services:
       OC_LOG_LEVEL: ${LOG_LEVEL:-info}
       OC_LOG_PRETTY: ${LOG_PRETTY:-true}
       OC_ADMIN_USERNAME: ${OC_ADMIN_USERNAME:-admin}
-      OC_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:-CHANGEME_oc_admin}
+      OC_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
       OC_DOMAIN: ${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       OC_IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
@@ -83,7 +83,7 @@ services:
       # (idempotent, first demo boot); it writes the Zitadel-issued secret into
       # .env as OC_OIDC_CLIENT_SECRET. OC_OIDC_SECRET is kept as a legacy
       # fallback for older .env files / overlay consumers.
-      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:-${OC_OIDC_SECRET:-CHANGEME_oidc_client}}
+      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:?OC_OIDC_CLIENT_SECRET must be set in .env}
       PROXY_ROLE_ASSIGNMENT_DRIVER: ${OPENCLOUD_ROLE_ASSIGNMENT_DRIVER:-default}
       # External (Zitadel) subjects are provisioned into the IDM on first
       # login. Without this ocis 401s every SSO user after a successful token
@@ -182,7 +182,7 @@ services:
       domain: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
       DONT_GEN_SSL_CERT: true
       username: ${COLLABORA_USERNAME:-admin}
-      password: ${COLLABORA_PASSWORD:-CHANGEME_collabora}
+      password: ${COLLABORA_PASSWORD:?COLLABORA_PASSWORD must be set in .env}
     cap_add:
       - MKNOD
     # collabora/code 26.04 ships NO curl, wget, or shell — an in-container

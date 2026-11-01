@@ -43,7 +43,7 @@ services:
       - sogo-data:/srv
     environment:
       TZ: ${TZ:-Europe/Berlin}
-      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo}
+      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:?SOGO_DB_PASSWORD must be set in .env}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
       # Webmail SSO (docs/ROADMAP.md Epic C3): the OIDC client pair is minted
       # by scripts/zitadel-client.sh --app sogo into .env. Until it runs, the

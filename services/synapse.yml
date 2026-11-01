@@ -34,7 +34,7 @@ services:
       SYNAPSE_SERVER_NAME: "matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
       SYNAPSE_REPORT_STATS: "no"
       POSTGRES_USER: synapse_user
-      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD:-CHANGEME_synapse}
+      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD:?SYNAPSE_DB_PASSWORD must be set in .env}
       POSTGRES_DB: synapse_db
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
@@ -42,7 +42,7 @@ services:
       # for the oidc_providers block in synapse-setup.sh; the pair is minted
       # by scripts/zitadel-client.sh --app synapse
       SYNAPSE_OIDC_CLIENT_ID: ${SYNAPSE_OIDC_CLIENT_ID:-}
-      SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET:-CHANGEME_synapse_oidc}
+      SYNAPSE_OIDC_CLIENT_SECRET: ${SYNAPSE_OIDC_CLIENT_SECRET:?SYNAPSE_OIDC_CLIENT_SECRET must be set in .env}
       # issuer for the oidc_providers block — must be in the container env,
       # the setup script's fallback default is the wrong (non-live) domain
       ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}

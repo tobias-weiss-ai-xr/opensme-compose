@@ -34,8 +34,8 @@ services:
     environment:
       MARIADB_DATABASE: invoiceninja_db
       MARIADB_USER: invoiceninja_user
-      MARIADB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}
-      MARIADB_ROOT_PASSWORD: ${INVOICENINJA_DB_ROOT_PASSWORD:-CHANGEME_invoiceninja_root}
+      MARIADB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:?INVOICENINJA_DB_PASSWORD must be set in .env}
+      MARIADB_ROOT_PASSWORD: ${INVOICENINJA_DB_ROOT_PASSWORD:?INVOICENINJA_DB_ROOT_PASSWORD must be set in .env}
     volumes:
       - invoiceninja-db:/var/lib/mysql
     networks:
@@ -76,7 +76,7 @@ services:
       DB_PORT: "3306"
       DB_DATABASE: invoiceninja_db
       DB_USERNAME: invoiceninja_user
-      DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}
+      DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:?INVOICENINJA_DB_PASSWORD must be set in .env}
       DB_TYPE: mysql
       # Laravel reads DB_CONNECTION (DB_TYPE is a invoiceninja-doc but
       # dead name — without this it defaults to the mysql driver)

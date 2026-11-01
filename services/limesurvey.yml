@@ -57,7 +57,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: limesurvey_db
       DB_USERNAME: limesurvey_user
-      DB_PASSWORD: ${SURVEYS_DB_PASSWORD:-CHANGEME_surveys}
+      DB_PASSWORD: ${SURVEYS_DB_PASSWORD:?SURVEYS_DB_PASSWORD must be set in .env}
       # initial admin — only effective on FIRST start; afterwards manage
       # users inside the LimeSurvey admin UI
       ADMIN_USER: ${SURVEYS_ADMIN_USER:-admin}

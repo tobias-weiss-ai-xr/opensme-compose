@@ -157,7 +157,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEME_postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_USER: opensme
       POSTGRES_DB: opensme
       # Per-service DB passwords for postgres-init/01-create-users.sh —
@@ -165,19 +165,19 @@ services:
       # here (the script's :-changeme fallbacks otherwise win, and the
       # profile-gated service then fails auth against a 'changeme' user).
       # Defaults aligned with the per-service compose files (e.g.
-      # services/paperless.yml uses ${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}).
+      # services/paperless.yml requires PAPERLESS_DB_PASSWORD (fail-fast, no known default).
       # If these defaults diverge, postgres-init creates the user with one
       # password and the service tries to connect with another → auth failure.
-      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD:-CHANGEME_casdoor}
-      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD:-CHANGEME_synapse}
-      PAPERLESS_DB_PASSWORD: ${PAPERLESS_DB_PASSWORD:-CHANGEME_paperless}
-      INVOICENINJA_DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:-CHANGEME_invoiceninja}
-      NOTES_DB_PASSWORD: ${NOTES_DB_PASSWORD:-CHANGEME_notes}
-      NOSDESK_DB_PASSWORD: ${NOSDESK_DB_PASSWORD:-CHANGEME_nosdesk_db}
-      CAMUNDA_DB_PASSWORD: ${CAMUNDA_DB_PASSWORD:-CHANGEME_camunda}
+      CASDOOR_DB_PASSWORD: ${CASDOOR_DB_PASSWORD:?CASDOOR_DB_PASSWORD must be set in .env}
+      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD:?SYNAPSE_DB_PASSWORD must be set in .env}
+      PAPERLESS_DB_PASSWORD: ${PAPERLESS_DB_PASSWORD:?PAPERLESS_DB_PASSWORD must be set in .env}
+      INVOICENINJA_DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:?INVOICENINJA_DB_PASSWORD must be set in .env}
+      NOTES_DB_PASSWORD: ${NOTES_DB_PASSWORD:?NOTES_DB_PASSWORD must be set in .env}
+      NOSDESK_DB_PASSWORD: ${NOSDESK_DB_PASSWORD:?NOSDESK_DB_PASSWORD must be set in .env}
+      CAMUNDA_DB_PASSWORD: ${CAMUNDA_DB_PASSWORD:?CAMUNDA_DB_PASSWORD must be set in .env}
       # SOGo (mail/sogo.yml) connects as sogo_user, not as the superuser —
       # its DB password is generated separately from POSTGRES_PASSWORD.
-      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo}
+      SOGO_DB_PASSWORD: ${SOGO_DB_PASSWORD:?SOGO_DB_PASSWORD must be set in .env}
     # Production tuning for up to 500 users (via CLI args)
     command:
       - "-c"
@@ -233,13 +233,13 @@ services:
       POSTGRESQL_HOST: postgres
       POSTGRESQL_PORT: 5432
       POSTGRESQL_USERNAME: opensme
-      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEME_postgres}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRESQL_DATABASE: opensme
       # bitnami uses PGBOUNCER_DATABASE as the client-facing [databases]
       # alias; unset it defaults to "postgres" and every -d opensme
       # connection (incl. the healthcheck) fails with "no such database".
       PGBOUNCER_DATABASE: opensme
-      PGPASSWORD: ${POSTGRES_PASSWORD:-CHANGEME_postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       PGBOUNCER_POOL_MODE: transaction
       PGBOUNCER_DEFAULT_POOL_SIZE: 25
       PGBOUNCER_MAX_CLIENT_CONN: 200
