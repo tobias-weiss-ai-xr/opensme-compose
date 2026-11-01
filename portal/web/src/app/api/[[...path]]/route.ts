@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendUrl, forwardToBackend } from "@/lib/backend";
 import { getSetCookieList, parseSetCookie } from "@/lib/setcookie";
+import { sanitizeApiPath } from "@/lib/apipath";
 
 /**
  * Same-origin proxy to the Rust axum API (runtime BACKEND_URL — dynamic
@@ -26,7 +27,14 @@ const FORWARD = new Set([
 
 async function proxy(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
   const { path } = await ctx.params;
-  const suffix = (path ?? []).join("/");
+  // Refuse '.'/'..' (and double-encoded) segments BEFORE they are re-joined
+  // into the backend URL: /api/..%2f..%2fmetrics would otherwise normalize to
+  // the backend /metrics and bypass web gates. 404 hides backend surface.
+  const clean = sanitizeApiPath(path);
+  if (clean === null) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const suffix = clean.join("/");
   const qs = req.nextUrl.search;
   const url = `${backendUrl()}/api/${suffix}${qs}`;
 
