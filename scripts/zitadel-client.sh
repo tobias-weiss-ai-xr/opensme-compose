@@ -288,14 +288,14 @@ case "$APP_KIND" in
     CLIENT_SECRET_KEY="PAPERLESS_OIDC_CLIENT_SECRET"
     SECRET_ALIAS_KEY=""
     TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
-    # Paperless-ngx logs in through django-allauth's GENERIC OIDC provider
-    # (provider slug 'openid_connect'): the browser lands back at
-    # /accounts/openid_connect/login/callback/ (services/paperless.yml sets
-    # PAPERLESS_SOCIALACCOUNT_PROVIDERS with OAUTH_PKCE_ENABLED + the
-    # issuer discovery URL).
+    # Paperless-ngx logs in through django-allauth's GENERIC OIDC provider:
+    # allauth >=65 mounts the generic OIDC flow under the 'oidc' URL prefix
+    # with the per-app provider_id as slug, so the browser lands back at
+    # /accounts/oidc/zitadel/login/callback/. The legacy pre-65 slug is kept
+    # alongside so older allauth builds keep working.
     app_domain="$(env_get PAPERLESS_DOMAIN "paperless.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
     CLIENT_ID_LABEL="$(env_get PAPERLESS_OIDC_CLIENT_ID opensme-paperless)"
-    base_paths=("/accounts/openid_connect/login/callback/")
+    base_paths=("/accounts/oidc/zitadel/login/callback/" "/accounts/openid_connect/login/callback/")
     ;;
   operaton)
     APP_PROJECT="opensme"

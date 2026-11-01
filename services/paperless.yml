@@ -24,7 +24,10 @@ x-service-defaults: &service-defaults
 services:
   paperless-ngx:
     <<: *service-defaults
-    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    # Patched image (images/paperless-oidc) — enables the allauth generic OIDC
+    # provider app; stock paperless-ngx never loads it (allauth ≥65 providers
+    # come from INSTALLED_APPS). Override for upstream/own builds.
+    image: ${PAPERLESS_NGX_IMAGE:-opensme/paperless-ngx:3.3.4-oidc}
     container_name: opensme-paperless
     restart: unless-stopped
     # s6-overlay must be PID 1; the shared anchor's `init: true` (tini) breaks it
@@ -44,14 +47,15 @@ services:
       # ── SSO via the central IdP (optional — register the client with
       #    scripts/zitadel-client.sh --app paperless; issuer defaults to the
       #    auth.<domain> discovery URL) ──
-      # django-allauth generic OIDC provider (slug 'openid_connect'): the
-      # browser callback is /accounts/openid_connect/login/callback/. PKCE is
+      # django-allauth generic OIDC provider (allauth slug 'oidc'): the
+      # browser callback is /accounts/oidc/zitadel/login/callback/. PKCE is
       # required by Zitadel; fetch_userinfo maps the identity claims.
-      PAPERLESS_APPS: "allauth.socialaccount.providers.openid_connect"
+      # NOTE the provider app is enabled by the custom image (images/paperless-oidc),
+      # NOT by env — the stock image ignores any "PAPERLESS_APPS"-style hint.
       PAPERLESS_SOCIAL_AUTO_SIGNUP: "true"
       PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS: "true"
       PAPERLESS_LOGOUT_REDIRECT_URL: ${PAPERLESS_OIDC_LOGOUT_URL:-}
-      PAPERLESS_SOCIALACCOUNT_PROVIDERS: "{\"openid_connect\":{\"OAUTH_PKCE_ENABLED\":true,\"APPS\":[{\"provider_id\":\"zitadel\",\"name\":\"openSME SSO\",\"client_id\":\"${PAPERLESS_OIDC_CLIENT_ID:-}\",\"secret\":\"${PAPERLESS_OIDC_CLIENT_SECRET:-}\",\"settings\":{\"server_url\":\"https://auth.${OPENSME_DOMAIN:-opensme.graphwiz.ai}/.well-known/openid-configuration\",\"fetch_userinfo\":true}}],\"SCOPE\":[\"openid\",\"profile\",\"email\"]}}"
+      PAPERLESS_SOCIALACCOUNT_PROVIDERS: "{\"openid_connect\":{\"OAUTH_PKCE_ENABLED\":true,\"APPS\":[{\"provider_id\":\"zitadel\",\"name\":\"openSME SSO\",\"client_id\":\"${PAPERLESS_OIDC_CLIENT_ID:-}\",\"secret\":\"${PAPERLESS_OIDC_CLIENT_SECRET:-}\",\"settings\":{\"server_url\":\"https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration\",\"fetch_userinfo\":true}}],\"SCOPE\":[\"openid\",\"profile\",\"email\"]}}"
       PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?PAPERLESS_SECRET_KEY must be set in .env}
       PAPERLESS_TIME_ZONE: ${TZ:-Europe/Berlin}
       PAPERLESS_OCR_LANGUAGE: deu+eng
@@ -73,6 +77,14 @@ services:
       - ./services/paperless-consume:/consume:ro
     networks:
       - opensme-net
+    # OIDC backchannel: docker DNS maps ${ZITADEL_DOMAIN} to the zitadel
+    # container (hostname trick) where only :8080/http listens -> issuer
+    # discovery on https:443 fails from inside during login. Route the FQDN
+    # to the compose gateway instead: traefik (host network, :443) terminates
+    # TLS and routes by Host header back to zitadel (same pattern as
+    # camunda/opencloud).
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
