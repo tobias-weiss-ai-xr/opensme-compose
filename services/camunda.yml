@@ -19,6 +19,18 @@ x-service-defaults: &service-defaults
 # (/engine-rest/), and web apps (Cockpit, Tasklist, Admin) at
 # https://bpm.<domain>/operaton/app/
 #
+# ⚠ SECURITY NOTE (2026-10-31): despite the --oauth2 flag, Operaton's run
+# dist only SSO-protects the WEBAPPS (Cockpit/Tasklist/Admin redirect to
+# /oauth2/...). /engine-rest stays UNAUTHENTICATED — anyone with network
+# access (incl. the public Internet via traefik) can list/start/delete/deploy
+# processes. The public path is therefore gated: on the fleet edge by a
+# file-provider router (Host(bpm.*) && PathPrefix(/engine-rest) →
+# noop@internal), and on the compose-internal Traefik by the
+# camunda-rest-block label router below (same noop@internal stop).
+# First-party bootstrap deploys run via docker exec / the compose network
+# and are unaffected. Do not remove the gate unless REST is behind a real
+# auth boundary.
+#
 # Include via: COMPOSE_FILE=…:services/camunda.yml
 # Or via profile: docker compose --profile camunda up -d
 #
@@ -40,7 +52,9 @@ services:
     container_name: opensme-camunda
     # Run launcher flags: without ANY flag it enables REST+Webapps+Example,
     # but NOT the OAuth2 starter. --oauth2 --rest --webapps pulls in the
-    # spring-security jars (/operaton/internal/oauth2) + webapps + engine-rest;
+    # spring-security jars (/operaton/internal/oauth2) + the webapps (the
+    # REST API is NOT covered by the OAuth2 filter — see the security note
+    # above and the camunda-rest-block gating labels below);
     # the example is intentionally left out (no second engine context).
     command: ["./operaton.sh", "--oauth2", "--rest", "--webapps"]
     # docker DNS maps ${ZITADEL_DOMAIN} to the zitadel container (hostname
@@ -98,6 +112,14 @@ services:
       - "traefik.http.routers.camunda.tls=true"
       - "traefik.http.routers.camunda.entrypoints=websecure"
       - "traefik.http.services.camunda.loadbalancer.server.port=8080"
+      # Gate the unauthenticated REST API at the compose-internal Traefik
+      # (same stop as the fleet edge file router): anyone on the public host
+      # could otherwise drive the BPM engine over /engine-rest/... To reach
+      # the API: docker exec / compose network (camunda:8080).
+      - "traefik.http.routers.camunda-rest-block.rule=Host(`${CAMUNDA_DOMAIN:-bpm.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}`) && PathPrefix(`/engine-rest`)"
+      - "traefik.http.routers.camunda-rest-block.entrypoints=websecure"
+      - "traefik.http.routers.camunda-rest-block.priority=10000"
+      - "traefik.http.routers.camunda-rest-block.service=noop@internal"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/engine-rest/engine"]
       interval: 30s

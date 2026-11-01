@@ -37,22 +37,37 @@ file via `POST /engine-rest/deployment/create`. Re-running updates
 existing deployments (idempotent).
 
 After deployment, the processes are available in:
-- **Cockpit**: `https://bpm.<domain>/operaton/app/cockpit/`
-- **Tasklist**: `https://bpm.<domain>/operaton/app/tasklist/`
-- **REST API**: `POST https://bpm.<domain>/engine-rest/process-definition/key/<process-key>/start`
+- **Cockpit**: `https://bpm.<domain>/operaton/app/cockpit/` (SSO)
+- **Tasklist**: `https://bpm.<domain>/operaton/app/tasklist/` (SSO)
+- **REST API**: internal-only / docker exec — see below (public `/engine-rest` is blocked).
 
-### Starting a process instance
+> [!IMPORTANT]
+> Since 2026-10-31 the public `/engine-rest` is BLOCKED by a Traefik edge
+> router (`noop@internal`, priority 10000; on the compose-internal Traefik
+> the same via the `camunda-rest-block` label router). Operaton's run dist
+> only SSO-protects the webapps (Cockpit/Tasklist/Admin), the REST API stays
+> unauthenticated — anonymous Internet access meant anyone could list/
+> start/delete/deploy BPM processes (proven live: anonymous instance start).
+> First-party tooling above runs via docker exec into the engine (loopback)
+> and is unaffected. All REST automation happens **inside the compose
+> network / docker exec**, never over the public host.
+
+### Starting a process instance (internal / docker exec)
 
 ```bash
-# Invoice approval — manager approval path (> 500):
-curl -X POST "https://bpm.<domain>/engine-rest/process-definition/key/opensme-invoice-approval/start" \
+# Inside the engine container (loopback, no Internet exposure):
+docker exec opensme-camunda curl -s -X POST \
+  "http://localhost:8080/engine-rest/process-definition/key/opensme-invoice-approval/start" \
   -H "Content-Type: application/json" \
   -d '{"variables": {"amount": {"value": 750, "type": "Integer"}, "manager": {"value": "demo", "type": "String"}}, "businessKey": "INV-2026-001"}'
 
 # Vacation request — two-level path (> 3 days):
-curl -X POST "https://bpm.<domain>/engine-rest/process-definition/key/opensme-vacation-request/start" \
+docker exec opensme-camunda curl -s -X POST \
+  "http://localhost:8080/engine-rest/process-definition/key/opensme-vacation-request/start" \
   -H "Content-Type: application/json" \
   -d '{"variables": {"days": {"value": 10, "type": "Integer"}, "teamLead": {"value": "demo", "type": "String"}, "substitute": {"value": "jane", "type": "String"}}, "businessKey": "VAC-2026-001"}'
+
+# From a container on the same compose network: http://camunda:8080/...
 ```
 
 ### Completing a user task
