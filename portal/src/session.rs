@@ -375,9 +375,11 @@ pub async fn handle_login(State(config): State<Arc<AppConfig>>) -> Response {
 pub struct CallbackParams {
     code: String,
     /// OIDC `state` echoed by the IdP. A real browser round trip always
-    /// carries one, but the v2 Session-API machine flow (api_login drives
-    /// the IdP directly) may return a callback without it — tolerate that
-    /// while still enforcing the CSRF equality whenever a state is present.
+    /// echoes it; an unauthenticated machine flow never carries a cookie and
+    /// is rejected as “missing state cookie” before this field matters.
+    /// 2026-11-01: a callback with NO echoed state but WITH an OPENSMESTATE
+    /// cookie is treated as login CSRF / session fixation and rejected
+    /// (the equality is enforced whenever a state IS present).
     state: Option<String>,
 }
 
@@ -407,7 +409,18 @@ pub async fn handle_callback(
                 .expect("static");
         }
     } else {
-        tracing::warn!("OIDC callback without state (v2 Session-API machine flow?)");
+        // A state cookie is present (this browser ran /api/auth) but the IdP
+        // did not echo a state. A pure machine flow would carry NO cookie and
+        // is already rejected above (“missing state cookie”); a cookie paired
+        // with a missing state means the callback URL was crafted by a third
+        // party (login CSRF / session fixation: attacker forces /api/auth on
+        // the victim, then sends the victim their own auth code) — reject.
+        tracing::warn!("OIDC callback without state but with state cookie (CSRF rejected)");
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(SET_COOKIE, clear_state())
+            .body(axum::body::Body::empty())
+            .expect("static");
     }
     match exchange_and_userinfo(&config.session, &params.code).await {
         Ok(user) => {
@@ -1051,5 +1064,54 @@ mod tests {
             .unwrap();
         let res = router.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn callback_with_state_cookie_but_no_echoed_state_is_rejected() {
+        // Login-CSRF / session-fixation shape: attacker forces /api/auth on the
+        // victim (sets OPENSMESTATE), then sends the victim a callback URL that
+        // carries the ATTACKER's auth code but no state. The cookie is present,
+        // the echoed state is absent — must be rejected, not tolerated.
+        let mut app = crate::tests::cfg_with("", None, "");
+        let mut sc = cfg();
+        sc.session_secret = SECRET.as_bytes().to_vec();
+        app.session = sc.clone();
+
+        let router = crate::build_router(std::sync::Arc::new(app));
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/auth/callback?code=attacker-code")
+            .header("Cookie", "OPENSMESTATE=abc123")
+            .body(Body::empty())
+            .unwrap();
+        let res = router.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        // state cookie must be cleared so a follow-up callback can't ride it
+        let clear = res.headers().get_all(SET_COOKIE).iter().find_map(|v| {
+            let s = v.to_str().unwrap_or_default();
+            s.starts_with(&format!("{STATE_COOKIE}="))
+                .then_some(s.to_string())
+        });
+        let clear = clear.expect("state cookie cleared");
+        assert!(clear.contains("Max-Age=0"), "cleared: {clear}");
+    }
+
+    #[tokio::test]
+    async fn callback_without_cookie_stays_denied() {
+        // A true machine flow carries no cookie and no state — it must remain
+        // denied (missing state cookie), the pre-existing behaviour.
+        let mut app = crate::tests::cfg_with("", None, "");
+        let mut sc = cfg();
+        sc.session_secret = SECRET.as_bytes().to_vec();
+        app.session = sc.clone();
+
+        let router = crate::build_router(std::sync::Arc::new(app));
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/auth/callback?code=attacker-code")
+            .body(Body::empty())
+            .unwrap();
+        let res = router.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 }
