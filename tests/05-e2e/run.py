@@ -531,7 +531,7 @@ def section_discovery(result, session, idp_base):
     return disc
 
 
-def section_portal(result, session, portal_base, ai_configured=False):
+def section_portal(result, session, portal_base, ai_configured=False, idp_base=""):
     try:
         r = session.get(portal_base + "/", timeout=T)
     except requests.RequestException:
@@ -610,12 +610,32 @@ def section_portal(result, session, portal_base, ai_configured=False):
         (result.ok if ok else result.fail)(
             "portal /health ok" if ok else f"portal /health: HTTP {h.status_code} {h.text[:60]}"
         )
-        s = session.get(portal_base + "/api/services", timeout=T)
-        services = s.json().get("services") if s.status_code == 200 else None
-        (result.ok if isinstance(services, list) else result.fail)(
-            f"portal /api/services: {len(services)} service(s)" if isinstance(services, list)
-            else f"portal /api/services: HTTP {s.status_code}"
+        # Gate contract: /api/services is session-protected (require_session
+        # in portal/src) — anonymous callers must get 401, never a catalog.
+        try:
+            g = session.get(portal_base + "/api/services", timeout=T)
+        except requests.RequestException:
+            g = None
+        (result.ok if g is not None and g.status_code == 401 else result.fail)(
+            "portal /api/services gated for anonymous (401)"
+            if g is not None and g.status_code == 401
+            else f"portal /api/services: anonymous got HTTP {g.status_code if g else 'err'} (want 401)"
         )
+
+        # Signed-in catalog: sign in through the REAL OIDC flow in an ISOLATED
+        # session (fresh cookie jar) so the main session stays anonymous for
+        # the later throw-away-app flows, then read the catalog as a user.
+        signed_in = requests.Session()
+        if portal_login(signed_in, portal_base, idp_base):
+            s = signed_in.get(portal_base + "/api/services", timeout=T)
+            services = s.json().get("services") if s.status_code == 200 else None
+            (result.ok if isinstance(services, list) else result.fail)(
+                f"portal /api/services: {len(services)} service(s) (signed in)" if isinstance(services, list)
+                else f"portal /api/services: HTTP {s.status_code} (signed in)"
+            )
+        else:
+            services = None
+            result.fail("portal /api/services: portal sign-in failed (no session, catalog unverifiable)")
 
         # Truthful catalog: every advertised service must actually answer.
         # The portal must not promise what isn't there.
@@ -627,7 +647,7 @@ def section_portal(result, session, portal_base, ai_configured=False):
                     dead.append(f"{svc.get('name')!r}: no url")
                     continue
                 try:
-                    rs = session.get(href, timeout=T, allow_redirects=True)
+                    rs = signed_in.get(href, timeout=T, allow_redirects=True)
                     if rs.status_code >= 500:
                         dead.append(f"{svc.get('name')!r}: HTTP {rs.status_code}")
                 except requests.RequestException:
@@ -1203,7 +1223,7 @@ def main() -> bool:
     disc = section_discovery(result, session, idp_base)
 
     # 2) Portal (AI card gating depends on AI_API_URL configuration)
-    section_portal(result, session, portal_base, ai_configured=bool(cfg("AI_API_URL")))
+    section_portal(result, session, portal_base, ai_configured=bool(cfg("AI_API_URL")), idp_base=idp_base)
 
     # 3-5) SSO flows
     flows_ok = bool(disc) and not args.skip_flows
