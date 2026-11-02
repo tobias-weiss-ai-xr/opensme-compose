@@ -484,8 +484,11 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         stage = f"exception {type(exc).__name__}: {exc}"
         return False
     finally:
-        if os.environ.get("E2E_DEBUG") and not session.cookies.get("OPENSMEPORTALSESSION"):
-            print(f"  [diag]   portal_login failed: {stage}", flush=True)
+        # Always surface the failing stage: a silent False costs a CI round
+        # trip to diagnose. (Cookie present → login actually succeeded, e.g.
+        # a late redirect hiccup — don't cry wolf.)
+        if not session.cookies.get("OPENSMEPORTALSESSION"):
+            print(f"  [diag]   portal_login failed at: {stage}", flush=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
