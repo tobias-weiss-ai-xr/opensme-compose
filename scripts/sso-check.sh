@@ -18,6 +18,7 @@ err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 # Load env
 if [[ -f .env ]]; then
     set -a
+    # shellcheck source=/dev/null  # .env generated at deploy time
     source .env
     set +a
 fi

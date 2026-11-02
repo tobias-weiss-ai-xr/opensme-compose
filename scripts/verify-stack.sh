@@ -50,7 +50,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -f .env ]]; then
-  set -a; source .env; set +a
+  set -a
+  # shellcheck source=/dev/null  # .env generated at deploy time
+  source .env
+  set +a
 fi
 DOMAIN="${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
 IDP_DOMAIN="${ZITADEL_DOMAIN:-auth.${DOMAIN}}"

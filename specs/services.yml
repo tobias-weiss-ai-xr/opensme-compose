@@ -26,7 +26,10 @@ services:
       memory: 192M
 
   paperless-ngx:
-    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    # Forked image (images/paperless-oidc): stock paperless-ngx 3.3.4 never loads
+    # allauth's openid_connect provider app — see commit addbef5. Overridable via
+    # PAPERLESS_NGX_IMAGE for upstream/own builds.
+    image: opensme/paperless-ngx:3.3.4-oidc
     compose_file: services/paperless.yml
     required: false
     profiles: [paperless]

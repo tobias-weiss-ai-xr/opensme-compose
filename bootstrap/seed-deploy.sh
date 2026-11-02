@@ -78,7 +78,7 @@ if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
 fi
 
 title_of() { basename "$1" .md; }
-titles_newline() { local f; for f in "${FILES[@]}"; do echo "$(title_of "$f")"; done; }
+titles_newline() { local f; for f in "${FILES[@]}"; do title_of "$f"; done; }
 
 # Run a Django snippet inside the container; titles are fed on stdin (pass -i).
 pshell() { docker exec -i "$CONTAINER" ./manage.py shell -c "$1"; }

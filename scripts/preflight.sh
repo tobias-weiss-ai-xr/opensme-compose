@@ -219,7 +219,12 @@ fi
 
 # ── 7) IdP reachability (soft) ───────────────────────────────────────────
 if command -v curl >/dev/null 2>&1; then
-  set -a; [[ -f .env ]] && source .env; set +a
+  set -a
+  if [[ -f .env ]]; then
+    # shellcheck source=/dev/null  # .env generated at deploy time
+    source .env
+  fi
+  set +a
   idp="${ZITADEL_DOMAIN:-auth.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}"
   if curl -sk --max-time 8 "https://$idp/healthz" >/dev/null 2>&1; then
     [[ "$QUIET" == false ]] && ok "IdP reachable (https://$idp/healthz)"

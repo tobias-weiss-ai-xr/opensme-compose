@@ -245,7 +245,7 @@ def check_no_public_admin_default_cred(result, rule, loader):
             labels = svc_data.get("labels") or []
             if isinstance(labels, dict):
                 labels = list(labels.values())
-            if not any(public_router.search(str(l)) for l in labels):
+            if not any(public_router.search(str(lbl)) for lbl in labels):
                 continue  # not on the public edge
             envs = svc_data.get("environment") or {}
             envs_map = {}

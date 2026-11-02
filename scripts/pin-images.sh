@@ -104,7 +104,7 @@ derive_var() {
   for sfx in -ngx -backend -frontend -y-provider -web -cloud-sync \
              -gotenberg -tika -db -data; do
     if [[ "$base" == *"$sfx" ]] && ((${#base} > ${#sfx})); then
-      base="${base%$sfx}"; break
+      base="${base%"$sfx"}"; break
     fi
   done
   cand="${base//-/_}"; cand="${cand^^}_IMAGE"

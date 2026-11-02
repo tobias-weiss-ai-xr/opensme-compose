@@ -253,14 +253,14 @@ def check_issuer_override(result: Result) -> None:
         return
     text = ZITADEL_YML.read_text()
     need = [
-        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
-        "Host=",
-        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
-        "X-Forwarded-Host=",
-        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
-        "X-Forwarded-Proto=https",
-        "traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
-        "X-Forwarded-Port=443",
+        ("traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+         "Host="),
+        ("traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+         "X-Forwarded-Host="),
+        ("traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+         "X-Forwarded-Proto=https"),
+        ("traefik.http.middlewares.zitadel-idp-host.headers.customrequestheaders."
+         "X-Forwarded-Port=443"),
     ]
     missing = [n for n in need if n not in text]
     if missing:

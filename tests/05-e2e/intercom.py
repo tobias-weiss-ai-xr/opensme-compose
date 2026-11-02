@@ -56,7 +56,7 @@ from conftest import Result, ensure_portal_routed
 from cloud_mock_support import CLOUD_NAME, CLOUD_PORT, start_cloud_standin, stop_cloud_standin
 # The portal's intercom/polls are authenticated surfaces: reuse run.py's
 # real OIDC login helper so this journey carries an OPENSMEPORTALSESSION cookie.
-from run import E2EError, fetch_seeded, load_env_file, portal_login  # noqa: E402  (after T/helpers)
+from run import portal_login
 
 import requests
 
