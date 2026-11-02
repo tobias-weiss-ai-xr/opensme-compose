@@ -440,11 +440,23 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
             stage = f"user-lookup: '{login_name}' not resolvable via Management API"
             return False
 
-        # 1) start the flow — capture the authorize Location + state cookie
-        stage = "start"
-        r = session.get(
-            portal_base + "/api/auth/login", allow_redirects=False, timeout=T
-        )
+        # 1) start the flow — capture the authorize Location + state cookie.
+        # Dev mode serves plain HTTP behind Traefik, which 301s to https:
+        # follow that self-bounce (same login path) and remember the effective
+        # base — the callback leg below needs the https base as well, or its
+        # Set-Cookie lands on a redirect hop we never follow.
+        stage = "start-bounce"
+        login_url = portal_base + "/api/auth/login"
+        r = session.get(login_url, allow_redirects=False, timeout=T)
+        for _ in range(3):
+            loc = r.headers.get("Location", "")
+            if r.status_code in REDIRECTS and loc.startswith("http") \
+                    and "/api/auth/login" in loc:
+                login_url = loc
+                r = session.get(login_url, allow_redirects=False, timeout=T)
+            else:
+                break
+        portal_eff = login_url.rsplit("/api/auth/login", 1)[0] or portal_base
         if r.status_code not in REDIRECTS or "Location" not in r.headers:
             stage = f"authorize: HTTP {r.status_code}, no Location"
             return False
@@ -467,7 +479,7 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
         # urlencode with doseq=True: qs values are parse_qs LISTS (without it
         # a list becomes str(['…']) and the IdP 'state' echo never matches
         # the OPENSMESTATE cookie → the portal's CSRF check 400s the login)
-        cb = f"{portal_base}/api/auth/callback?{urlencode(qs, doseq=True)}"
+        cb = f"{portal_eff}/api/auth/callback?{urlencode(qs, doseq=True)}"
         r = session.get(cb, allow_redirects=False, timeout=T)
         if r.status_code not in REDIRECTS or not session.cookies.get("OPENSMEPORTALSESSION"):
             stage = (
