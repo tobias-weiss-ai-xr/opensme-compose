@@ -935,7 +935,6 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/", get(handle_root))
         .route("/app.js", get(handle_app_js))
         .route("/health", get(handle_health))
-        .route("/api/services", get(handle_services))
         .route("/api/announcements", get(handle_announcements))
         .route("/api/feeds", get(handle_feeds))
         .route("/api/auth/login", get(session::handle_login))
@@ -944,9 +943,13 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/logout", post(logout::handle_logout))
         .route("/logged-out", get(logout::handle_logged_out));
 
-    // Authenticated surfaces: intercom + polls (+ their upload/file routes)
-    // sit behind the signed-session firewall. The public landing page, feeds
-    // and service tiles stay anonymous.
+    // Authenticated surfaces: intercom, polls, the service-tile catalog and
+    // their upload/file routes sit behind the signed-session firewall. The
+    // public landing page and the news surfaces (feeds + announcements) stay
+    // anonymous — they are public content shown to every visitor. The tile
+    // catalog (/api/services) is only meaningful for signed-in members: the
+    // Next.js page probes /api/session first and skips the catalog fetch
+    // entirely when anonymous, so the gate causes no anonymous-page breakage.
     let mut protected = Router::new()
         .route("/api/intercom", get(handle_intercom_list))
         .route("/api/intercom", post(handle_intercom_post))
@@ -954,7 +957,8 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route(
             "/api/intercom/files/:token/:name",
             get(handle_intercom_file),
-        );
+        )
+        .route("/api/services", get(handle_services));
 
     if config.ai.is_some() {
         router = router.route("/api/ai/chat", post(handle_ai_chat));
@@ -2030,6 +2034,32 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK, "GET {uri}");
             assert_eq!(header(&resp, "x-content-type-options"), "nosniff", "{uri}");
         }
+    }
+
+    #[tokio::test]
+    async fn services_gate_rejects_anonymous_and_serves_signed_in() {
+        let cfg = cfg_with("", None, "");
+        // Anonymous: the signed-session firewall rejects the tile catalog
+        // (tiles are a signed-in surface; the Next.js page skips the fetch
+        // entirely when no session cookie is present, so no UI breakage).
+        let router = build_router(Arc::new(cfg.clone()));
+        let req = axum::http::Request::builder()
+            .uri("/api/services")
+            .body(Body::empty())
+            .unwrap();
+        let anon = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            anon.status(),
+            StatusCode::UNAUTHORIZED,
+            "anonymous /api/services must be gated"
+        );
+
+        // Signed-in (minted session cookie): the catalog is served.
+        let resp = respond(cfg, "GET", "/api/services", None).await;
+        assert_eq!(resp.status(), StatusCode::OK, "signed-in /api/services");
+        let body = body_json(resp).await;
+        let services = body["services"].as_array().expect("services array");
+        assert!(!services.is_empty(), "tile catalog must be non-empty");
     }
 
     #[tokio::test]

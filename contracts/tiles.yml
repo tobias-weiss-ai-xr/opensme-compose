@@ -6,6 +6,12 @@
 # when its URL env var is configured. Infrastructure never gets a
 # tile (see `excluded`). Validated by tests/00-static/check_tiles.py.
 #
+# Access: the tile catalog is a signed-in surface. Its API endpoint
+# (/api/services) sits behind the portal's require_session firewall —
+# anonymous callers get 401, the signed-in portal renders the grid
+# (decision 2026-11-01: tiles are membership content; the anonymous
+# landing page shows only the login CTA and public news).
+#
 # Catalog functions (spec: openspec capability `portal-catalog`):
 #   id          tile name      service           routed host
 #   opencloud   OpenCloud      opencloud         cloud.<OPENSME_DOMAIN>
