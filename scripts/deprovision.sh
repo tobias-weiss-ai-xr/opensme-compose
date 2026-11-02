@@ -120,16 +120,31 @@ comp_users() {
 comp_oidc() {
   local apps=(opencloud portal notes synapse ticketing sogo)
   local a
+  if [[ "$DRY_RUN" == true ]]; then
+    info "  would delete OIDC clients: ${apps[*]}"
+    return 0
+  fi
+  if ! running opensme-zitadel; then
+    warn "opensme-zitadel not running — skipping OIDC client removal"
+    return 0
+  fi
+  # zitadel-client.sh reaches the IdP through the Traefik edge (--resolve
+  # <vhost>:443:127.0.0.1). On hosts where :443 belongs to something else
+  # (co-existing stacks without an edge of their own) every removal burns
+  # its full readiness-retry budget (~2 min) before exiting gracefully.
+  # Probe once with a 1-attempt budget: if the IdP is unreachable, skip the
+  # whole loop — with --data the volumes (and with them the IdP database)
+  # are destroyed anyway.
+  local probe_err=""
+  probe_err=$(IDP_PROBE_RETRIES=1 bash scripts/zitadel-client.sh --list 2>&1 >/dev/null) || true
+  if grep -q "not ready" <<<"$probe_err"; then
+    warn "IdP management API unreachable via the Traefik edge — skipping OIDC client removal"
+    warn "  (clients disappear with the volumes under --data; for --keep teardown"
+    warn "   bring up an edge routing ZITADEL_DOMAIN first, or remove clients manually)"
+    return 0
+  fi
   for a in "${apps[@]}"; do
-    if [[ "$DRY_RUN" == true ]]; then
-      info "  would delete OIDC client '${a}'"
-      continue
-    fi
-    if running opensme-zitadel; then
-      bash scripts/zitadel-client.sh --remove --app "$a" || warn "OIDC client '${a}' removal failed"
-    else
-      warn "opensme-zitadel not running — skipping OIDC client '${a}'"
-    fi
+    bash scripts/zitadel-client.sh --remove --app "$a" || warn "OIDC client '${a}' removal failed"
   done
 }
 

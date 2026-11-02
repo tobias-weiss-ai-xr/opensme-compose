@@ -858,7 +858,7 @@ main_zitadel() {
     
     # ── Create users ──────────────────────────────────────────────────
     info "Creating/updating users..."
-    local created=0 updated=0 skipped=0
+    local created=0 updated=0 skipped=0 unexpected=0
     
     while IFS= read -r user_json; do
         [[ -z "$user_json" ]] && continue
@@ -902,14 +902,31 @@ main_zitadel() {
                 }')
             
             local res
-            res=$(create_user "$user_payload" "$PAT") || { err "Failed to create user $username"; continue; }
-            uid=$(echo "$res" | jq -r '.id')
+            res=$(create_user "$user_payload" "$PAT") || { err "Failed to create user $username (HTTP error)"; continue; }
+            # The v2 human endpoint answers {"userId": ...}. A 200 that is NOT
+            # Zitadel JSON means the request landed on something else — the
+            # classic case is the Traefik edge routing $zt_base to another
+            # stack's vhost (curl -f cannot see that; only the payload can).
+            # Fail loudly instead of counting a phantom user as created.
+            uid=$(printf '%s' "$res" | jq -r '.userId // empty' 2>/dev/null || true)
+            if [[ -z "$uid" ]]; then
+                err "user $username: non-Zitadel response from $zt_scheme://$zt_base —"
+                err "  the IdP vhost is not routed to this stack (wrong/shared Traefik edge?)."
+                err "  Raw response head: $(printf '%s' "$res" | head -c 120)"
+                unexpected=$((unexpected + 1))
+                continue
+            fi
             info "  ✓ Created user: $display ($username, $uid)"
             created=$((created + 1))
         fi
         
     done < <(printf '%s\n' "$users")  # one compact object per line; a 2nd '.[]' would iterate values
     
+    if [[ "$unexpected" -gt 0 ]]; then
+        err "$unexpected user(s) hit non-Zitadel responses — provisioning CANNOT be trusted."
+        err "Fix the IdP routing (Traefik edge must own ${EXTERNAL_HOST%%:*}:443 for this stack) and re-run."
+        return 1
+    fi
     info ""
     info "Provisioning complete: $created created, $updated updated, $skipped skipped"
     

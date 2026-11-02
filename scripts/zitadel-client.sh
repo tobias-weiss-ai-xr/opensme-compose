@@ -545,7 +545,10 @@ fi
 # only credential errors (401/403) abort immediately.
 projects_json=""
 code=""
-for _ in $(seq 1 24); do
+# IDP_PROBE_RETRIES lets callers trade patience for speed (deprovision probes
+# with 1 — every removal would otherwise burn the full budget on hosts where
+# the Traefik edge doesn't route the IdP vhost).
+for _ in $(seq 1 "${IDP_PROBE_RETRIES:-24}"); do
   if projects_json="$(api POST /management/v1/projects/_search '{}' 2>/dev/null)"; then
     code="$(api_http)"
     [[ "$code" == "200" ]] && break

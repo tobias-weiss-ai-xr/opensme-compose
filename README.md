@@ -271,7 +271,39 @@ cd openSME-compose
 # Edit .env — set your domains; adjust any passwords to your own policy
 ```
 
-#### 2. Start core services
+#### 2. Build the Paperless fork image (small / medium tiers)
+
+The `paperless` profile ships an **OIDC-enabled Paperless-ngx fork** — stock
+Paperless cannot do Zitadel SSO. The image is built from this repository and
+not published to Docker Hub, so build it once before starting a tier that
+includes document management:
+
+```bash
+make paperless-oidc-image   # FROM ghcr.io/paperless-ngx/paperless-ngx:3.3.4
+                            # + one-line INSTALLED_APPS patch (allauth OIDC)
+```
+
+Skip this step for `PROFILE=soho` (no paperless).
+
+#### 3. Initialize Zitadel on a fresh database
+
+`make up` starts Zitadel with `zitadel start`, which expects an **initialized
+database** (`system.encryption_keys` et al.). On a fresh volume that means
+running init + setup once — the same two commands `scripts/demo.sh` runs
+headlessly (they are also idempotent, safe to re-run):
+
+```bash
+export COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml"
+docker compose run --rm zitadel init
+docker compose run --rm --user 0:0 zitadel setup --masterkeyFile /secrets/masterkey --steps /steps.yaml
+unset COMPOSE_FILE
+```
+
+> `--user 0:0` matters on a first-ever run: the fresh machinekey volume is
+> root-owned and the distroless Zitadel image runs as uid 1000 — without it
+> the PAT files cannot be written.
+
+#### 4. Start core services
 
 ```bash
 # Via the Makefile (recommended):
@@ -286,7 +318,7 @@ docker compose up -d      # Portal + Traefik + PostgreSQL + Redis + Memcached
 > `make up` reads your generated `.env` when present and falls back to the template
 > otherwise — after `init-env.sh` nothing else is required to boot a real stack.
 
-#### 3. Add features (overlays)
+#### 5. Add features (overlays)
 
 ```bash
 # Core + IAM + file sync + online office
@@ -299,6 +331,7 @@ docker compose up -d
 
 # With optional services (profiles)
 docker compose --profile invoice --profile paperless up -d   # Invoicing + document management
+#   (paperless needs the fork image built once: make paperless-oidc-image)
 docker compose --profile chat --profile element up -d        # Matrix chat
 docker compose --profile collab up -d                       # CryptPad
 docker compose --profile notes up -d                        # Collaborative notes
@@ -346,6 +379,16 @@ Individual removal primitives are also exposed directly:
 
 `provision.sh` / `deprovision.sh` are inverse-idempotent: re-running either is
 safe, and each reports what it skipped and why (stack slice not running).
+
+> **Teardown & verification depend on the Traefik edge.** Provisioning,
+> deprovisioning and `./scripts/verify-stack.sh` all talk to the IdP (and the
+> SSO vhosts) through `https://<ZITADEL_DOMAIN>` — resolved to `127.0.0.1:443`
+> for `*.local` hosts, i.e. they assume **this stack's Traefik owns ports
+> 80/443**. On hosts where another web server owns those ports (co-existing
+> stacks, edge-less test boxes), OIDC reversal is skipped with a warning and
+> the SSO checks report unreachable — the containers themselves stay healthy.
+> `make down-volumes` is tier-aware: pass the `PROFILE=` the stack was started
+> with (default `soho`), otherwise services of other tiers survive as orphans.
 
 ## Hardware Tiers
 

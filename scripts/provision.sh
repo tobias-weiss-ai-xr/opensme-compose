@@ -157,10 +157,12 @@ comp_surveys() {
     info "  would seed the example LimeSurvey"
     return 0
   fi
-  if running opensme-postgres; then
+  # Needs BOTH the limesurvey container (its schema lives in its own DB —
+  # postgres alone says nothing about it) and postgres for its tables.
+  if running opensme-limesurvey && running opensme-postgres; then
     bash bootstrap/survey-deploy.sh
   else
-    warn "opensme-postgres not running — skipping surveys (start with --profile surveys)"
+    warn "opensme-limesurvey not running — skipping surveys (start with --profile surveys)"
   fi
 }
 
