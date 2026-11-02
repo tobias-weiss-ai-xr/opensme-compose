@@ -21,6 +21,9 @@ Public API:
 
 from __future__ import annotations
 
+import os
+import sys
+
 import requests
 
 from run import T
@@ -67,7 +70,28 @@ def probe_portal(session: requests.Session, domain: str, localish: bool,
     if portal_base is None:
         return None, []
 
+    # /api/services is session-gated (portal require_session) — read the
+    # catalog signed-in, through the REAL OIDC flow, in an isolated session
+    # (fresh cookie jar; the caller's session keeps its own journey state).
+    from run import portal_login, load_env_file  # noqa: PLC0415 — sibling module
+
     svc_resp = session.get(portal_base + "/api/services", timeout=T)
+    if svc_resp.status_code == 401:
+        dotenv = load_env_file()
+        zitadel_domain = (os.environ.get("ZITADEL_DOMAIN")
+                          or dotenv.get("ZITADEL_DOMAIN") or "")
+        if not zitadel_domain:
+            print("saga: ZITADEL_DOMAIN unset — cannot sign in for /api/services",
+                  file=sys.stderr)
+            return portal_base, []
+        signed = requests.Session()
+        signed.verify = session.verify
+        if not portal_login(signed, portal_base,
+                            f"https://{zitadel_domain}"):
+            print("saga: portal sign-in failed — catalog unreadable",
+                  file=sys.stderr)
+            return portal_base, []
+        svc_resp = signed.get(portal_base + "/api/services", timeout=T)
     if svc_resp.status_code != 200:
         return portal_base, []
     services = svc_resp.json().get("services") or []

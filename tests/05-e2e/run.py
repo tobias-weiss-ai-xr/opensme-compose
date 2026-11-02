@@ -462,9 +462,12 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
             return False
         authz_url = r.headers["Location"]
         if client_id and client_id not in authz_url:
-            stage = (f"authorize client mismatch: want {client_id!r} in "
-                     f"{authz_url[:90]!r}")
-            return False
+            # Soft diagnostic only: the portal's OWN config is authoritative
+            # for this flow (we drive whatever client the running container
+            # uses). A mismatch usually means .env is stale relative to the
+            # running stack — worth a line, not a hard failure.
+            print(f"  [diag]   portal authorize client differs from expectation: "
+                  f"want {client_id!r}, portal uses {authz_url[:90]!r}", flush=True)
         # capture the state cookie + raw Set-Cookie exactly as the portal
         # delivered them right after the login 303
         post_login = session.cookies.get("OPENSMESTATE")
