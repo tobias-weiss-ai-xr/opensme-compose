@@ -371,6 +371,14 @@ services:
       HTTPS_PROXY: ${PORTAL_HTTPS_PROXY:-}
       PORTAL_NO_PROXY: ${PORTAL_NO_PROXY:-}
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
+      # Server-side OIDC base (token + userinfo exchange): the IdP on the
+      # compose network is reached at http://zitadel:8080; the public https
+      # URL fails reqwest's TLS verification behind the self-signed edge.
+      # Previously only profiles/demo.dev.yml set this — a gap that broke
+      # portal sign-in on soho/medium/max deployments (callback 302, no
+      # OPENSMEPORTALSESSION cookie). Override with an empty value when a
+      # trusted TLS certificate is in front of the IdP.
+      IDP_INTERNAL_URL: ${IDP_INTERNAL_URL:-http://zitadel:8080}
       # Portal sign-in for the authenticated surfaces (intercom/polls): the
       # Rust backend validates OPENSMEPORTALSESSION itself, so it needs the
       # same OIDC RP env as portal-web — without it the auth gate can never
