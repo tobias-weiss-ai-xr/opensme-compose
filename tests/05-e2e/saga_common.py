@@ -73,7 +73,7 @@ def probe_portal(session: requests.Session, domain: str, localish: bool,
     # /api/services is session-gated (portal require_session) — read the
     # catalog signed-in, through the REAL OIDC flow, in an isolated session
     # (fresh cookie jar; the caller's session keeps its own journey state).
-    from run import portal_login, load_env_file  # noqa: PLC0415 — sibling module
+    from run import portal_login, load_env_file  # sibling module, same dir
 
     svc_resp = session.get(portal_base + "/api/services", timeout=T)
     if svc_resp.status_code == 401:

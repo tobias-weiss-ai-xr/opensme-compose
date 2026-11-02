@@ -19,6 +19,7 @@ Usage:
 """
 
 import argparse
+import os
 import re
 import socket
 import sys
@@ -28,7 +29,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result
+from run import load_env_file, portal_login
 
 import requests
 
@@ -77,14 +80,28 @@ def main() -> int:
         print()
         return 0
 
-    calm_names = catalog_names(requests.get(portal + "/api/services",
-                                             timeout=10, verify=False).text)
+    calm_session = requests.Session()
+    calm_session.verify = False
+    # /api/services is session-gated (portal require_session): sign in ONCE
+    # through the real OIDC flow and share this session across the burst
+    # workers — an anonymous calm snapshot would be 401 and the consistency
+    # check would compare emptiness, not content.
+    dotenv = load_env_file()
+    idp_domain = (os.environ.get("ZITADEL_DOMAIN")
+                  or dotenv.get("ZITADEL_DOMAIN") or f"auth.{args.domain}")
+    if not portal_login(calm_session, portal, f"https://{idp_domain}"):
+        result.fail("portal sign-in failed — catalog burst check not possible")
+        print()
+        return 1
+
+    calm_names = catalog_names(calm_session.get(portal + "/api/services",
+                                                timeout=10).text)
 
     def one(i: int):
         path = PATHS[i % len(PATHS)]
         t0 = time.monotonic()
         try:
-            r = requests.get(portal + path, timeout=10, verify=False)
+            r = calm_session.get(portal + path, timeout=10)
             return path, r.status_code, time.monotonic() - t0, r.text
         except requests.RequestException as e:
             return path, 0, time.monotonic() - t0, f"{e.__class__.__name__}"
