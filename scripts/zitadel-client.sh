@@ -590,7 +590,7 @@ if [[ "$MODE" == "remove" ]]; then
     apps_json="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev/null || true)"
     [[ -n "$apps_json" ]] || continue
     hit="$(printf '%s' "$apps_json" | jq -r --arg cid "$CLIENT_ID_LABEL" --arg name "$APP_NAME" \
-      '.result[]? | select((.oidcConfig.clientId // "") == $cid or .name == $name) | .id' 2>/dev/null | head -1)"
+      '.result[]? | select((($cid != "") and ((.oidcConfig.clientId // "") == $cid)) or .name == $name) | .id' 2>/dev/null | head -1)"
     if [[ -n "$hit" ]]; then
       FOUND_PROJECT="$pid"
       FOUND_APP="$hit"
