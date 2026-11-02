@@ -406,36 +406,42 @@ def portal_login(session, portal_base, idp_base, disc=None, client_id=None):
     def cfg(key, default=""):
         return os.environ.get(key) or dotenv.get(key) or default
 
-    if client_id is None:
-        client_id = cfg("PORTAL_OIDC_CLIENT_ID", "opensme-portal")
-    login_name = cfg("E2E_ZITADEL_LOGIN_NAME", "zitadel-admin")
-    pw = cfg("ZITADEL_ADMIN_PASSWORD")
-    # The E2E_* overrides are optional: on a booted stack the seeded
-    # login-client PAT rides the v2 Session API (same source the
-    # logout/lifecycle journeys use). Without this fallback portal_login
-    # bails out on stock demo/Ci stacks where .env has no E2E_* overrides.
-    lc_pat = cfg("E2E_ZITADEL_LOGINCLIENT_PAT") or fetch_seeded("/machinekey/login-client.pat")
-    if not (pw and lc_pat):
-        return False
-    pat = cfg("E2E_ZITADEL_PAT") or fetch_seeded("/machinekey/pat")
-    if not pat:
-        return False
-    if disc is None:
-        try:
+    # Every failure path reports its stage via the finally-diag below —
+    # credential-resolution failures included (they early-returned silently
+    # before, which cost a CI round-trip each time).
+    stage = "credentials"
+    try:
+        if client_id is None:
+            client_id = cfg("PORTAL_OIDC_CLIENT_ID", "opensme-portal")
+        login_name = cfg("E2E_ZITADEL_LOGIN_NAME", "zitadel-admin")
+        pw = cfg("ZITADEL_ADMIN_PASSWORD")
+        # The E2E_* overrides are optional: on a booted stack the seeded
+        # login-client PAT rides the v2 Session API (same source the
+        # logout/lifecycle journeys use). Without this fallback portal_login
+        # bails out on stock demo/Ci stacks where .env has no E2E_* overrides.
+        lc_pat = cfg("E2E_ZITADEL_LOGINCLIENT_PAT") or fetch_seeded("/machinekey/login-client.pat")
+        if not (pw and lc_pat):
+            stage = (f"credentials: password={'yes' if pw else 'NO'}, "
+                     f"login-client PAT={'yes' if lc_pat else 'NO'} (fetch_seeded)")
+            return False
+        pat = cfg("E2E_ZITADEL_PAT") or fetch_seeded("/machinekey/pat")
+        if not pat:
+            stage = "credentials: machine PAT missing (fetch_seeded)"
+            return False
+        if disc is None:
             disc = session.get(
                 f"{idp_base}/.well-known/openid-configuration", timeout=T
             ).json()
-        except requests.RequestException:
+        # Prefer the machine PAT (admin) for the Management-API user lookup —
+        # the login-client PAT may be too narrow-privileged to resolve users.
+        stage = f"user-lookup ({login_name})"
+        client_uid = resolve_user_id(session, idp_base, pat or lc_pat, login_name)
+        if not client_uid:
+            stage = f"user-lookup: '{login_name}' not resolvable via Management API"
             return False
-    # Prefer the machine PAT (admin) for the Management-API user lookup —
-    # the login-client PAT may be too narrow-privileged to resolve users.
-    client_uid = resolve_user_id(session, idp_base, pat or lc_pat, login_name)
-    if not client_uid:
-        return False
 
-    # 1) start the flow — capture the authorize Location + state cookie
-    stage = "start"
-    try:
+        # 1) start the flow — capture the authorize Location + state cookie
+        stage = "start"
         r = session.get(
             portal_base + "/api/auth/login", allow_redirects=False, timeout=T
         )
