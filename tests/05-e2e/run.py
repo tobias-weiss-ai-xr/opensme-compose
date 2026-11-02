@@ -634,7 +634,10 @@ def section_portal(result, session, portal_base, ai_configured=False, idp_base="
         # Signed-in catalog: sign in through the REAL OIDC flow in an ISOLATED
         # session (fresh cookie jar) so the main session stays anonymous for
         # the later throw-away-app flows, then read the catalog as a user.
+        # TLS config mirrors the main session (VERIFY is module state, set in
+        # main; self-signed demo certs must verify off here too).
         signed_in = requests.Session()
+        signed_in.verify = VERIFY
         if portal_login(signed_in, portal_base, idp_base):
             s = signed_in.get(portal_base + "/api/services", timeout=T)
             services = s.json().get("services") if s.status_code == 200 else None
