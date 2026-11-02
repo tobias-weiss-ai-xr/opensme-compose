@@ -236,8 +236,9 @@ Same repository, two ways in:
 - **Evaluate in ~2 minutes** — clone, run [`scripts/demo.sh`](#evaluate-in-2-minutes), open
   http://localhost:8080. Random passwords, Zitadel seeded, health summary printed — no config.
 - **Install it properly** — clone, [`scripts/init-env.sh`](#1-clone--configure) to generate a
-  secure `.env`, then `make up PROFILE=…` and add overlays. This is the path for a real
-  deployment you own.
+  secure `.env`, build the Paperless fork image + initialize Zitadel on the fresh database
+  (steps 2–3 below), `make up PROFILE=…`, add overlays, provision, verify. This is the path
+  for a real deployment you own.
 
 > Requirements: Linux with Docker 24+ and Compose v2.20+; 2 vCPU / 4 GB RAM minimum.
 
@@ -261,6 +262,25 @@ The script waits for the Portal to answer before finishing and prints a per-serv
 health overview. Needs **2 vCPU / 4 GB RAM**.
 
 ### Manual install
+
+> **TL;DR — the whole proper install, copy & paste** (small tier; annotated steps below):
+>
+> ```bash
+> git clone https://github.com/tobias-weiss-ai-xr/openSME-compose.git && cd openSME-compose
+> ./scripts/init-env.sh                       # secure .env — then edit your domains
+> make paperless-oidc-image                   # SSO-enabled Paperless fork (skip for soho)
+> export COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml"
+> docker compose run --rm zitadel init
+> docker compose run --rm --user 0:0 zitadel setup --masterkeyFile /secrets/masterkey --steps /steps.yaml
+> unset COMPOSE_FILE
+> make up PROFILE=small                      # core + Zitadel + OpenCloud + Paperless
+> ./scripts/provision.sh                     # OIDC clients, demo users, mail rows, seed content
+> ./scripts/verify-stack.sh                  # SSO matrix + smoke suite
+> ```
+>
+> For `PROFILE=medium` additionally add `mail/stalwart.yml:mail/sogo.yml:profiles/medium.yml`
+> at `up` time (step 4 shows the file sets); for `PROFILE=soho` skip steps 2 and the
+> paperless parts of provisioning.
 
 #### 1. Clone &amp; configure
 
@@ -338,6 +358,22 @@ docker compose --profile notes up -d                        # Collaborative note
 docker compose --profile surveys up -d                      # LimeSurvey surveys
 ```
 
+> **OIDC-backed overlays need their client registered before first boot.**
+> Notes, Synapse, Ticketing, SOGo, Paperless and Operaton each interpolate an
+> OIDC client secret from `.env` — that secret only exists after Zitadel has
+> minted it. The fail-fast contract rejects booting such an overlay before
+> its client is registered:
+>
+> ```bash
+> # boot core + IdP first, mint the client, then bring up the overlay:
+> make up PROFILE=soho
+> ./scripts/provision.sh --components oidc     # writes *_OIDC_CLIENT_SECRET into .env
+> docker compose --profile notes up -d         # now the secret interpolates
+> ```
+>
+> (`scripts/demo.sh` and the tier profiles wire this ordering for their
+> included services automatically.)
+
 ### Bootstrap, provision &amp; deprovision (lifecycle tooling)
 
 The suite ships three orchestration entry points that bundle the piecemeal
@@ -347,7 +383,14 @@ scripts (`init-env.sh`, `zitadel-client.sh`, `provision-demo-users.sh`,
 ```bash
 # 1) GREENFIELD — bring up EVERY service, then provision everything:
 ./scripts/bootstrap.sh          # env → make up-all → surveys overlay → provision.sh
-#    (or: make bootstrap-all   |   --force-env to regenerate .env)
+#    --force-env        regenerate .env with fresh random secrets
+#    --no-surveys       skip the LimeSurvey overlay
+#    --no-provision     bring the stack up only
+#    --verify           run scripts/verify-stack.sh after provisioning (default off)
+#    --preflight        host/stack fail-fast checks first (default on; --skip-preflight)
+#    --resume           skip steps already finished (.bootstrap-state checkpoints)
+#    --dry-run          print the plan, change nothing
+#    (or: make bootstrap-all)
 
 # 2) PROVISION — idempotent, safe to re-run on a running stack:
 ./scripts/provision.sh                                   # all components

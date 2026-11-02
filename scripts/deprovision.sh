@@ -118,7 +118,7 @@ comp_users() {
 }
 
 comp_oidc() {
-  local apps=(opencloud portal notes synapse ticketing sogo)
+  local apps=(opencloud portal notes synapse ticketing sogo paperless)
   local a
   if [[ "$DRY_RUN" == true ]]; then
     info "  would delete OIDC clients: ${apps[*]}"

@@ -80,10 +80,12 @@ services:
       OC_OIDC_ISSUER: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
       OC_OIDC_CLIENT_ID: ${OC_OIDC_CLIENT_ID:-opencloud}
       # The persistent OIDC client is registered by scripts/zitadel-client.sh
-      # (idempotent, first demo boot); it writes the Zitadel-issued secret into
-      # .env as OC_OIDC_CLIENT_SECRET. OC_OIDC_SECRET is kept as a legacy
+      # (idempotent, first demo boot) as a PUBLIC PKCE app (auth method NONE) —
+      # no client secret exists, so the script deliberately persists an EMPTY
+      # OC_OIDC_CLIENT_SECRET. Empty is therefore a valid value here (do NOT
+      # use :? — it would fail every boot). OC_OIDC_SECRET is kept as a legacy
       # fallback for older .env files / overlay consumers.
-      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:?OC_OIDC_CLIENT_SECRET must be set in .env}
+      OC_OIDC_CLIENT_SECRET: ${OC_OIDC_CLIENT_SECRET:-}
       PROXY_ROLE_ASSIGNMENT_DRIVER: ${OPENCLOUD_ROLE_ASSIGNMENT_DRIVER:-default}
       # External (Zitadel) subjects are provisioned into the IDM on first
       # login. Without this ocis 401s every SSO user after a successful token
