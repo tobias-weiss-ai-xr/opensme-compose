@@ -461,7 +461,7 @@ pub struct UserInfo {
 #[derive(Debug)]
 pub enum ExchangeError {
     Http(String),
-    Status(u16),
+    Status(u16, String),
     NoAccessToken,
     Userinfo(String),
     NoSubject,
@@ -471,7 +471,9 @@ impl std::fmt::Display for ExchangeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExchangeError::Http(e) => write!(f, "token request failed: {e}"),
-            ExchangeError::Status(s) => write!(f, "token endpoint returned {s}"),
+            ExchangeError::Status(s, body) => {
+                write!(f, "token endpoint returned {s}: {body}")
+            }
             ExchangeError::NoAccessToken => write!(f, "token response without access_token"),
             ExchangeError::Userinfo(s) => write!(f, "userinfo failed: {s}"),
             ExchangeError::NoSubject => write!(f, "userinfo without sub"),
@@ -524,7 +526,10 @@ async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserIn
         .await
         .map_err(|e| ExchangeError::Http(e.to_string()))?;
     if !token_resp.status().is_success() {
-        return Err(ExchangeError::Status(token_resp.status().as_u16()));
+        let status = token_resp.status().as_u16();
+        let body_txt = token_resp.text().await.unwrap_or_default();
+        let body = body_txt.chars().take(300).collect::<String>();
+        return Err(ExchangeError::Status(status, body));
     }
     let token: TokenResponse = token_resp
         .json()
@@ -963,7 +968,7 @@ mod tests {
 
         assert!(matches!(
             exchange_and_userinfo(&sc, "bad-code").await,
-            Err(ExchangeError::Status(400))
+            Err(ExchangeError::Status(400, _))
         ));
     }
 

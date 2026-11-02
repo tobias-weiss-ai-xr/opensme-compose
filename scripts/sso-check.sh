@@ -145,21 +145,39 @@ if [[ -n "${OPENCLOUD_DOMAIN:-}" ]]; then
         "$IDP_DOMAIN" "oidc" "openSME" || true
 fi
 
+# Optional-profile apps: when the service is not deployed the edge answers
+# 404 on every route (or refuses the connection) — report a clean skip
+# instead of a false failure. A present-but-down backend shows up as 5xx
+# and still fails the check (correct).
+service_deployed() {
+    local code
+    code=$(curl -sk --max-time 12 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
+    [[ "$code" != "404" && "$code" != "000" ]]
+}
+
 # Notes/Impress — mozilla-django-oidc exposes the SSO trigger as a real
 # 302 to the IdP authorize endpoint (proven live)
 # 302 → auth…/oauth/v2/authorize?response_type=code&…client_id=…
 if [[ -n "${NOTES_DOMAIN:-}" ]]; then
-    check_sso_redirect "Notes/Impress" "https://$NOTES_DOMAIN/api/v1.0/authenticate/" \
-        "$IDP_DOMAIN" "${NOTES_OIDC_CLIENT_ID:-394882698901979139}" || true
+    if service_deployed "https://$NOTES_DOMAIN/"; then
+        check_sso_redirect "Notes/Impress" "https://$NOTES_DOMAIN/api/v1.0/authenticate/" \
+            "$IDP_DOMAIN" "$NOTES_OIDC_CLIENT_ID" || true
+    else
+        warn "  Notes/Impress: not deployed (optional profile) — Zitadel client provisioned, skipped"
+    fi
 fi
 
 # Synapse/Matrix — needs the mandatory ?redirectUrl= query (else it 400s).
 # After the authorize hop the chain lands on the IdP login UI (requestId),
 # so only the IdP domain is asserted (no client_id there).
 if [[ -n "${MATRIX_DOMAIN:-}" ]]; then
-    check_sso_redirect "Synapse/Matrix" \
-        "https://$MATRIX_DOMAIN/_matrix/client/v3/login/sso/redirect?redirectUrl=https://$MATRIX_DOMAIN/_matrix/client/" \
-        "$IDP_DOMAIN" || true
+    if service_deployed "https://$MATRIX_DOMAIN/"; then
+        check_sso_redirect "Synapse/Matrix" \
+            "https://$MATRIX_DOMAIN/_matrix/client/v3/login/sso/redirect?redirectUrl=https://$MATRIX_DOMAIN/_matrix/client/" \
+            "$IDP_DOMAIN" || true
+    else
+        warn "  Synapse/Matrix: not deployed (optional profile) — Zitadel client provisioned, skipped"
+    fi
 fi
 
 # Ticketing (Nosdesk) — optional profile; the Zitadel client is provisioned
@@ -167,7 +185,7 @@ fi
 # report as a skip, not a failure. When listening, its own login page must
 # expose an SSO entry.
 if [[ -n "${NOSDESK_DOMAIN:-}" ]]; then
-    if curl -sk --max-time 12 -o /dev/null -w '%{http_code}' "https://$NOSDESK_DOMAIN/" 2>/dev/null | grep -q "404"; then
+    if ! service_deployed "https://$NOSDESK_DOMAIN/"; then
         warn "  Ticketing (Nosdesk): not deployed (optional profile) — Zitadel client provisioned, skipped"
     elif check_sso_entry "Ticketing (Nosdesk)" "https://$NOSDESK_DOMAIN/" \
         "$IDP_DOMAIN" "oidc" "SSO" "zitadel"; then
@@ -177,10 +195,12 @@ if [[ -n "${NOSDESK_DOMAIN:-}" ]]; then
     fi
 fi
 
-# Webmail/SOGo — the login screen drives the OIDC flow via mode/kind 'sso'
+# Webmail/SOGo — with the OIDC realm active the whole /SOGo/ entry is
+# IdP-gated: no cookies ⇒ 302 to the authorize endpoint (client_id on the
+# first hop), then the chain lands on the IdP login UI.
 if [[ -n "${SOGO_DOMAIN:-}" ]]; then
-    check_sso_entry "Webmail/SOGo" "https://$SOGO_DOMAIN/de/" \
-        "$IDP_DOMAIN" "sso" "oidc" "OIDC" || true
+    check_sso_redirect "Webmail/SOGo" "https://$SOGO_DOMAIN/SOGo/" \
+        "$IDP_DOMAIN" "$SOGO_OIDC_CLIENT_ID" || true
 fi
 
 # Paperless (django-allauth generic OIDC; shows the openSME/zitadel button)
@@ -189,11 +209,12 @@ if [[ -n "${PAPERLESS_DOMAIN:-}" ]]; then
         "$IDP_DOMAIN" "zitadel" "openSME" || true
 fi
 
-# Portal (home) — serves its own anonymous landing; the SSO-driven sign-in
-# path (/api/auth/login, HMAC + IdP redirect) must be wired into the page
+# Portal (home) — the sign-in endpoint /api/auth/login 303s to the IdP
+# authorize (client_id on the first hop, HMAC state cookie) and the chain
+# ends on the IdP login UI. A landing-page HTML marker is not served.
 if [[ -n "${PORTAL_DOMAIN:-}" ]]; then
-    check_sso_entry "Portal (home)" "https://$PORTAL_DOMAIN/" \
-        "$IDP_DOMAIN" "/api/auth/login" || true
+    check_sso_redirect "Portal (home)" "https://$PORTAL_DOMAIN/api/auth/login" \
+        "$IDP_DOMAIN" "$PORTAL_OIDC_CLIENT_ID" || true
 fi
 
 echo ""
