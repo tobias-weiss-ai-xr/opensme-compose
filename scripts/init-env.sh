@@ -33,6 +33,10 @@ if [[ -f .env ]]; then
     exit 0
   fi
   warn "Regenerating .env (--force-env)"
+  # Safety net: hand edits (domains, zitadel-minted OIDC creds, registry
+  # pins) must never vanish silently on a regen.
+  cp -a .env .env.prev
+  warn "previous .env backed up to .env.prev"
 fi
 
 if [[ ! -f .env.example ]]; then
@@ -50,9 +54,17 @@ TRAEFIK_PASS="$(openssl rand -base64 24)"
 TRAEFIK_HASH="admin:$(printf '%s' "$TRAEFIK_PASS" | openssl passwd -apr1 -stdin)"
 TRAEFIK_HASH_ESC="${TRAEFIK_HASH//\$/\$\$}"
 
+# OIDC keys are NOT init-env's business: values minted by
+# scripts/zitadel-client.sh during provisioning must survive a
+# --force-env regen verbatim. Snapshot them from the current .env now
+# (before the template loop) and restore them after the rewrite.
+PRESERVED_OIDC=""
+if [[ "$FORCE" == true ]] && [[ -f .env ]]; then
+  PRESERVED_OIDC="$(grep -E '^[A-Za-z0-9_]*OIDC[A-Za-z0-9_]*=' .env || true)"
+fi
+
 tmp="$(mktemp)"
-while IFS= read -r line || [[ -n "$line" ]]; do
-  case "$line" in
+while IFS= read -r line || [[ -n "$line" ]]; do  case "$line" in
     'TRAEFIK_USERS='*)
       printf 'TRAEFIK_USERS=%s\n' "$TRAEFIK_HASH_ESC" >> "$tmp"
       ;;
@@ -74,6 +86,22 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < .env.example
 mv "$tmp" .env
 chmod 600 .env
+
+# ── Preserve zitadel-minted OIDC credentials (and any *OIDC* runtime key, e.g.
+# ZITADEL_OIDC_URL) that existed in the replaced .env. They are minted at
+# provision time (scripts/provision.sh → zitadel-client.sh) and are IRRECOVERABLE
+# after a regen — Zitadel v4 returns a client secret exactly once and has no
+# secret-regen endpoint. init-env's job is the base secrets, never these.
+if [[ -n "${PRESERVED_OIDC:-}" ]]; then
+  while IFS='=' read -r k v; do
+    [[ -n "$k" ]] || continue
+    # drop any template value for this key, then re-add the preserved one
+    sed -i "/^${k}=/d" .env
+    printf '%s=%s\n' "$k" "$v" >> .env
+  done <<< "$PRESERVED_OIDC"
+  chmod 600 .env
+  ok "preserved $(printf '%s' "$PRESERVED_OIDC" | wc -l | tr -d ' ') OIDC key(s) from the replaced .env"
+fi
 
 # ── Self-check: nothing unresolved may ship ──
 leftover=$(grep -c '=CHANGEME_' .env || true)
