@@ -54,13 +54,13 @@ TRAEFIK_PASS="$(openssl rand -base64 24)"
 TRAEFIK_HASH="admin:$(printf '%s' "$TRAEFIK_PASS" | openssl passwd -apr1 -stdin)"
 TRAEFIK_HASH_ESC="${TRAEFIK_HASH//\$/\$\$}"
 
-# OIDC keys are NOT init-env's business: values minted by
-# scripts/zitadel-client.sh during provisioning must survive a
-# --force-env regen verbatim. Snapshot them from the current .env now
-# (before the template loop) and restore them after the rewrite.
-PRESERVED_OIDC=""
+# OIDC/domain keys are NOT init-env's business: values minted by
+# scripts/zitadel-client.sh during provisioning and the site's domain config
+# must survive a --force-env regen verbatim. Snapshot them from the current
+# .env now (before the template loop) and restore them after the rewrite.
+PRESERVED_KEYS=""
 if [[ "$FORCE" == true ]] && [[ -f .env ]]; then
-  PRESERVED_OIDC="$(grep -E '^[A-Za-z0-9_]*OIDC[A-Za-z0-9_]*=' .env || true)"
+  PRESERVED_KEYS="$(grep -E '^(IDP_URL|TRAEFIK_ACME_EMAIL|ZITADEL_singleSignOnDomain|[A-Za-z0-9_]*OIDC[A-Za-z0-9_]*|[A-Za-z0-9_]*_DOMAIN)=' .env || true)"
 fi
 
 tmp="$(mktemp)"
@@ -87,20 +87,22 @@ done < .env.example
 mv "$tmp" .env
 chmod 600 .env
 
-# ── Preserve zitadel-minted OIDC credentials (and any *OIDC* runtime key, e.g.
-# ZITADEL_OIDC_URL) that existed in the replaced .env. They are minted at
-# provision time (scripts/provision.sh → zitadel-client.sh) and are IRRECOVERABLE
-# after a regen — Zitadel v4 returns a client secret exactly once and has no
-# secret-regen endpoint. init-env's job is the base secrets, never these.
-if [[ -n "${PRESERVED_OIDC:-}" ]]; then
+# ── Preserve site config + zitadel-minted OIDC credentials that existed in the
+# replaced .env. OIDC values are minted at provision time (provision.sh →
+# zitadel-client.sh) and are IRRECOVERABLE after a regen — Zitadel v4 returns a
+# client secret exactly once and has no secret-regen endpoint. The DOMAIN/IDP
+# keys are site-specific (a regen from the graphwiz defaults silently broke
+# .local deployments on 2026-11-02). init-env's job is the base secrets, never
+# these value classes.
+if [[ -n "${PRESERVED_KEYS:-}" ]]; then
   while IFS='=' read -r k v; do
     [[ -n "$k" ]] || continue
     # drop any template value for this key, then re-add the preserved one
     sed -i "/^${k}=/d" .env
     printf '%s=%s\n' "$k" "$v" >> .env
-  done <<< "$PRESERVED_OIDC"
+  done <<< "$PRESERVED_KEYS"
   chmod 600 .env
-  ok "preserved $(printf '%s' "$PRESERVED_OIDC" | wc -l | tr -d ' ') OIDC key(s) from the replaced .env"
+  ok "preserved $(printf '%s' "$PRESERVED_KEYS" | wc -l | tr -d ' ') site/OIDC key(s) from the replaced .env"
 fi
 
 # ── Self-check: nothing unresolved may ship ──
