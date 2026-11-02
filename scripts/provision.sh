@@ -108,10 +108,14 @@ comp_oidc() {
       info "  would register OIDC client '${a}'"
       continue
     fi
-    if bash scripts/zitadel-client.sh --app "$a" >/dev/null; then
+    # zitadel-client prints its own [ERR] lines — surface them instead of
+    # swallowing stderr: 'IdP slice down?' was misleading when the real
+    # failure was e.g. a false idempotence hit on a non-OIDC app.
+    if out="$(bash scripts/zitadel-client.sh --app "$a" 2>&1)"; then
       ok "OIDC client '${a}' is registered"
     else
-      warn "OIDC client '${a}' failed — IdP slice down? rerun after 'make up'"
+      warn "OIDC client '${a}' failed:"
+      printf '%s\n' "$out" | grep -E '\[(ERR|WARN)\]' | tail -3 | sed 's/^/    /'
     fi
   done
 }
