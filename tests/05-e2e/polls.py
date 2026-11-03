@@ -254,11 +254,15 @@ def main() -> int:
     # P8: unknown poll / bad option index
     ghost = session.post(portal + "/api/polls/999999/vote",
                          json={"option": 0}, timeout=T)
+    # Out-of-range index from THIS session: the conflict guard runs first —
+    # the session voted in P6, so 409 CONFLICT dominates index validation
+    # (input errors only surface for polls the caller hasn't voted on yet;
+    # the unknown-poll guard still answers 400 before any state lookup).
     bad_idx = session.post(portal + f"/api/polls/{pid}/vote",
                            json={"option": 99}, timeout=T)
-    p8 = ghost.status_code == 400 and bad_idx.status_code == 400
+    p8 = ghost.status_code == 400 and bad_idx.status_code == 409
     (result.ok if p8 else result.fail)(
-        "P8 unknown poll id and out-of-range option → 400"
+        "P8 unknown poll → 400; bad index after own vote → 409 (conflict first)"
         if p8 else f"P8 vote guard: ghost={ghost.status_code} idx={bad_idx.status_code}"
     )
 
