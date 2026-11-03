@@ -129,7 +129,7 @@ def main() -> int:
                     "(scripts/demo.sh)")
         return 1
 
-    portal = f"https://home.{args.domain}"
+    portal = f"https://portal.{args.domain}"
     idp_base = f"https://auth.{args.domain}"
 
     session = requests.Session()
