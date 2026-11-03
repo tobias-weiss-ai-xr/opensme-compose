@@ -83,15 +83,20 @@ IDM_FILES  := -f idm/zitadel.yml
 
 ifeq ($(PROFILE),soho)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f profiles/soho.yml
-COMPOSE_PROFILES :=
-TIER_SERVICES := core (7 containers: Traefik, PG, PgBouncer, Redis, Memcached, Portal, Zitadel)
+# "standalone" = the stack brings its OWN Traefik edge (ports 80/443).
+# Without this flag the gate in docker-compose.yml (profiles: ["standalone"])
+# silently skips traefik — found via an external tester's report (2026-10-29):
+# make up produced a headless stack, "no port open". Hosts running their own
+# system-Traefik can still opt out with COMPOSE_PROFILES="" on the CLI.
+COMPOSE_PROFILES := --profile standalone
+TIER_SERVICES := core (6 containers: Traefik, PG, Redis, Memcached, Portal, Zitadel)
 else ifeq ($(PROFILE),small)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f services/paperless.yml -f profiles/small.yml
-COMPOSE_PROFILES := --profile paperless
+COMPOSE_PROFILES := --profile standalone --profile paperless
 TIER_SERVICES := core + office + paperless (12 containers)
 else ifeq ($(PROFILE),medium)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f mail/stalwart.yml -f mail/sogo.yml -f services/paperless.yml -f profiles/medium.yml
-COMPOSE_PROFILES := --profile paperless
+COMPOSE_PROFILES := --profile standalone --profile paperless
 TIER_SERVICES := core + office + mail + paperless (14 containers)
 else ifeq ($(PROFILE),custom)
 COMPOSE_FILES := $(COMPOSE_FILE)
