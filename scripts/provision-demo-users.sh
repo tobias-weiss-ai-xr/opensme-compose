@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/provision-demo-users.sh — Provision 12 demo users across components
+# scripts/provision-demo-users.sh — Provision 13 demo users across components
 #
 # Part of the bootstrap process: creates users for an imaginary SME
 # company (OpenSME Muster GmbH) for demo and e2e testing purposes.
@@ -321,7 +321,7 @@ operaton_curl() {
 main_operaton() {
     load_config || return 1
     info "[operaton] Provisioning engine users/groups for: $COMPANY"
-    $DRY_RUN && { info "[operaton] would create 12 users + department groups + admin-webapp setup (tweiss)"; return 0; }
+    $DRY_RUN && { info "[operaton] would create the demo users + department groups + admin-webapp setup (tweiss)"; return 0; }
 
     local created=0 skipped=0
     # Groups: slug from JSON name (opensme-* already slug-like)
@@ -464,7 +464,7 @@ PAPERLESS_CONTAINER="${PAPERLESS_CONTAINER:-opensme-paperless}"
 main_paperless() {
     load_config || return 1
     info "[paperless] Creating users for: $COMPANY"
-    $DRY_RUN && { info "[paperless] would create 12 Django users via $PAPERLESS_CONTAINER manage.py"; return 0; }
+    $DRY_RUN && { info "[paperless] would create the demo Django users via $PAPERLESS_CONTAINER manage.py"; return 0; }
 
     # Both the driver and the user data travel base64-encoded inside one
     # `shell -c`: manage.py shell -c has no second stdin stream, and embedding

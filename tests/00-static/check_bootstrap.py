@@ -269,7 +269,7 @@ def check_env_generator(result: Result) -> None:
 
 
 def check_demo_users(result: Result) -> None:
-    """bootstrap/demo-users.json offers 12 pre-configured users for demos."""
+    """bootstrap/demo-users.json offers 13 pre-configured users for demos."""
     DEMO_USERS = ROOT / "bootstrap" / "demo-users.json"
     DEMO_SCRIPT = ROOT / "scripts" / "provision-demo-users.sh"
     

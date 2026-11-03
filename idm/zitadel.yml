@@ -99,6 +99,12 @@ services:
       # symbols) can seed — human passwords created later still follow the
       # runtime policy which admins can tighten
       ZITADEL_DEFAULTINSTANCE_PASSWORDCOMPLEXITYPOLICY_HASSYMBOL: false
+      # uppercase OFF too: the seeded evaluation account (bootstrap/
+      # demo-users.json: testuser / eval2026) must pass the policy — it
+      # carries lowercase + digits only. Still guards: MinLength 8,
+      # HasLowercase, HasNumber. Production deployments should tighten
+      # (Console → Password Complexity) after bootstrapping.
+      ZITADEL_DEFAULTINSTANCE_PASSWORDCOMPLEXITYPOLICY_HASUPPERCASE: false
     volumes:
       - ./idm/secrets:/secrets:ro
       - zitadel-machinekey:/machinekey

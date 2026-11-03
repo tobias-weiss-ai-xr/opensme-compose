@@ -261,6 +261,15 @@ cd openSME-compose
 The script waits for the Portal to answer before finishing and prints a per-service
 health overview. Needs **2 vCPU / 4 GB RAM**.
 
+> **Quick evaluation login** — after `./scripts/demo.sh --with-demo-users` (or
+> `make provision-demo-users`), any seeded demo user works (see
+> `bootstrap/demo-users.json`, e.g. `tweiss` / `DemoPass123!`). For handed-out
+> evaluations there is also the no-frills account **`testuser` / `eval2026`** —
+> its lowercase+digits password is exactly why the seeded Zitadel password
+> policy drops the uppercase/symbol requirement (see `idm/zitadel.yml`,
+> `ZITADEL_DEFAULTINSTANCE_PASSWORDCOMPLEXITYPOLICY_*`). Production
+> deployments should tighten the policy again via the Zitadel Console.
+
 ### Manual install
 
 > **TL;DR — the whole proper install, copy & paste** (small tier; annotated steps below):
@@ -683,7 +692,7 @@ openSME-compose/
 │   ├── upgrade.sh             # Helm-free rolling upgrade with pre-flight checks (make upgrade)
 │   ├── pin-images.sh          # Resolve image tags to sha256 digests → manifests/pinned-images.env
 │   ├── rotate-backups.sh      # Prune old off-site backups via rclone (retention policy)
-│   └── provision-demo-users.sh # Provision 12 demo users across Zitadel, Operaton, Synapse, Paperless, Stalwart (--component, idempotent)
+│   └── provision-demo-users.sh # Provision 13 demo users across Zitadel, Operaton, Synapse, Paperless, Stalwart (--component, idempotent)
 ├── contracts/                  # Integration contracts (parsed by tests/02-contracts/)
 │   ├── README.md               # Contract format + rule types
 │   ├── tiles.yml               # Portal service tiles
@@ -709,7 +718,7 @@ openSME-compose/
 │   ├── seed-content/           # Readable seed docs (onboarding, charter, decision records)
 │   ├── bpmn-deploy.sh          # Deploy BPMN to Operaton (idempotent; docker exec or BPM_URL)
 │   ├── survey-deploy.sh        # Provision the example LimeSurvey survey (idempotent)
-│   └── demo-users.json         # 12 demo users used by provision-demo-users.sh
+│   └── demo-users.json         # 13 demo users used by provision-demo-users.sh
 ├── postgres-init/
 │   ├── 00-create-databases.sql # Auto-creates the per-service databases on first start
 │   └── 01-create-users.sh      # Per-service database roles + grants
@@ -1208,7 +1217,7 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
   are in `bootstrap/seed-content/` — see its README for how to load them
   into the Cloud / Paperless / Team Notes.
   
-  **Demo Users:** Provision 12 pre-configured users in Zitadel for demo purposes
+  **Demo Users:** Provision 13 pre-configured users in Zitadel for demo purposes
   (`12 person SME Company`): run `make provision-demo-users` (uses the
   machine PAT from `idm/secrets/masterkey`). Configuration in
   `bootstrap/demo-users.json`; Use `--clean` to remove existing users first,
@@ -1273,7 +1282,7 @@ make restore              # List available backups
 make restore-from BACKUP=<ts>  # Restore from backup (add PASSPHRASE=<p> for .enc sets)
 
 # Seed data / demo
-make provision-demo-users     # 12 demo users across Zitadel, Operaton, Synapse, …
+make provision-demo-users     # 13 demo users across Zitadel, Operaton, Synapse, …
 make bpm-deploy               # Deploy seed BPMN processes to Operaton
 make survey-deploy            # Seed the example LimeSurvey survey
 ```
@@ -1299,7 +1308,7 @@ make survey-deploy            # Seed the example LimeSurvey survey
 | `scripts/upgrade.sh` | Helm-free rolling upgrade with pre-flight contract checks (`make upgrade`) — see [docs/UPGRADE.md](docs/UPGRADE.md) |
 | `scripts/mailcow.sh` | Drive the mailcow mail backend (pinned submodule; requires `MAIL_BACKEND=mailcow` — strict XOR with Stalwart) |
 | `scripts/zitadel-client.sh` | Idempotent Zitadel OIDC app provisioning (`--app opencloud\|notes\|synapse`) — registers the client with the correct redirect URIs and persists the minted id/secret to `.env` |
-| `scripts/provision-demo-users.sh` | Provision the 12 demo users (`make provision-demo-users`; `--component`, `--clean`, `--dry-run`) |
+| `scripts/provision-demo-users.sh` | Provision the 13 demo users (`make provision-demo-users`; `--component`, `--clean`, `--dry-run`) |
 | `scripts/compliance.py` | Run the static suite and emit timestamped compliance reports (`make compliance`) |
 | `bootstrap/bpmn-deploy.sh` | Deploy sample BPMN processes to the Operaton engine |
 | `bootstrap/survey-deploy.sh` | Provision the seeded example LimeSurvey survey |

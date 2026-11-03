@@ -8,7 +8,7 @@
 # Usage:
 #   ./scripts/demo.sh                    # first run (creates .env)
 #   ./scripts/demo.sh --force-env        # regenerate .env with new passwords
-#   ./scripts/demo.sh --with-demo-users  # provision 12 demo users after stack boot
+#   ./scripts/demo.sh --with-demo-users  # provision 13 demo users after stack boot
 #   ./scripts/demo.sh --with-bpmn        # deploy sample BPMN workflows
 #   ./scripts/demo.sh --with-seed-content # show seed content location
 #   ./scripts/demo.sh --all-demo         # full demo: users + BPMN + seed content hint
@@ -47,7 +47,7 @@ for arg in "$@"; do
       echo ""
       echo "Options:"
       echo "  --force-env         Regenerate .env with new passwords"
-      echo "  --with-demo-users   Provision 12 demo users after stack is ready"
+      echo "  --with-demo-users   Provision 13 demo users after stack is ready"
       echo "  --with-bpmn         Deploy sample BPMN workflows (if engine active)"
       echo "  --with-seed-content  Show seed content location hint"
       echo "  --all-demo          All of the above (users + BPMN + seed content)"
@@ -408,7 +408,7 @@ done
 
 # ── Demo bootstrap
 if [[ "$WITH_DEMO_USERS" == true ]]; then
-  info "Provisioning 12 demo users for OpenSME Muster GmbH..."
+  info "Provisioning 13 demo users for OpenSME Muster GmbH..."
   ./scripts/provision-demo-users.sh --wait --verbose
   ok "Demo users provisioned"
 fi

@@ -1269,6 +1269,30 @@ def main() -> bool:
                         "set E2E_OIDC_CLIENT_ID or E2E_ZITADEL_PAT")
             flows_ok = False
         else:
+            # Seeded password policy must accept the evaluation account
+            # (bootstrap/demo-users.json: testuser / eval2026 — lowercase +
+            # digits only). The DefaultInstance env in idm/zitadel.yml drops
+            # uppercase+symbol at setup time; this pins it so a Zitadel
+            # default change (all four char classes) fails CI instead of
+            # silently rejecting eval logins on fresh installs.
+            pol = mgmt(session, idp_base, pat, "GET",
+                       "/management/v1/policies/password/complexity")
+            if pol.status_code == 200:
+                p = pol.json().get("policy", {})
+                if (p.get("hasUppercase") is False and p.get("hasSymbol") is False
+                        and (p.get("minLength") or 8) <= 8):
+                    result.ok(
+                        f"seeded password policy accepts eval passwords "
+                        f"(min {p.get('minLength')}, upper={p.get('hasUppercase')}, "
+                        f"symbol={p.get('hasSymbol')})"
+                    )
+                else:
+                    result.fail(
+                        f"seeded password policy rejects eval logins (testuser/"
+                        f"eval2026): {p}"
+                    )
+            else:
+                result.skip(f"password policy check: HTTP {pol.status_code}")
             try:
                 client_id, pid, app_id = bootstrap_app(session, idp_base, pat, callback, post_logout)
                 owned = (pid, app_id)

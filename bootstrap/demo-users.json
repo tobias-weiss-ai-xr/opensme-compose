@@ -1,8 +1,19 @@
 {
   "company": "OpenSME Muster GmbH",
   "domain": "opensme.local",
-  "description": "12 personnel for demo/e2e testing — an imaginary SME company",
+  "description": "13 personnel for demo/e2e testing — an imaginary SME company plus a no-frills evaluation account (testuser)",
   "users": [
+    {
+      "id": "test.user",
+      "username": "testuser",
+      "firstName": "Test",
+      "lastName": "User",
+      "displayName": "Test User",
+      "email": "testuser@opensme.local",
+      "password": "eval2026",
+      "roles": ["support"],
+      "department": "Evaluation"
+    },
     {
       "id": "tobias.weiss",
       "username": "tweiss",

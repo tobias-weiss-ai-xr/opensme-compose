@@ -23,7 +23,7 @@ Status and direction of the openSME Compose distribution.
   (`--profile ai`) with a portal AI assistant.
 - **Seed data** for fresh deployments: BPMN processes (`make bpm-deploy`),
   human-readable seed documents, an example survey (`make survey-deploy`)
-  and 12 demo users (`make provision-demo-users`).
+  and 13 demo users (`make provision-demo-users`).
 - **Browser login page at the IdP**: the Zitadel Login v2 UI
   (`zitadel-login`, `ghcr.io/zitadel/zitadel-login`) is deployed and
   path-routed at `https://auth.<domain>/ui/v2/login`, so humans can click
