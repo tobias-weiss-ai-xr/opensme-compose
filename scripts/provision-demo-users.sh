@@ -246,11 +246,11 @@ user_exists() {
     [[ -n "$(get_user_id "$1" "$2")" ]]
 }
 
-# Human users created by THIS script carry org-domain-suffixed login
-# names that equal their email (v2 endpoint + userName=email; the setup-
-# seeded admin is suffixed the same way) — a suffix-free equals-query
-# would miss them, so compare on the '@'-stem (the same way
-# tests/05-e2e/run.py does; works for both shapes).
+# Human users created by THIS script carry bare login names (v1 +
+# string initialPassword); older installs may still hold org-domain-
+# suffixed names (v2-era) — a suffix-free equals-query would miss those,
+# so compare on the '@'-stem (the same way tests/05-e2e/run.py does;
+# works for both shapes).
 get_user_id() {
     local username="$1"
     local token="$2"
@@ -269,15 +269,21 @@ delete_user() {
 create_user() {
     local json="$1"
     local token="$2"
-    # v2 — NOT Management v1: v1/users/human ignores the password payload
-    # entirely and leaves the user in USER_STATE_INITIAL (verified live on
-    # v4.19.4: email verified, no password, INITIAL; both v1 and v2
-    # SetPassword then refuse with "User is not yet initialized"). Only
-    # v2 creation sets the initial password (user lands ACTIVE).
-    # Trade-off: v2 appends the org domain to bare usernames, so demo
-    # users log in with the FULL form (testuser@opensme.local) — Login
-    # v2 matches loginNames exactly and cannot resolve bare names.
-    api POST "/v2/users/human" "$json" "$token"
+    # Management v1 with the string-field initialPassword — the ONLY
+    # combination that yields a bare login name AND an ACTIVE user
+    # (all verified live against v4.19.4):
+    #   • v2 /users/human sets the password fine but AUTO-APPENDS the org
+    #     domain to bare usernames (UserLoginMustBeDomain=false) — Login
+    #     v2 matches loginNames EXACTLY, so bare "testuser" would never
+    #     resolve ("user not found").
+    #   • v1 /users/human keeps the userName as given (no suffix), but the
+    #     password must ride in the top-level STRING field "initialPassword"
+    #     — a nested "password" object is silently dropped by protobuf and
+    #     leaves the user in USER_STATE_INITIAL (a dead account without
+    #     SMTP: neither v1 nor v2 SetPassword accepts INITIAL users).
+    # Human usernames cannot be renamed later (v2 PATCH → 501), so this
+    # choice is permanent per user — get it right at creation time.
+    api POST "/management/v1/users/human" "$json" "$token"
 }
 
 list_users() {
@@ -893,15 +899,15 @@ main_zitadel() {
             log "  - User $username already exists ($uid)"
             skipped=$((skipped + 1))
         else
-            # Zitadel v2 human-user shape (verified on v4.19): profile +
-            # email nested, password wrapped, isVerified so no invite mail
-            # is generated (the stack ships no SMTP relay for the IdP).
-            # userName = email: keeps login name == email so evaluators
-            # have ONE identifier to remember (v2 would otherwise append
-            # the org domain to a bare name anyway — see create_user()).
+            # Zitadel Management-v1 human-user shape (verified on
+            # v4.19.4): profile firstName/lastName nested, email verified
+            # (no invite mail — the stack ships no SMTP relay for the IdP),
+            # and the password as top-level STRING initialPassword — bare
+            # userName stays bare, user lands ACTIVE (see create_user()).
+            # Login v2 then resolves BOTH the bare name and the e-mail.
             local user_payload
             user_payload=$(jq -n \
-                --arg un "$email" \
+                --arg un "$username" \
                 --arg fn "$first" \
                 --arg ln "$last" \
                 --arg dn "$display" \
@@ -909,14 +915,14 @@ main_zitadel() {
                 --arg pw "$pwd" \
                 '{
                     userName: $un,
-                    profile: { givenName: $fn, familyName: $ln, displayName: $dn },
-                    email:   { email: $em, isVerified: true },
-                    password: { password: $pw, changeRequired: false }
+                    profile: { firstName: $fn, lastName: $ln, displayName: $dn },
+                    email:   { email: $em, isEmailVerified: true },
+                    initialPassword: $pw
                 }')
             
             local res
             res=$(create_user "$user_payload" "$PAT") || { err "Failed to create user $username (HTTP error)"; continue; }
-            # The v2 human endpoint answers {"userId": ...}. A 200 that is NOT
+            # The v1 human endpoint answers {"userId": ...}. A 200 that is NOT
             # Zitadel JSON means the request landed on something else — the
             # classic case is the Traefik edge routing $zt_base to another
             # stack's vhost (curl -f cannot see that; only the payload can).

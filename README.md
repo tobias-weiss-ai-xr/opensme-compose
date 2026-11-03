@@ -263,18 +263,17 @@ health overview. Needs **2 vCPU / 4 GB RAM**.
 
 > **Quick evaluation login** — after `./scripts/demo.sh --with-demo-users` (or
 > `make provision-demo-users`), any seeded demo user works (see
-> `bootstrap/demo-users.json`, e.g. `tweiss@opensme.local` / `DemoPass123!`). For handed-out
-> evaluations there is also the no-frills account **`testuser@opensme.local` /
-> `eval2026`** — its lowercase+digits password is exactly why the seeded Zitadel
-> password policy drops the uppercase/symbol requirement (see `idm/zitadel.yml`,
+> `bootstrap/demo-users.json`, e.g. `tweiss` / `DemoPass123!`). For handed-out
+> evaluations there is also the no-frills account **`testuser` / `eval2026`** —
+> its lowercase+digits password is exactly why the seeded Zitadel password
+> policy drops the uppercase/symbol requirement (see `idm/zitadel.yml`,
 > `ZITADEL_DEFAULTINSTANCE_PASSWORDCOMPLEXITYPOLICY_*`). Production
 > deployments should tighten the policy again via the Zitadel Console.
 >
-> **Login names are the full e-mail form.** Zitadel's Login v2 screen matches
-> login names *exactly* — a bare `testuser` (or `tweiss`) cannot be resolved
-> and yields *"Benutzer im System nicht gefunden"* / *"user not found"*.
-> Always sign in with `name@domain`; the e-mail address and login name are
-> identical for all demo users.
+> Demo users sign in with their **bare login name** (`testuser`, `tweiss`) or
+> their e-mail address — both resolve. (Setup-seeded accounts like
+> `zitadel-admin` are org-domain-suffixed instead: use the full
+> `zitadel-admin@…` form for those.)
 
 ### Manual install
 
