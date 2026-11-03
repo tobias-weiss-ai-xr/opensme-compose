@@ -47,5 +47,16 @@ else
   echo "[sogo-entrypoint] No template found, using existing $OUTPUT"
 fi
 
+# Trust anchor for the OIDC backchannel: fold the edge's lab wildcard
+# (*.opensme.local, self-signed fixture committed at traefik/certs/) into
+# the system CA bundle while we are still root — SOGo's libcurl-based
+# token/userinfo calls then verify against https://auth.<domain> normally.
+if [ -f /usr/local/share/ca-certificates/opensme-lab.crt ] \
+  && command -v update-ca-certificates >/dev/null 2>&1; then
+  update-ca-certificates >/dev/null 2>&1 \
+    && echo "[sogo-entrypoint] Lab CA folded into system bundle" \
+    || echo "[sogo-entrypoint] WARN: update-ca-certificates failed (OIDC TLS verify may fail)"
+fi
+
 # Delegate to the image's start script (drops to sogo user via su for sogod).
 exec sh -c "/start.sh && tail -f /var/log/sogo/sogo.log"

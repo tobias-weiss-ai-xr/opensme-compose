@@ -19,6 +19,18 @@
 
 FROM ghcr.io/paperless-ngx/paperless-ngx:3.3.4
 
+# Trust anchor for the OIDC backchannel: allauth fetches discovery/token/
+# userinfo against https://auth.<domain> (extra_hosts -> host-gateway ->
+# traefik), which serves the self-signed *.opensme.local lab wildcard. Bake
+# it into the SYSTEM bundle (update-ca-certificates) so requests' default
+# verify path trusts lab AND public CAs — a REQUESTS_CA_BUNDLE override
+# would REPLACE the bundle and break Let's-Encrypt deployments.
+# BuildKit named context (see make paperless-oidc-image) pulls the committed
+# fixture in without widening the build context. Rotation: regenerate via
+# scripts/gen-lab-cert.sh, then REBUILD this image.
+COPY --from=lab-ca selfsigned.crt /usr/local/share/ca-certificates/opensme-lab.crt
+RUN update-ca-certificates
+
 # Enable the generic OIDC provider app (allauth >=65 loads providers INSTALLED_APPS).
 # chr(10) avoids literal-newline escaping problems in the build shell.
 RUN python3 -c "p='/usr/src/paperless/src/paperless/settings/__init__.py'; s=open(p).read(); old='    \"allauth.socialaccount\",'; new=old+chr(10)+'    \"allauth.socialaccount.providers.openid_connect\",'; assert old in s, 'anchor missing'; open(p,'w').write(s.replace(old,new,1))" && grep -n "allauth.socialaccount.providers.openid_connect" /usr/src/paperless/src/paperless/settings/__init__.py

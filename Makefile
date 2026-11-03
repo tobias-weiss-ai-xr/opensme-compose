@@ -631,5 +631,7 @@ portal-web-image: ## Build the portal-web container image (for docker save | doc
 
 # ── Paperless-ngx (OIDC-enabled image, images/paperless-oidc) ───
 paperless-oidc-image: ## Build the allauth/OIDC-enabled paperless image
-	docker build -t opensme/paperless-ngx:3.3.4-oidc -f images/paperless-oidc/Dockerfile images/paperless-oidc
+	docker build -t opensme/paperless-ngx:3.3.4-oidc \
+	  --build-context lab-ca=traefik/certs \
+	  -f images/paperless-oidc/Dockerfile images/paperless-oidc
 

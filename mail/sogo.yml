@@ -39,6 +39,11 @@ services:
       # shadow this bind (leaving sogo.conf empty). See sogo-entrypoint.sh.
       - ./mail/sogo/sogo.conf.template:/sogo.conf.template:ro
       - ./mail/sogo/sogo-entrypoint.sh:/sogo-entrypoint.sh:ro
+      # Trust anchor for SOGo's OIDC backchannel (token/userinfo against
+      # https://auth.<domain>): the edge serves the self-signed *.opensme.local
+      # lab wildcard; the entrypoint folds it into the system bundle while
+      # still running as root (before /start.sh drops privileges).
+      - ./traefik/certs/selfsigned.crt:/usr/local/share/ca-certificates/opensme-lab.crt:ro
       - sogo-config:/etc/sogo
       - sogo-data:/srv
     environment:

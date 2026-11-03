@@ -114,6 +114,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      # Lab wildcard (*.opensme.local, self-signed, committed fixture) served
+      # as the default cert for vhosts without an ACME resolver — see
+      # traefik/dynamic.yml tls block. Services that verify TLS against the
+      # edge (paperless allauth, SOGo) mount the same file as trust anchor.
+      - ./traefik/certs:/etc/traefik/certs:ro
       - traefik-data:/etc/traefik
     networks:
       opensme-net:

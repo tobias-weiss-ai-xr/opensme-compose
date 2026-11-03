@@ -76,6 +76,12 @@ services:
       # proxy). Same pattern as SOGO_NO_PROXY in mail/sogo.yml.
       NO_PROXY: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
       no_proxy: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
+      # TLS trust for the OIDC backchannel (discovery/token/userinfo against
+      # https://auth.<domain> via host-gateway -> traefik): the lab wildcard
+      # is baked into the image's SYSTEM bundle (images/paperless-oidc:
+      # COPY + update-ca-certificates) — requests then trusts lab AND public
+      # CAs; no REQUESTS_CA_BUNDLE override (that would REPLACE the bundle
+      # and break ACME/Let's-Encrypt deployments).
       # Uncomment to enable Tika (requires --profile tika)
       # PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
     volumes:

@@ -10,3 +10,18 @@ http:
       headers:
         customResponseHeaders:
           Strict-Transport-Security: "max-age=31536000"
+
+# Lab wildcard for the non-routable *.opensme.local zone (self-signed,
+# CA:TRUE, committed as a fixture — rotate via scripts/gen-lab-cert.sh).
+# Serves every router without its own ACME resolver: the .local vhosts can't
+# pass the letsencrypt challenge. Public deployments (opensme.graphwiz.ai)
+# keep their per-router certresolver and override this via ACME.
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/selfsigned.crt
+      keyFile: /etc/traefik/certs/selfsigned.key
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/selfsigned.crt
+        keyFile: /etc/traefik/certs/selfsigned.key
