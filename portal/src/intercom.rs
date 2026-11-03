@@ -267,25 +267,9 @@ impl IntercomStore {
     /// only exact /api/intercom/files/<token>/<name> URLs, laid out as
     /// attachments_dir/<token>_<name>. Never touches anything else.
     fn gc_local_attachment(&self, msg: &IntercomMessage) {
-        let Some(dir) = self.attachments_dir.as_ref() else {
-            return;
-        };
-        let Some(att) = msg.attachment.as_ref() else {
-            return;
-        };
-        let Some(rest) = att.url.strip_prefix("/api/intercom/files/") else {
-            return;
-        };
-        let Some((token, name)) = rest.split_once('/') else {
-            return;
-        };
-        if token.is_empty()
-            || !token.bytes().all(|b| b.is_ascii_hexdigit())
-            || sanitize_name(name) != name
-        {
-            return;
+        if let Some(dir) = self.attachments_dir.as_ref() {
+            remove_local_attachment(dir, &msg.attachment, "/api/intercom/files/");
         }
-        let _ = std::fs::remove_file(dir.join(format!("{token}_{name}")));
     }
 
     pub fn list(&self) -> Vec<IntercomMessage> {
@@ -353,6 +337,33 @@ pub(crate) fn random_token() -> String {
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
     h.write_u64(0);
     format!("{:016x}{:016x}", a, h.finish())
+}
+
+/// Best-effort removal of a rotated-out entity's LOCAL upload (shared by
+/// the intercom and polls stores). Only exact `<prefix><token>/<name>`
+/// URLs are honored — token must be hex, name must already be sanitized —
+/// so nothing outside attachments_dir can ever be touched.
+pub(crate) fn remove_local_attachment(
+    dir: &std::path::Path,
+    attachment: &Option<Attachment>,
+    prefix: &str,
+) {
+    let Some(att) = attachment.as_ref() else {
+        return;
+    };
+    let Some(rest) = att.url.strip_prefix(prefix) else {
+        return;
+    };
+    let Some((token, name)) = rest.split_once('/') else {
+        return;
+    };
+    if token.is_empty()
+        || !token.bytes().all(|b| b.is_ascii_hexdigit())
+        || sanitize_name(name) != name
+    {
+        return;
+    }
+    let _ = std::fs::remove_file(dir.join(format!("{token}_{name}")));
 }
 
 /// Minimal content-type mapping for serving picked files inline.

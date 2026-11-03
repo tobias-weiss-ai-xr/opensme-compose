@@ -13,9 +13,13 @@
 //! downloads. Without cloud config the file falls back to the local
 //! attachment dir (same <token>_<name> layout as the intercom picker).
 //!
-//! Vote identity: the portal has no per-user identity server-side, so
-//! double-vote prevention is client-side (localStorage marker); the
-//! server accepts votes from anyone who can reach the portal.
+//! Vote identity: the portal has no per-user identity server-side for
+//! v1 — double-vote prevention used to be client-side (localStorage
+//! marker) only. Since the routes sit behind the session firewall, the
+//! handlers now pass the OIDC session subject into the store: one vote
+//! per subject per poll, enforced server-side (`voted_by` in the
+//! persisted JSON; the public API never exposes subjects — list/vote
+//! answers carry only a boolean `voted` flag for the asking user).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -39,8 +43,53 @@ pub struct Poll {
     #[serde(default)]
     pub closed: bool,
     pub created_at: String,
+    /// Login display name of the poll author (None = legacy store).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
+    /// Session subjects that already voted — internal + persisted only,
+    /// NEVER serialized through the public API (see PollPublic).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voted_by: Vec<String>,
+}
+
+/// Public API shape for a poll: everything a client may see — including
+/// `voted: true` for the REQUESTING session (when known) so the UI can
+/// disable choices server-truthfully — but never other users' subjects.
+#[derive(Clone, Debug, Serialize)]
+pub struct PollPublic {
+    pub id: u64,
+    pub question: String,
+    pub options: Vec<String>,
+    pub votes: Vec<u32>,
+    pub closed: bool,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<Attachment>,
+    /// Set when `viewer` is known: did THIS user already vote?
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voted: Option<bool>,
+}
+
+impl Poll {
+    /// Public view for `viewer` (session subject). `None` viewer = no
+    /// `voted` flag (shape used for create responses).
+    pub fn public(&self, viewer: Option<&str>) -> PollPublic {
+        PollPublic {
+            id: self.id,
+            question: self.question.clone(),
+            options: self.options.clone(),
+            votes: self.votes.clone(),
+            closed: self.closed,
+            created_at: self.created_at.clone(),
+            created_by: self.created_by.clone(),
+            attachment: self.attachment.clone(),
+            voted: viewer.map(|v| self.voted_by.iter().any(|s| s == v)),
+        }
+    }
 }
 
 /// OpenCloud upload credentials (WebDAV PUT + OCS public share).
@@ -211,11 +260,18 @@ impl PollStore {
         polls
     }
 
+    /// Public API listing for `viewer` (session subject): never exposes
+    /// other users' subjects, answers `voted` for the asking user only.
+    pub fn list_public(&self, viewer: Option<&str>) -> Vec<PollPublic> {
+        self.list().iter().map(|p| p.public(viewer)).collect()
+    }
+
     pub fn create(
         &self,
         question: String,
         options: Vec<String>,
         attachment: Option<Attachment>,
+        created_by: Option<String>,
     ) -> Poll {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let created_at = std::time::SystemTime::now()
@@ -229,19 +285,35 @@ impl PollStore {
             options,
             closed: false,
             created_at,
+            created_by,
             attachment,
+            voted_by: Vec::new(),
         };
         let mut polls = self.polls.lock().unwrap_or_else(|e| e.into_inner());
         polls.push(poll.clone());
+        // Rotated-out polls: their LOCAL fallback uploads die with the
+        // poll (cloud share links survive — the file stays in the cloud).
+        let mut dropped = Vec::new();
         while polls.len() > MAX_POLLS {
-            polls.remove(0);
+            if let Some(old) = polls.first().cloned() {
+                polls.remove(0);
+                dropped.push(old);
+            }
         }
         drop(polls);
         self.persist(&self.snapshot());
+        for old in dropped {
+            if let Some(dir) = self.attachments_dir.as_ref() {
+                intercom::remove_local_attachment(dir, &old.attachment, "/api/files/");
+            }
+        }
         poll
     }
 
-    pub fn vote(&self, id: u64, option: usize) -> Result<Poll, String> {
+    /// Register a vote for `voter` (session subject). One vote per
+    /// subject per poll — a second attempt is rejected ("already voted");
+    /// a `None` voter (internal/test) skips the double-vote guard.
+    pub fn vote(&self, id: u64, option: usize, voter: Option<&str>) -> Result<Poll, String> {
         let result = {
             let mut polls = self.polls.lock().unwrap_or_else(|e| e.into_inner());
             let poll = polls
@@ -251,10 +323,18 @@ impl PollStore {
             if poll.closed {
                 return Err("poll is closed".into());
             }
+            if let Some(v) = voter {
+                if poll.voted_by.iter().any(|s| s == v) {
+                    return Err("already voted".into());
+                }
+            }
             if option >= poll.options.len() {
                 return Err("invalid option".into());
             }
             poll.votes[option] += 1;
+            if let Some(v) = voter {
+                poll.voted_by.push(v.to_string());
+            }
             Some(poll.clone())
         };
         let poll = result.expect("set above on success path");
@@ -428,9 +508,9 @@ mod tests {
     fn create_vote_and_list() {
         let dir = tmpdir("basic");
         let store = PollStore::open(Some(dir.join("polls.json")), None, None);
-        let p = store.create("Wo?.".into(), opts(&["a", "b"]), None);
+        let p = store.create("Wo?.".into(), opts(&["a", "b"]), None, None);
         assert_eq!(p.votes, vec![0, 0]);
-        let p = store.vote(p.id, 1).unwrap();
+        let p = store.vote(p.id, 1, None).unwrap();
         assert_eq!(p.votes, vec![0, 1]);
         let listed = store.list();
         assert_eq!(listed.len(), 1);
@@ -442,12 +522,12 @@ mod tests {
     fn vote_rejects_unknown_poll_option_and_closed() {
         let dir = tmpdir("vote");
         let store = PollStore::open(Some(dir.join("polls.json")), None, None);
-        let p = store.create("q".into(), opts(&["a", "b"]), None);
-        assert!(store.vote(999, 0).is_err());
-        assert!(store.vote(p.id, 2).is_err());
+        let p = store.create("q".into(), opts(&["a", "b"]), None, None);
+        assert!(store.vote(999, 0, None).is_err());
+        assert!(store.vote(p.id, 2, None).is_err());
         // close via direct store manipulation (no close endpoint in v1)
         store.polls.lock().unwrap()[0].closed = true;
-        assert!(store.vote(p.id, 0).is_err());
+        assert!(store.vote(p.id, 0, None).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -457,9 +537,9 @@ mod tests {
         let path = dir.join("polls.json");
         {
             let store = PollStore::open(Some(path.clone()), None, None);
-            store.create("frage 1".into(), opts(&["a", "b"]), None);
-            let p2 = store.create("frage 2".into(), opts(&["x", "y", "z"]), None);
-            store.vote(p2.id, 2).unwrap();
+            store.create("frage 1".into(), opts(&["a", "b"]), None, None);
+            let p2 = store.create("frage 2".into(), opts(&["x", "y", "z"]), None, None);
+            store.vote(p2.id, 2, None).unwrap();
         }
         let store = PollStore::open(Some(path), None, None);
         let listed = store.list();
@@ -468,7 +548,9 @@ mod tests {
         assert_eq!(listed[0].votes, vec![0, 0, 1]);
         // id counter continues after reload
         assert_eq!(
-            store.create("frage 3".into(), opts(&["a", "b"]), None).id,
+            store
+                .create("frage 3".into(), opts(&["a", "b"]), None, None)
+                .id,
             3
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -481,7 +563,7 @@ mod tests {
         {
             let store = PollStore::open(Some(path.clone()), None, None);
             for i in 0..(MAX_POLLS + 5) {
-                store.create(format!("p{i}"), opts(&["a", "b"]), None);
+                store.create(format!("p{i}"), opts(&["a", "b"]), None, None);
             }
         }
         let store = PollStore::open(Some(path), None, None);
@@ -503,6 +585,117 @@ mod tests {
     }
 
     #[test]
+    fn double_vote_rejected_per_subject() {
+        let dir = tmpdir("double");
+        let store = PollStore::open(Some(dir.join("polls.json")), None, None);
+        let p = store.create("Abend?".into(), opts(&["ja", "nein"]), None, None);
+        // first vote counts
+        store.vote(p.id, 0, Some("alice-sub")).unwrap();
+        // SAME subject again → rejected, votes unchanged
+        let err = store.vote(p.id, 1, Some("alice-sub")).unwrap_err();
+        assert!(err.contains("already voted"));
+        // different subject may vote (different option)
+        store.vote(p.id, 1, Some("bob-sub")).unwrap();
+        let listed = store.list();
+        assert_eq!(listed[0].votes, vec![1, 1]);
+        assert_eq!(listed[0].voted_by.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn voted_by_persists_and_legacy_json_loads() {
+        let dir = tmpdir("persist-votes");
+        let path = dir.join("polls.json");
+        {
+            let store = PollStore::open(Some(path.clone()), None, None);
+            let p = store.create("q".into(), opts(&["a", "b"]), None, None);
+            store.vote(p.id, 1, Some("carol-sub")).unwrap();
+        }
+        let store = PollStore::open(Some(path.clone()), None, None);
+        // guard survives the reload
+        assert!(store.vote(1, 0, Some("carol-sub")).is_err());
+        store.vote(1, 0, Some("dave-sub")).unwrap();
+        // legacy JSON (pre-author/pre-voted_by) still loads
+        std::fs::write(
+            &path,
+            r#"[{"id":7,"question":"legacy","options":["a"],"votes":[3],"closed":false,"created_at":"1"}]"#,
+        )
+        .unwrap();
+        let legacy = PollStore::open(Some(path), None, None);
+        let polls = legacy.list();
+        assert_eq!(polls[0].voted_by, Vec::<String>::new());
+        assert_eq!(polls[0].created_by, None);
+        // legacy voters can each vote once (migration artifact, accepted)
+        assert!(legacy.vote(7, 0, Some("anyone")).is_ok());
+        assert!(legacy.vote(7, 0, Some("anyone")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn public_view_hides_subjects_and_answers_voted() {
+        let dir = tmpdir("public");
+        let store = PollStore::open(Some(dir.join("polls.json")), None, None);
+        let p = store
+            .create("Fr?".into(), opts(&["a", "b"]), None, Some("Eve".into()))
+            .public(None);
+        let json = serde_json::to_value(&p).unwrap();
+        assert!(json.get("voted_by").is_none(), "subjects must never leak");
+        assert_eq!(json["created_by"], serde_json::json!("Eve"));
+        assert!(json.get("voted").is_none(), "no viewer → no voted flag");
+
+        let store2 = PollStore::open(Some(dir.join("x.json")), None, None);
+        let p2 = store2.create("Fr?".into(), opts(&["a", "b"]), None, None);
+        let after_vote = store2.vote(p2.id, 0, Some("frank-sub")).unwrap();
+        let for_frank = serde_json::to_value(after_vote.public(Some("frank-sub"))).unwrap();
+        assert_eq!(for_frank["voted"], serde_json::json!(true));
+        assert!(for_frank.get("voted_by").is_none());
+        let for_greta = serde_json::to_value(p2.public(Some("greta-sub"))).unwrap();
+        assert_eq!(for_greta["voted"], serde_json::json!(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotated_local_upload_files_are_gc_collected() {
+        let dir = tmpdir(&format!(
+            "gc-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let atts = dir.join("attachments");
+        std::fs::create_dir_all(&atts).unwrap();
+        let store = PollStore::open(Some(dir.join("polls.json")), Some(atts.clone()), None);
+        let mut first_url = None;
+        for i in 0..(MAX_POLLS + 2) {
+            let bytes = format!("doc-{i}").into_bytes();
+            let (token, name) = store
+                .save_attachment_local(&format!("antrag-{i}.txt"), &bytes)
+                .unwrap();
+            let att = intercom::Attachment {
+                url: format!("/api/files/{token}/{name}"),
+                name: name.clone(),
+                size: Some(bytes.len() as u64),
+                content_type: "text/plain".into(),
+            };
+            if i == 0 {
+                first_url = Some(att.url.clone());
+            }
+            store.create(format!("p{i}"), opts(&["ja", "nein"]), Some(att), None);
+        }
+        assert_eq!(
+            std::fs::read_dir(&atts).unwrap().count(),
+            MAX_POLLS,
+            "rotated-out poll upload must be gc'd"
+        );
+        let first = first_url.unwrap();
+        let rest = first.strip_prefix("/api/files/").unwrap();
+        let (token, name) = rest.split_once('/').unwrap();
+        assert!(!atts.join(format!("{token}_{name}")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn create_carries_attachment() {
         let dir = tmpdir("att");
         let store = PollStore::open(Some(dir.join("polls.json")), None, None);
@@ -512,7 +705,7 @@ mod tests {
             Some(9),
             Some("attachment; filename=\"beschluss.pdf\""),
         );
-        store.create("Abstimmung".into(), opts(&["ja", "nein"]), Some(att));
+        store.create("Abstimmung".into(), opts(&["ja", "nein"]), Some(att), None);
         assert_eq!(
             store.list()[0].attachment.as_ref().unwrap().name,
             "beschluss.pdf"

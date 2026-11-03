@@ -246,6 +246,7 @@ immune to silent upstream upgrades.
 | # | User story | Journey test |
 |---|------------|--------------|
 | O1 | Mit konfigurierter KI WIRD die Karte sichtbar (Umkehrung von D2/B5) | `tests/05-e2e/ai_journey.py` — portal recreated with `AI_API_URL` → `id="ai-card"` present |
+| O1b | Der KI-Proxy ist der EINE kostenpflichtige Endpoint — er sitzt hinter dem Session-Gate | anonymous POST `/api/ai/chat` → 401, bevor irgendein Upstream-Token bezahlt wird (Cost-DoS-Schutz); danach OIDC-Login |
 | O2 | Frage rein, Antwort raus — der Proxy-Roundtrip funktioniert | POST `/api/ai/chat` → answer from the OpenAI-compatible mock |
 | O3 | Das Portal spricht den korrekten Upstream-Vertrag | mock logs prove: bearer auth, `model` from `AI_MODEL`, user message == question, `max_tokens` bounded |
 | O4 | Leere Fragen werden abgewiesen, nicht weitergeleitet | empty question → 400 AND nothing reaches the backend |

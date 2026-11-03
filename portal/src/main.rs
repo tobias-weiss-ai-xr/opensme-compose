@@ -940,7 +940,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
     // previously let any website read /api/* responses whenever the backend
     // was directly reachable (e.g. a mis-exposed container port). Same-origin
     // only: no Access-Control-Allow-* headers are emitted at all.
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/", get(handle_root))
         .route("/app.js", get(handle_app_js))
         .route("/health", get(handle_health))
@@ -952,13 +952,14 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/logout", post(logout::handle_logout))
         .route("/logged-out", get(logout::handle_logged_out));
 
-    // Authenticated surfaces: intercom, polls, the service-tile catalog and
-    // their upload/file routes sit behind the signed-session firewall. The
-    // public landing page and the news surfaces (feeds + announcements) stay
-    // anonymous — they are public content shown to every visitor. The tile
-    // catalog (/api/services) is only meaningful for signed-in members: the
-    // Next.js page probes /api/session first and skips the catalog fetch
-    // entirely when anonymous, so the gate causes no anonymous-page breakage.
+    // Authenticated surfaces: intercom, polls, the service-tile catalog,
+    // the AI chat proxy and their upload/file routes sit behind the
+    // signed-session firewall. The public landing page and the news
+    // surfaces (feeds + announcements) stay anonymous — they are public
+    // content shown to every visitor. The tile catalog (/api/services) is
+    // only meaningful for signed-in members: the Next.js page probes
+    // /api/session first and skips the catalog fetch entirely when
+    // anonymous, so the gate causes no anonymous-page breakage.
     let mut protected = Router::new()
         .route("/api/intercom", get(handle_intercom_list))
         .route("/api/intercom", post(handle_intercom_post))
@@ -969,8 +970,14 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         )
         .route("/api/services", get(handle_services));
 
+    // The AI proxy is the one METERED endpoint (the operator pays per
+    // upstream token) — it must sit behind the session firewall like
+    // every other interactive surface, or anyone who reaches the edge
+    // can run a cost-DoS with anonymous 4000-char questions. Anonymous
+    // callers get 401; the cards' fetch sends cookies (same-origin), so
+    // signed-in users are unaffected.
     if config.ai.is_some() {
-        router = router.route("/api/ai/chat", post(handle_ai_chat));
+        protected = protected.route("/api/ai/chat", post(handle_ai_chat));
     }
 
     if config.polls.is_some() {
@@ -1216,15 +1223,20 @@ struct PollUploadQuery {
     attachment_url: Option<String>,
 }
 
-async fn handle_polls_list(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
+async fn handle_polls_list(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+) -> impl IntoResponse {
     match &config.polls {
-        Some(store) => Json(serde_json::json!({ "polls": store.list() })).into_response(),
+        Some(store) => Json(serde_json::json!({ "polls": store.list_public(Some(&session.sub)) }))
+            .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn handle_polls_create(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     Json(post): Json<PollPost>,
 ) -> impl IntoResponse {
     let Some(store) = &config.polls else {
@@ -1246,10 +1258,10 @@ async fn handle_polls_create(
             Ok(a) => a,
             Err(e) => return bad(&e).into_response(),
         };
-    let poll = store.create(question, options, attachment);
+    let poll = store.create(question, options, attachment, Some(session.name.clone()));
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({ "poll": poll })),
+        Json(serde_json::json!({ "poll": poll.public(None) })),
     )
         .into_response()
 }
@@ -1259,6 +1271,7 @@ async fn handle_polls_create(
 /// + public share link); otherwise it falls back to the local dir.
 async fn handle_polls_upload(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     axum::extract::Query(q): axum::extract::Query<PollUploadQuery>,
     headers: axum::http::HeaderMap,
     bytes: axum::body::Bytes,
@@ -1338,29 +1351,39 @@ async fn handle_polls_upload(
             }
         }
     };
-    let poll = store.create(question, options, attachment);
+    let poll = store.create(question, options, attachment, Some(session.name.clone()));
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({ "poll": poll })),
+        Json(serde_json::json!({ "poll": poll.public(None) })),
     )
         .into_response()
 }
 
 async fn handle_polls_vote(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     axum::extract::Path(id): axum::extract::Path<u64>,
     Json(post): Json<PollVotePost>,
 ) -> impl IntoResponse {
     let Some(store) = &config.polls else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match store.vote(id, post.option) {
-        Ok(poll) => Json(serde_json::json!({ "poll": poll })).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e})),
-        )
-            .into_response(),
+    match store.vote(id, post.option, Some(&session.sub)) {
+        Ok(poll) => Json(serde_json::json!({
+            "poll": poll.public(Some(&session.sub))
+        }))
+        .into_response(),
+        Err(e) => {
+            // "already voted" is a conflict (the poll state is fine, the
+            // request just cannot be applied) — clients show a friendly
+            // hint instead of a generic 400.
+            let status = if e.contains("already voted") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (status, Json(serde_json::json!({"error": e}))).into_response()
+        }
     }
 }
 

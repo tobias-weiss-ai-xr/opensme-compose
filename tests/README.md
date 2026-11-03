@@ -145,9 +145,11 @@ network or through the edge:
    (DNS + pool, probed via `pg_isready` from the postgres container)
 3. **SSO issuer consistency** — `OC_OIDC_ISSUER` from opencloud's runtime
    env equals the issuer zitadel actually serves via OIDC discovery
-4. **AI proxy round-trip** — `POST /api/ai/chat` succeeds end-to-end
-   against the live llama.cpp backend (the deployed twin of the in-process
-   contract tests in `portal/src/main.rs`)
+4. **AI proxy round-trip** — anonymous `POST /api/ai/chat` is refused
+   with 401 (the metered endpoint sits behind the session gate); a
+   signed-in round-trip succeeds end-to-end against the live llama.cpp
+   backend (the deployed twin of the in-process contract tests in
+   `portal/src/main.rs`)
 
 Every check skips gracefully when a participating service isn't running,
 so the layer stays meaningful for any `COMPOSE_FILE` subset.

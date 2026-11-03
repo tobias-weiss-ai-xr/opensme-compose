@@ -66,6 +66,13 @@ export default function PollsPanel() {
         body: JSON.stringify({ option }),
       });
       if (res.status === 401) setAuthRequired(true);
+      if (res.status === 409) {
+        // server-truth double-vote guard: this session already voted
+        markVoted(poll.id);
+        setError("In dieser Umfrage hast du bereits abgestimmt.");
+        await refresh();
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       markVoted(poll.id);
       await refresh();
@@ -146,10 +153,15 @@ export default function PollsPanel() {
             )}
             {polls.map((p) => {
               const total = p.votes.reduce((a, b) => a + b, 0);
-              const isVoted = p.closed || voted[p.id];
+              const isVoted = p.closed || voted[p.id] || p.voted === true;
               return (
                 <li key={p.id} className="poll">
-                  <div className="poll-q font-medium">{p.question}</div>
+                  <div className="poll-q font-medium">
+                    {p.question}
+                    {p.created_by && (
+                      <span className="text-xs font-normal text-dim"> — von {p.created_by}</span>
+                    )}
+                  </div>
                   {p.attachment?.url && (
                     <a
                       className="poll-att"

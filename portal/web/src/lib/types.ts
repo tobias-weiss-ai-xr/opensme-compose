@@ -62,6 +62,10 @@ export interface Poll {
   votes: number[];
   closed: boolean;
   attachment: Attachment | null;
+  /** login name of the author (older entries: absent) */
+  created_by?: string;
+  /** server-truth: did THE REQUESTING session already vote? */
+  voted?: boolean;
 }
 
 export interface PollListResponse {

@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 /// Hard limits — a runaway env var must not balloon memory or latency.
@@ -23,6 +23,10 @@ const MAX_FEED_BYTES: usize = 5 * 1024 * 1024;
 const MAX_TITLE_CHARS: usize = 300;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 const CACHE_TTL: Duration = Duration::from_secs(600);
+/// Empty results (all sources down/unparseable) are cached briefly too —
+/// without negative caching every page visitor would re-trigger a full
+/// 8s-timeout fetch storm against a dead upstream.
+const NEG_TTL: Duration = Duration::from_secs(120);
 
 /// One news column on the landing page (e.g. "Startup") with its feed URLs.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -53,12 +57,30 @@ pub struct FeedColumnPayload {
 struct CachedColumn {
     entries: Vec<FeedEntry>,
     fetched_at: Instant,
+    /// true when the last fetch produced NOTHING (all sources down or
+    /// unparseable) — served for NEG_TTL, never longer than CACHE_TTL.
+    negative: bool,
+}
+
+impl CachedColumn {
+    /// Positive results live CACHE_TTL; negative ones (empty column) only
+    /// NEG_TTL — down upstreams are retried sooner.
+    fn ttl(&self) -> Duration {
+        if self.negative {
+            NEG_TTL
+        } else {
+            CACHE_TTL
+        }
+    }
 }
 
 /// In-memory feed cache + fetch pipeline. Shared behind `Arc<AppConfig>`.
 pub struct FeedFetcher {
     columns: Vec<FeedColumn>,
     cache: RwLock<HashMap<String, CachedColumn>>,
+    /// Columns with a background refresh currently in flight — one refresh
+    /// per column, no matter how many visitors hit the page at once.
+    in_flight: Mutex<std::collections::HashSet<String>>,
     client: reqwest::Client,
 }
 
@@ -130,6 +152,7 @@ impl FeedFetcher {
         FeedFetcher {
             columns,
             cache: RwLock::new(HashMap::new()),
+            in_flight: Mutex::new(std::collections::HashSet::new()),
             client,
         }
     }
@@ -139,52 +162,79 @@ impl FeedFetcher {
         &self.columns
     }
 
-    /// Current snapshot of every column: cached-fresh entries if available,
-    /// otherwise a (concurrent) re-fetch. Never fails — a broken upstream
-    /// only yields an empty column.
-    pub async fn snapshot(&self) -> Vec<FeedColumnPayload> {
+    /// Current snapshot of every column — stale-while-revalidate:
+    /// fresh cache hits are served as-is, expired ones are served STALE
+    /// immediately while a single background refresh per column runs (a
+    /// burst of concurrent visitors triggers one upstream fetch, not N).
+    /// A column never seen before is fetched inline (first visit must
+    /// actually show something). Never fails — a broken upstream only
+    /// yields an empty column.
+    pub async fn snapshot(self: &Arc<Self>) -> Vec<FeedColumnPayload> {
         let cols = self.columns.clone();
         let now = Instant::now();
 
         let futures: Vec<_> = cols
             .into_iter()
             .map(|col| {
-                let cached = {
+                let (fresh, stale_entries) = {
                     let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
-                    cache.get(&col.id).and_then(|c| {
-                        if now.duration_since(c.fetched_at) < CACHE_TTL {
-                            Some(c.entries.clone())
-                        } else {
-                            None
+                    match cache.get(&col.id) {
+                        Some(c) => {
+                            let fresh = now.duration_since(c.fetched_at) < c.ttl();
+                            (fresh, Some(c.entries.clone()))
                         }
-                    })
+                        None => (false, None),
+                    }
                 };
+                let this = self.clone();
                 async move {
-                    match cached {
-                        Some(entries) => (col, entries),
-                        None => {
-                            let entries = self.fetch_column(&col).await;
-                            (col, entries)
+                    let entries = match (fresh, stale_entries) {
+                        (true, Some(e)) => e,
+                        (false, Some(e)) => {
+                            // stale-while-revalidate: serve what we have,
+                            // refresh exactly once in the background.
+                            this.trigger_refresh(&col);
+                            e
                         }
+                        (false, None) => this.refresh_column(&col).await,
+                        (true, None) => Vec::new(), // unreachable
+                    };
+                    FeedColumnPayload {
+                        id: col.id,
+                        title: col.title,
+                        entries,
                     }
                 }
             })
             .collect();
 
-        futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .map(|(col, entries)| FeedColumnPayload {
-                id: col.id,
-                title: col.title,
-                entries,
-            })
-            .collect()
+        futures::future::join_all(futures).await
+    }
+
+    /// Spawn one background refresh for `col` unless one is already
+    /// running (per-column single-flight).
+    fn trigger_refresh(self: &Arc<Self>, col: &FeedColumn) {
+        {
+            let mut inflight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+            if !inflight.insert(col.id.clone()) {
+                return; // already refreshing
+            }
+        }
+        let this = self.clone();
+        let col = col.clone();
+        tokio::spawn(async move {
+            this.refresh_column(&col).await;
+            this.in_flight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&col.id);
+        });
     }
 
     /// Fetch every URL of a column concurrently, merge + sort + cap, and
-    /// cache the result (only when something was actually retrieved).
-    async fn fetch_column(&self, col: &FeedColumn) -> Vec<FeedEntry> {
+    /// cache the result — including empty results (negative cache, see
+    /// NEG_TTL) so a dead upstream is not re-fetched on every page load.
+    async fn refresh_column(&self, col: &FeedColumn) -> Vec<FeedEntry> {
         let urls: Vec<&str> = col
             .urls
             .iter()
@@ -195,18 +245,17 @@ impl FeedFetcher {
             futures::future::join_all(urls.into_iter().map(|u| self.fetch_url(u))).await;
         let mut entries: Vec<FeedEntry> = per_url.into_iter().flatten().collect();
         entries = merge_and_cap(entries);
-        if !entries.is_empty() {
-            self.cache
-                .write()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(
-                    col.id.clone(),
-                    CachedColumn {
-                        entries: entries.clone(),
-                        fetched_at: Instant::now(),
-                    },
-                );
-        }
+        self.cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                col.id.clone(),
+                CachedColumn {
+                    entries: entries.clone(),
+                    fetched_at: Instant::now(),
+                    negative: entries.is_empty(),
+                },
+            );
         entries
     }
 
@@ -216,6 +265,16 @@ impl FeedFetcher {
             Ok(r) if r.status().is_success() => r,
             _ => return Vec::new(),
         };
+        // Refuse oversized bodies BEFORE buffering them: content_length is
+        // a header read (cheap); the bytes() post-check still guards the
+        // chunked/no-length case. A lying or hostile feed cannot balloon
+        // portal memory past MAX_FEED_BYTES.
+        if resp
+            .content_length()
+            .is_some_and(|len| len as usize > MAX_FEED_BYTES)
+        {
+            return Vec::new();
+        }
         let bytes = match resp.bytes().await {
             Ok(b) if !b.is_empty() && b.len() <= MAX_FEED_BYTES => b,
             _ => return Vec::new(),
@@ -226,10 +285,13 @@ impl FeedFetcher {
 
 /// Egress-restricted hosts (e.g. OpenVZ containers without working
 /// MASQUERADE on the virtualization layer) can still run a local HTTP
-/// CONNECT proxy reachable from the docker bridges. reqwest only honors
-/// `HTTPS_PROXY` with its opt-in `system-proxy` feature, which this build
-/// deliberately does not use — so read the conventional variables here and
-/// wire the proxy into the feed client only (internal clients unaffected).
+/// CONNECT proxy reachable from the docker bridges. reqwest 0.12 already
+/// consults the conventional proxy env vars itself on this platform — but
+/// wiring the proxy EXPLICITLY makes the behavior identical across
+/// builds/platforms and is what lets the intercom client carve out
+/// PORTAL_NO_PROXY (internal docker-net names must bypass the egress
+/// proxy). Internal clients (IdP token exchange) stay proxy-free either
+/// way.
 fn proxy_env_url() -> Option<String> {
     let raw = std::env::var("HTTPS_PROXY")
         .or_else(|_| std::env::var("https_proxy"))
@@ -443,6 +505,74 @@ mod tests {
             normalize_proxy_candidate("http://p:1//"),
             Some("http://p:1".to_string())
         );
+    }
+
+    // ── cache behavior (negative cache + stale-while-revalidate) ─────
+
+    fn fetcher_with_dead_column() -> Arc<FeedFetcher> {
+        Arc::new(FeedFetcher::new(vec![FeedColumn {
+            id: "dead".into(),
+            title: "Dead".into(),
+            urls: vec!["http://127.0.0.1:1/feed".into()], // nothing listens here
+        }]))
+    }
+
+    fn cached_at(f: &FeedFetcher, id: &str) -> Option<(bool, Instant)> {
+        f.cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .map(|c| (c.negative, c.fetched_at))
+    }
+
+    #[tokio::test]
+    async fn dead_upstream_is_negative_cached_not_refetched() {
+        let f = fetcher_with_dead_column();
+        let snap = f.snapshot().await;
+        assert!(snap[0].entries.is_empty());
+        let (negative, t1) = cached_at(&f, "dead").unwrap();
+        assert!(negative, "empty column must be cached as negative");
+
+        // A burst of visitors inside NEG_TTL: served from the negative
+        // cache — the fetched_at stamp must not move (no new fetches).
+        for _ in 0..5 {
+            let again = f.snapshot().await;
+            assert!(again[0].entries.is_empty());
+        }
+        let (_, t2) = cached_at(&f, "dead").unwrap();
+        assert_eq!(t1, t2, "fresh negative cache must not trigger refetches");
+    }
+
+    #[tokio::test]
+    async fn stale_column_serves_and_refreshes_in_background() {
+        let f = fetcher_with_dead_column();
+        f.snapshot().await; // seed the (negative) cache
+                            // Age the cache entry past its TTL.
+        f.cache.write().unwrap().get_mut("dead").unwrap().fetched_at =
+            Instant::now() - CACHE_TTL - Duration::from_secs(60);
+        let before = cached_at(&f, "dead").unwrap().1;
+        // Stale-while-revalidate: snapshot returns IMMEDIATELY (stale data)
+        // while a background refresh runs.
+        let snap = f.snapshot().await;
+        assert!(snap[0].entries.is_empty(), "stale (negative) column served");
+        // Give the spawned refresh a moment to land.
+        for _ in 0..50 {
+            if cached_at(&f, "dead").unwrap().1 != before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_ne!(
+            cached_at(&f, "dead").unwrap().1,
+            before,
+            "background refresh must update the cache"
+        );
+        // single-flight: the refresh marker is released afterwards
+        assert!(!f
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains("dead"));
     }
 
     #[test]

@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "05-e2e"))
 from conftest import Result
 
 import requests
@@ -186,15 +187,33 @@ def check_ai_proxy(result: Result, running: set[str], domain: str, env: dict):
         result.skip("ai/portal not running (--profile ai enables this check)")
         return
     s = session_insecure()
-    headers = {}
-    key = env.get("AI_API_KEY", "").strip()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+
+    # The chat proxy is the one METERED endpoint — it sits behind the
+    # session firewall. An anonymous caller must be refused BEFORE any
+    # upstream (cost-DoS guard).
+    anon = s.post(edge_base(domain) + "/api/ai/chat",
+                  json={"question": "free tokens?"}, timeout=60)
+    if anon.status_code != 401:
+        result.fail(f"AI proxy not session-gated: anonymous → HTTP {anon.status_code}")
+        return
+    result.ok("AI proxy session-gated (anonymous → 401)")
+
+    # Full round-trip needs a signed-in member — reuse the e2e login
+    # machinery; if the stack has no seeded credentials, that part skips.
+    try:
+        from run import portal_login
+    except ImportError:
+        result.skip("portal_login not importable — no full AI round-trip here")
+        return
+    if not portal_login(s, edge_base(domain), f"https://auth.{domain}"):
+        result.skip("portal login unavailable — full round-trip covered by 05-e2e/ai_journey")
+        return
+
     last = ""
     for attempt in range(5):  # model load can take a while on first boot
         try:
             r = s.post(edge_base(domain) + "/api/ai/chat",
-                       json={"question": "ping"}, headers=headers, timeout=120)
+                       json={"question": "ping"}, timeout=120)
         except requests.RequestException as e:
             result.fail(f"AI proxy round-trip failed: {e}")
             return

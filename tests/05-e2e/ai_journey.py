@@ -39,7 +39,9 @@ import urllib3
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import Result, ensure_portal_routed
+from run import portal_login
 
 import requests
 
@@ -169,6 +171,24 @@ def main() -> int:
             if 'id="ai-card"' in page.text
             else "AI card missing despite AI_API_URL set"
         )
+
+        # O1b: the metered AI proxy is SESSION-GATED — an anonymous
+        # caller must never reach the upstream (cost-DoS guard)
+        anon_chat = session.post(portal_base + "/api/ai/chat",
+                                 json={"question": "free tokens?"}, timeout=T)
+        (result.ok if anon_chat.status_code == 401 else result.fail)(
+            "anonymous chat rejected with 401 (session gate)"
+            if anon_chat.status_code == 401
+            else f"COST-DoS HOLE: anonymous chat → HTTP {anon_chat.status_code}"
+        )
+
+        # sign in — every subsequent assertion runs as a member
+        idp_base = f"https://auth.{args.domain}"
+        if portal_login(session, portal_base, idp_base):
+            result.ok("portal OIDC login minted an OPENSMEPORTALSESSION cookie")
+        else:
+            result.fail("portal login failed — cannot exercise the gated AI surface")
+            return 1
 
         # O2: full round trip through the portal proxy
         chat = session.post(portal_base + "/api/ai/chat",

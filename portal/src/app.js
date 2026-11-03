@@ -166,6 +166,11 @@
           body: JSON.stringify({ question: question }),
         })
           .then(function (r) {
+            // Session-gated (metered endpoint): anonymous callers get 401 —
+            // tell them why instead of a generic "unavailable".
+            if (r.status === 401) {
+              throw new Error("bitte zuerst anmelden — die KI-Antwort ist nur für Mitglieder");
+            }
             if (!r.ok) throw new Error("HTTP " + r.status);
             return r.json();
           })

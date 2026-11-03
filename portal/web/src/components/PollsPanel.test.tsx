@@ -92,6 +92,40 @@ describe("PollsPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides vote buttons when the SERVER says this session already voted (voted: true)", async () => {
+    mockedVotedSet.mockReturnValue({}); // localStorage empty
+    fetchMock.mockResolvedValue(
+      res(true, pollList([{ ...poll, voted: true }])),
+    );
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+    expect(
+      screen.queryByRole("button", { name: /stimmen/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the author when the poll carries one", async () => {
+    fetchMock.mockResolvedValue(
+      res(true, pollList([{ ...poll, created_by: "Kim Team" }])),
+    );
+    render(<PollsPanel />);
+    expect(await screen.findByText(/von Kim Team/)).toBeInTheDocument();
+  });
+
+  it("handles a 409 double-vote: marks voted locally and shows a hint", async () => {
+    fetchMock.mockResolvedValue(res(true, pollList([poll])));
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+
+    fetchMock.mockResolvedValueOnce(res(false, undefined, 409)); // vote
+    fetchMock.mockResolvedValueOnce(res(true, pollList([poll]))); // refresh
+    fireEvent.click(screen.getByRole("button", { name: "Für „Grün“ stimmen" }));
+    await waitFor(() =>
+      expect(screen.getByText(/bereits abgestimmt/)).toBeInTheDocument(),
+    );
+    expect(mockedMarkVoted).toHaveBeenCalledWith(7);
+  });
+
   it("casts a vote via POST, marks it voted and re-fetches", async () => {
     fetchMock.mockResolvedValue(res(true, pollList([poll])));
     render(<PollsPanel />);
