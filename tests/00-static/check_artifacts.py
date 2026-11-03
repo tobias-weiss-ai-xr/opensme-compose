@@ -38,6 +38,16 @@ FORBIDDEN = [
 # Tracked names that are templates by design, not live secrets.
 ALLOWED = {".env.example", ".env.demo"}
 
+# Deliberate committed fixtures (documented exceptions, guarded below):
+# the self-signed lab CA for the non-routable .local zone — see the
+# fixture_refs block in main(). A deployment secret it is not: the key is
+# worthless outside this repo's sealed lab topology, and dynamic.yml's
+# defaultCertificate REQUIRES it in every fresh checkout.
+FIXTURE_EXCEPTIONS = {
+    "traefik/certs/selfsigned.crt",
+    "traefik/certs/selfsigned.key",
+}
+
 # Ignore probes: (label, path) that must stay ignored so `git add -A` is safe.
 IGNORE_PROBES = [
     ("backups/", "backups/probe.sql.gz"),
@@ -79,7 +89,7 @@ def main() -> int:
 
     violations: list[tuple[str, str]] = []
     for path in files:
-        if Path(path).name in ALLOWED:
+        if Path(path).name in ALLOWED or path in FIXTURE_EXCEPTIONS:
             continue
         for pattern, why in FORBIDDEN:
             if re.search(pattern, path):
@@ -100,6 +110,34 @@ def main() -> int:
                 f"{label} is not gitignored — "
                 "a `git add -A` could commit secrets"
             )
+
+    # ── lab TLS fixture MUST be tracked ────────────────────────────────────
+    # traefik/dynamic.yml pins the default certificate to the committed
+    # self-signed lab CA (stable trust anchor for the non-routable .local
+    # zone). A fresh checkout WITHOUT those files boots an edge whose TLS
+    # handshake dies entirely — the failure mode that silently broke CI's
+    # SSO + mail jobs from 0d6e9ef on (the `certs/` ignore rule had
+    # swallowed the "committed" fixture). Guard both directions: present
+    # in the worktree AND tracked.
+    fixture_refs = [
+        ("traefik/certs/selfsigned.crt", "lab CA certificate"),
+        ("traefik/certs/selfsigned.key", "lab CA private key"),
+    ]
+    for path, label in fixture_refs:
+        if not (ROOT / path).is_file():
+            result.fail(
+                f"{path} missing — dynamic.yml's defaultCertificate points "
+                "at it and Traefik kills ALL TLS handshakes when the file "
+                "is absent (regenerate: scripts/gen-lab-cert.sh)"
+            )
+        elif path not in files:
+            result.fail(
+                f"{path} exists but is NOT git-tracked — the certs/ ignore "
+                "rule swallowed it again; fresh checkouts boot a dead-TLS "
+                "edge (see .gitignore exception + check_artifacts guard)"
+            )
+        else:
+            result.ok(f"{label} tracked ({path})")
 
     return 0 if result.summary() else 1
 

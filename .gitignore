@@ -16,8 +16,17 @@ manifests/pinned-images.env
 # config — never commit them.
 backups/
 
-# TLS certs
+# TLS certs — EXCEPT the deliberate lab fixture: traefik/dynamic.yml
+# references traefik/certs/selfsigned.{crt,key} as the stable wildcard
+# CA for the non-routable .local zone. If those two files are missing in
+# a fresh checkout (e.g. because this rule swallowed them — the exact bug
+# that killed CI from 0d6e9ef on: dynamic config pointing at a missing
+# cert file kills Traefik's TLS handshake ENTIRELY), every TLS router
+# dies. check_artifacts.py enforces that they stay tracked.
 certs/
+!traefik/certs/
+!traefik/certs/selfsigned.crt
+!traefik/certs/selfsigned.key
 
 # IDE
 .vscode/
