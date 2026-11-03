@@ -68,6 +68,14 @@ services:
       PAPERLESS_FILENAME_FORMAT: "{created_year}/{created_month}/{created_day}/{correspondent}/{title}"
       PAPERLESS_CONVERT_MEMORY_LIMIT: 256
       PAPERLESS_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
+      # Bypass the corporate HTTP proxy for internal Docker traffic (OIDC
+      # discovery/token exchange to Zitadel via the host-gateway FQDN,
+      # Gotenberg conversions). Docker's injected http_proxy cannot resolve
+      # these hosts — without the bypass the SSO entry renders but the login
+      # dies right after the button click (discovery 000/503 through the
+      # proxy). Same pattern as SOGO_NO_PROXY in mail/sogo.yml.
+      NO_PROXY: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
+      no_proxy: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
       # Uncomment to enable Tika (requires --profile tika)
       # PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
     volumes:

@@ -31,7 +31,7 @@
         bpm-deploy bpm-undeploy survey-deploy survey-delete survey-up clean help \
         up down status logs pull upgrade \
         mailcow-up mailcow-down mailcow-purge mailcow-status mailcow-logs \
-        up-soho up-small up-medium up-all \
+        up-soho up-small up-medium up-all up-login \
         nix-build nix-load nix-images \
         agent-build agent-status
 .PHONY: agentic-gate backup backup-db backup-dry-run bench compliance \
@@ -124,6 +124,17 @@ up-small:
 
 up-medium:
 	@$(MAKE) up PROFILE=medium
+
+# Start the IdP's login UI v2 (the page `authorize` redirects humans to).
+# Rides the login-client PAT that `zitadel setup` seeds into the machinekey
+# volume — only available AFTER the first init, which is why its
+# `donotstart` profile keeps it out of every generic `up -d` (idm/zitadel.yml).
+# Without it every browser login dead-ends in Zitadel's 404 (headless
+# journeys via the Session API are unaffected).
+up-login:
+	@echo -e "$(BLUE)── starting the IdP login UI (zitadel-login) ──$(NC)"
+	@$(FULL_COMPOSE) --env-file $(TEST_ENV) --profile donotstart up -d zitadel-login
+	@echo -e "$(GREEN)✓ login UI started: https://$$(grep -E '^ZITADEL_DOMAIN=' .env 2>/dev/null | head -1 | cut -d= -f2 || echo auth.opensme.local)/ui/v2/login/ready$(NC)"
 
 up-all:
 	@echo -e "$(BLUE)── starting openSME (ALL services) ──$(NC)"
@@ -514,6 +525,7 @@ help:
 	@echo "    make up PROFILE=soho     4c /  8 GB  (core only)"
 	@echo "    make up PROFILE=small    8c / 24 GB  (core + office + paperless)"
 	@echo "    make up PROFILE=medium  16c / 48 GB  (core + office + mail + paperless)"
+	@echo "    make up-login          Start the IdP login UI (needed for browser logins)"
 	@echo "    make up PROFILE=custom   Use COMPOSE_FILE from env"
 	@echo ""
 	@echo -e "  $(GREEN)Operations$(NC)"

@@ -375,11 +375,12 @@ services:
       # inherits http_proxy/https_proxy/no_proxy from .env, and reqwest
       # routes http://zitadel:8080 through the HRZ Squid → 503 (it cannot
       # resolve compose bridge names). reqwest reads NO_PROXY from the env,
-      # so list the bridge hostnames + private CIDR here. Without this the
-      # IDP_INTERNAL_URL token exchange fails on soho/medium/max
+      # so list the bridge hostnames here (no CIDR literals — the
+      # secret-scanner flags RFC1918 addresses in compose files). Without
+      # this the IDP_INTERNAL_URL token exchange fails on soho/medium/max
       # deployments (callback 302, no OPENSMEPORTALSESSION cookie).
-      NO_PROXY: ${PORTAL_NO_PROXY:-localhost,127.0.0.1,zitadel,traefik,opencloud,172.16.0.0/12,opensme.local,opensme.graphwiz.ai}
-      no_proxy: ${PORTAL_NO_PROXY:-localhost,127.0.0.1,zitadel,traefik,opencloud,172.16.0.0/12,opensme.local,opensme.graphwiz.ai}
+      NO_PROXY: ${PORTAL_NO_PROXY:-localhost,127.0.0.1,zitadel,traefik,opencloud,opensme.local,opensme.graphwiz.ai}
+      no_proxy: ${PORTAL_NO_PROXY:-localhost,127.0.0.1,zitadel,traefik,opencloud,opensme.local,opensme.graphwiz.ai}
       # Server-side OIDC base (token + userinfo exchange): the IdP on the
       # compose network is reached at http://zitadel:8080; the public https
       # URL fails reqwest's TLS verification behind the self-signed edge.
