@@ -31,6 +31,16 @@ FROM ghcr.io/paperless-ngx/paperless-ngx:3.3.4
 COPY --from=lab-ca selfsigned.crt /usr/local/share/ca-certificates/opensme-lab.crt
 RUN update-ca-certificates
 
+# requests/urllib3 DEFAULT to certifi's bundle and IGNORE the system store
+# (discovered live: in-container curl verified fine, gunicorn/allauth died
+# with CERTIFICATE_VERIFY_FAILED). Point REQUESTS_CA_BUNDLE at a CONCATENATED
+# bundle (certifi + lab) so public CAs stay trusted on ACME deployments.
+RUN CERTIFI=$(python3 -c "import certifi; print(certifi.where())") \
+  && cat "$CERTIFI" /usr/local/share/ca-certificates/opensme-lab.crt \
+     > /usr/local/share/ca-certificates/opensme-combined.pem
+ENV REQUESTS_CA_BUNDLE=/usr/local/share/ca-certificates/opensme-combined.pem \
+    SSL_CERT_FILE=/usr/local/share/ca-certificates/opensme-combined.pem
+
 # Enable the generic OIDC provider app (allauth >=65 loads providers INSTALLED_APPS).
 # chr(10) avoids literal-newline escaping problems in the build shell.
 RUN python3 -c "p='/usr/src/paperless/src/paperless/settings/__init__.py'; s=open(p).read(); old='    \"allauth.socialaccount\",'; new=old+chr(10)+'    \"allauth.socialaccount.providers.openid_connect\",'; assert old in s, 'anchor missing'; open(p,'w').write(s.replace(old,new,1))" && grep -n "allauth.socialaccount.providers.openid_connect" /usr/src/paperless/src/paperless/settings/__init__.py
