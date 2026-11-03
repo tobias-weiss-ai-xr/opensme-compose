@@ -1279,12 +1279,15 @@ def main() -> bool:
                        "/management/v1/policies/password/complexity")
             if pol.status_code == 200:
                 p = pol.json().get("policy", {})
-                if (p.get("hasUppercase") is False and p.get("hasSymbol") is False
-                        and (p.get("minLength") or 8) <= 8):
+                # proto3 JSON omits false booleans (and minLength is a
+                # string) — normalize before asserting
+                upper = bool(p.get("hasUppercase"))
+                symbol = bool(p.get("hasSymbol"))
+                min_len = int(p.get("minLength") or 8)
+                if (not upper and not symbol and min_len <= 8):
                     result.ok(
                         f"seeded password policy accepts eval passwords "
-                        f"(min {p.get('minLength')}, upper={p.get('hasUppercase')}, "
-                        f"symbol={p.get('hasSymbol')})"
+                        f"(min {min_len}, upper={upper}, symbol={symbol})"
                     )
                 else:
                     result.fail(
