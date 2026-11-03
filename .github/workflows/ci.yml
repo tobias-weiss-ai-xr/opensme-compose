@@ -347,6 +347,10 @@ jobs:
         env:
           E2E_DEBUG: "1"
         run: python3 tests/05-e2e/intercom.py opensme.local
+      - name: Run polls journey (voting lifecycle, double-vote 409, gated surface)
+        env:
+          E2E_DEBUG: "1"
+        run: python3 tests/05-e2e/polls.py opensme.local
       - name: Run hostile input journey (nothing breaks out of the renderer)
         env:
           E2E_DEBUG: "1"

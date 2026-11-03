@@ -78,6 +78,63 @@ else:
 This still runs the pre-flight checks first, then pulls and rolling
 `up -d`s only that service.
 
+## Offline upgrades via image transfer (no registry)
+
+Hosts that cannot reach image registries (firewalled 1blu-style
+deployments) get their updates as a tarball: build locally, transfer,
+load, then sync the repo tree. This is the flow the portal and
+portal-web images document in their Dockerfiles.
+
+```sh
+# 1) build locally (same tags the server already runs)
+docker build -t opensme-compose-portal:latest portal/
+docker build -t opensme-compose-portal-web:latest portal/web/  # profile "web"
+
+# 2) transfer + load
+docker save opensme-compose-portal:latest | gzip > /tmp/portal.tar.gz
+scp /tmp/portal.tar.gz root@SERVER:/tmp/
+ssh root@SERVER 'gunzip -c /tmp/portal.tar.gz | docker load && rm /tmp/portal.tar.gz'
+
+# 3) sync the repo tree — the exclude list is MANDATORY:
+#    every entry below is server-local state a sync must never clobber
+rsync -az --delete \
+  --exclude .git \
+  --exclude .env \                        # server truth: secrets + COMPOSE_FILE
+  --exclude 'traefik/certs' \             # server cert files + permissions
+  --exclude 'idm/secrets' \
+  --exclude 'idm/zitadel/masterkey' \
+  --exclude 'mail/mailcow-dockerized/data' \  # root-owned runtime configs
+  ./ root@SERVER:/opt/openSME-compose/
+
+# 4) recreate the service, then verify (see below)
+ssh root@SERVER 'cd /opt/openSME-compose && docker compose up -d portal'
+```
+
+**Post-sync integrity check (always run it):** `rsync` matches on
+md5+mtime — a clobbered `.env` can look byte-identical to a *stale*
+copy while missing server-only secrets, and `--delete` removes anything
+not present locally. Verify the server still owns its state:
+
+```sh
+ssh root@SERVER '
+  grep -q "^PORTAL_OIDC_CLIENT_SECRET=." /opt/openSME-compose/.env && echo env-ok
+  ls -l /opt/openSME-compose/traefik/certs/   # key must stay readable
+  docker ps --filter name=opensme-portal --format "{{.Status}}"
+'
+```
+
+**Gotchas learned the hard way:**
+
+- `mail/mailcow-dockerized/data` holds root-owned container configs on
+  any host that ever ran mailcow — a plain rsync aborts with exit 23.
+  Exclude it; that tree is generated per-host, never repo content.
+- The legacy portal UI (`portal/src/app.js`) is embedded into the Rust
+  binary via `include_str!` — UI fixes ship **only** in a rebuilt portal
+  image, a file sync alone does nothing.
+- `docker load` of an unchanged tag renames the old image instead of
+  replacing it — check `docker images` afterwards, and expect the
+  container recreate to pick the fresh ID.
+
 ## Rollback advice
 
 1. **Retain the bad change** — if the new images misbehave, you need the

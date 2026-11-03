@@ -314,6 +314,32 @@ The store is in-memory by design (v1): messages are conversational
 ephemera, not records. The journey never assumes persistence across
 restarts — that is Epic P's territory for DATA, not chat.
 
+## Epic AP — Polls: team votes, one per person
+
+> *Als Teammitglied starte ich eine schnelle Abstimmung im Portal —
+eine Stimme pro Login, Anhang optional.*
+
+| # | User story | Test |
+|---|------------|------|
+| AP1 | Login first | real OIDC login mints the OPENSMEPORTALSESSION cookie |
+| AP2 | Als Betreiber ist die Umfragen-Karte OPTIONAL | without `POLLS_ENABLED` every `/api/polls` route 404s for a signed-in user (store absent = feature off); the card is not rendered |
+| AP3 | Die Abstimmung ist eingemauert | anonymous GET/POST on `/api/polls` → 401 (session firewall before the feature gate) |
+| AP4 | Als Teammitglied lege ich eine Umfrage an | `POST /api/polls` → 201, `created_by` stamped (OIDC display name), `voted=false`, no `voted_by` subject leak |
+| AP5 | Fehlformate werden abgewiesen | 1 option, 11 options, blank question, 301-byte question → 400 |
+| AP6 | Meine Stimme zählt — genau einmal | vote → 200 `voted=true` with server-truth tallies; the SAME OIDC subject voting again → 409 CONFLICT (not 400, not silent overwrite) |
+| AP7 | Fremde Umfragen und kaputte Optionen | unknown poll id, out-of-range option index → 400 |
+| AP8 | Die Liste spiegelt MICH | list carries `voted` per requester + tallies, never `voted_by` |
+| AP9 | Umfragen mit Anhang: Datei vom eigenen Rechner | raw-body upload → new poll with local `/api/files/` attachment; serving carries nosniff + inline/attachment disposition (active content forced to attachment) + `private, immutable` caching |
+| AP10 | Neustart kostet keine Stimme | poll + votes survive a portal recreate (`POLLS_DATA_PATH` volume) — unlike the intercom store, polls ARE records |
+| AP11 | Zurück zum Auslieferungszustand | restored default stack: polls 404 again, intercom + health intact |
+
+Polls are records, not chat: the store persists (`POLLS_DATA_PATH`,
+default `/data/polls.json`, FIFO-capped at 25 polls with local
+attachment garbage-collection) — the journey proves that recreate
+survival explicitly. File serving reuses the intercom guards
+(`serve_inline`/`mime_for`) — pinned by the cargo contract test
+`polls_file_serving_carries_nosniff_and_disposition`.
+
 ## Epic U — Attachments from the cloud service
 
 > *Als Nutzer hänge ich einer Nachricht eine Datei aus der Cloud an —

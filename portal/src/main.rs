@@ -2186,6 +2186,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn polls_file_serving_carries_nosniff_and_disposition() {
+        // Same contract as intercom file serving: nosniff (global
+        // middleware, pinned here for this route), disposition from the
+        // shared serve_inline blocklist, immutable private caching.
+        let dir = std::env::temp_dir().join(format!(
+            "pl-http-{}-{}",
+            std::process::id(),
+            intercom::random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = cfg_with("", None, "");
+        cfg.polls = Some(Arc::new(polls::PollStore::open(
+            None,
+            Some(dir.clone()),
+            None,
+        )));
+        let store = cfg.polls.clone().unwrap();
+
+        let (token, name) = store.save_attachment_local("regeln.txt", b"v1").unwrap();
+        let resp = respond(
+            cfg.clone(),
+            "GET",
+            &format!("/api/files/{token}/{name}"),
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header(&resp, "x-content-type-options"), "nosniff");
+        assert_eq!(
+            header(&resp, "content-disposition"),
+            "inline; filename=\"regeln.txt\""
+        );
+        assert_eq!(
+            header(&resp, "cache-control"),
+            "private, max-age=31536000, immutable"
+        );
+
+        let (svg_tok, svg_name) = store.save_attachment_local("logo.svg", b"<svg/>").unwrap();
+        let resp = respond(
+            cfg,
+            "GET",
+            &format!("/api/files/{svg_tok}/{svg_name}"),
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header(&resp, "x-content-type-options"), "nosniff");
+        assert_eq!(
+            header(&resp, "content-disposition"),
+            "attachment; filename=\"logo.svg\""
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn json_endpoints_carry_security_headers_too() {
         for uri in ["/health", "/api/services", "/api/announcements"] {
             let resp = respond(cfg_with("", None, ""), "GET", uri, None).await;
