@@ -12,12 +12,14 @@ real OIDC login, and restores the default stack afterwards.
       the session firewall answers anonymous requests with 401 first,
       so the store-absent 404 is only visible signed in)
   P3  anonymous GET/POST walled out with 401 once enabled
-  P4  create → 201, created_by stamped, no voted_by leak, voted=false
+  P4  create → 201, created_by stamped, no voted_by leak, no `voted`
+      flag (create shape omits it — the viewer flag surfaces in P9)
   P5  validation: 1 option, 11 options, blank question, oversized
       question (301 bytes) all rejected with 400
   P6  vote → 200, voted=true, votes counted
   P7  double-vote → 409 CONFLICT (per OIDC subject)
-  P8  unknown poll id and out-of-range option → 400
+  P8  unknown poll id → 400; out-of-range option from an already-voted
+      session → 409 (conflict guard precedes index validation)
   P9  list carries voted=true + tallies for the requesting session,
       still no voted_by subjects
   P10 picked-file upload (local fallback, no cloud configured):
@@ -195,12 +197,15 @@ def main() -> int:
     p4 = [
         created.status_code == 201,
         bool(poll.get("created_by")),
+        # create responses omit `voted` entirely (viewer unknown — see
+        # Poll::public() in polls.rs: None viewer → no voted flag); the
+        # creator flag first surfaces in the list view (P9)
+        "voted" not in poll,
         "voted_by" not in poll,
-        poll.get("voted") is False,
         poll.get("votes") == [0, 0],
     ]
     (result.ok if all(p4) else result.fail)(
-        "P4 create → 201, created_by stamped, voted=false, no voted_by"
+        "P4 create → 201, created_by stamped, no voted/voted_by leak"
         if all(p4)
         else f"P4 create defect: HTTP {created.status_code}, poll={poll}"
     )
