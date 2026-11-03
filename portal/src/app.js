@@ -280,9 +280,28 @@
     }
     var MAX_MESSAGES_CLIENT = 50;
 
+    var icPollTimer = null;
+    function icStopPolling() {
+      if (icPollTimer) {
+        clearInterval(icPollTimer);
+        icPollTimer = null;
+      }
+    }
+
     function refresh() {
+      // Hidden tab: skip this tick (the visibilitychange listener below
+      // catches up the moment the tab is shown again).
+      if (document.hidden) return;
       fetch("/api/intercom?since=" + icLastId)
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          // Session gone (logged out / expired): stop polling for good —
+          // each further tick would just 401 against the gate.
+          if (r.status === 401) {
+            icStopPolling();
+            throw new Error("session expired");
+          }
+          return r.json();
+        })
         .then(function (d) {
           var latest = d.latest || 0;
           if (latest < icLastId) {
@@ -304,8 +323,13 @@
     }
 
     // Teammates' notes appear without a reload (30 s is plenty for a
-    // short-message panel; the delta keeps each poll tiny).
-    setInterval(refresh, 30 * 1000);
+    // short-message panel; the delta keeps each poll tiny). Paused while
+    // the tab is hidden — refresh() early-returns and the visibility
+    // listener below fires an immediate catch-up on show.
+    icPollTimer = setInterval(refresh, 30 * 1000);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && icPollTimer) refresh();
+    });
 
     icSend.addEventListener("click", function () {
       var text = (icText.value || "").trim();
