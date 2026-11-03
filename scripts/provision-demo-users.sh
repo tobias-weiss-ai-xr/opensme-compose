@@ -246,9 +246,11 @@ user_exists() {
     [[ -n "$(get_user_id "$1" "$2")" ]]
 }
 
-# Human users in Zitadel carry org-domain-suffixed login names
-# (tweiss@<org-domain>), so a suffix-free equals-query would miss them —
-# compare on the '@'-stem, the same way tests/05-e2e/run.py does.
+# Human users created by THIS script carry bare login names (v1
+# endpoint, see create_user); older installs and the setup-seeded admin
+# are org-domain-suffixed (tweiss@<org-domain>) — a suffix-free
+# equals-query would miss those, so compare on the '@'-stem (the same
+# way tests/05-e2e/run.py does; works for both shapes).
 get_user_id() {
     local username="$1"
     local token="$2"
@@ -267,7 +269,14 @@ delete_user() {
 create_user() {
     local json="$1"
     local token="$2"
-    api POST "/v2/users/human" "$json" "$token"
+    # Management v1 — NOT v2/users/human: the v2 endpoint auto-appends the
+    # org domain to bare usernames (UserLoginMustBeDomain=false), so a
+    # "testuser" becomes "testuser@<org-domain>". Login v2's user search
+    # matches loginNames EXACTLY, and evaluators type the bare name —
+    # Login v2 then answers "user not found". The v1 endpoint stores the
+    # userName as given (verified live against v4.19.4: loginNames stay
+    # bare; email login still works since disableLoginWithEmail is off).
+    api POST "/management/v1/users/human" "$json" "$token"
 }
 
 list_users() {
@@ -883,9 +892,11 @@ main_zitadel() {
             log "  - User $username already exists ($uid)"
             skipped=$((skipped + 1))
         else
-            # Zitadel v2 human-user shape (verified on v4.19): profile +
-            # email nested, password wrapped, isVerified so no invite mail
-            # is generated (the stack ships no SMTP relay for the IdP).
+            # Zitadel Management-v1 human-user shape (verified on
+            # v4.19.4): profile + email nested, password wrapped,
+            # isEmailVerified so no invite mail is generated (the stack
+            # ships no SMTP relay for the IdP). userName stays BARE —
+            # see create_user() for why this must be the v1 endpoint.
             local user_payload
             user_payload=$(jq -n \
                 --arg un "$username" \
@@ -896,18 +907,19 @@ main_zitadel() {
                 --arg pw "$pwd" \
                 '{
                     userName: $un,
-                    profile: { givenName: $fn, familyName: $ln, displayName: $dn },
-                    email:   { email: $em, isVerified: true },
+                    profile: { firstName: $fn, lastName: $ln, displayName: $dn },
+                    email:   { email: $em, isEmailVerified: true },
                     password: { password: $pw, changeRequired: false }
                 }')
             
             local res
             res=$(create_user "$user_payload" "$PAT") || { err "Failed to create user $username (HTTP error)"; continue; }
-            # The v2 human endpoint answers {"userId": ...}. A 200 that is NOT
-            # Zitadel JSON means the request landed on something else — the
-            # classic case is the Traefik edge routing $zt_base to another
-            # stack's vhost (curl -f cannot see that; only the payload can).
-            # Fail loudly instead of counting a phantom user as created.
+            # The v1 human endpoint answers {"userId": ...} (same key as
+            # v2). A 200 that is NOT Zitadel JSON means the request landed
+            # on something else — the classic case is the Traefik edge
+            # routing $zt_base to another stack's vhost (curl -f cannot see
+            # that; only the payload can). Fail loudly instead of counting
+            # a phantom user as created.
             uid=$(printf '%s' "$res" | jq -r '.userId // empty' 2>/dev/null || true)
             if [[ -z "$uid" ]]; then
                 err "user $username: non-Zitadel response from $zt_scheme://$zt_base —"
