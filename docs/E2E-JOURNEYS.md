@@ -305,7 +305,9 @@ is now empty, mail stays opt-in.
 | T1 | Als Nutzer sehe ich das Intercom-Panel auf dem Portal | landing page contains `id="intercom-card"`; `GET /api/intercom` lists messages |
 | T2 | Als Nutzer sende ich eine Nachricht; sie erscheint in der Liste | `POST /api/intercom` with text → 2xx, message retrievable, rendered on the page |
 | T3 | Als Nutzer wird mein Text XSS-sicher gerendert | `<script>` in text lands escaped in the page, raw in the JSON API |
-| T4 | Als Betreiber sind Nachrichten begrenzt | empty text and >2000 chars rejected with 400; store capped at 50 (FIFO) |
+| T4 | Als Betreiber sind Nachrichten begrenzt | empty text and >2000 chars rejected with 400; store capped at 50 (FIFO, `INTERCOM_MAX_MESSAGES` 10..=500); rotated-out picked-file uploads are garbage-collected |
+| T5 | Als Teammitglied sehe ich, WER eine Notiz geschrieben hat | the message carries `author` = OIDC login display name (from the portal session); rendered as a muted meta line (SSR + app.js) |
+| T6 | Neue Notizen erscheinen ohne Reload | `GET /api/intercom?since=<id>` returns only newer messages + `latest` cursor; app.js polls every 30 s and merges (delta keeps each poll tiny; store reset behind the cursor triggers a full reload) |
 
 The store is in-memory by design (v1): messages are conversational
 ephemera, not records. The journey never assumes persistence across
@@ -321,8 +323,9 @@ restarts — that is Epic P's territory for DATA, not chat.
 | U1 | Als Nutzer füge ich eine Cloud-Datei per Link hinzu | `POST` with `attachment_url` → attachment metadata (name, size, type) attached to the message |
 | U2 | Die Metadaten kommen zur Sendezeit vom Cloud-Server (Snapshot) | portal fetches HEAD at send time — name from Content-Disposition, size from Content-Length, type from Content-Type |
 | U3 | Als Betreiber akzeptiert das Portal nur die eigene Cloud als Quelle | host allowlist (`INTERCOM_ATTACHMENT_HOSTS`, default `cloud.<domain>`) — foreign hosts and ports rejected with 400 |
-| U4 | Als Angreifer kann ich SSRF nicht nutzen | IP-literal hosts, link-local targets and non-allowlisted internal services rejected; http refused unless `INTERCOM_ALLOW_HTTP=1` (dev) |
+| U4 | Als Angreifer kann ich SSRF nicht nutzen | IP-literal hosts, link-local targets and non-allowlisted internal services rejected; http refused unless `INTERCOM_ALLOW_HTTP=1` (dev); the metadata HEAD follows NO redirects — a 302 off the allowlisted host cannot smuggle foreign metadata |
 | U5 | Dateinamen mit Schadcode werden XSS-sicher gerendert | `<script>` in Content-Disposition filename lands escaped on the page |
+| U6 | Aktive Upload-Inhalte laufen nie inline im Portal-Origin | picked files with active extensions (svg/svgz/html/htm/xhtml/xml/swf) are served `Content-Disposition: attachment`; token-addressed files get `Cache-Control: private, immutable` |
 
 The portal stores a metadata SNAPSHOT at send time (the attachment stays
 in the cloud — the portal never proxies file bodies).

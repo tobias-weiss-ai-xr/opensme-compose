@@ -133,6 +133,14 @@ fn render_intercom(messages: &[intercom::IntercomMessage]) -> String {
         .iter()
         .map(|m| {
             let text = html_escape(&m.text);
+            // Author line — escaped, muted. Local HH:MM is app.js' job
+            // (no time crate in tree for SSR civil-time math).
+            let meta = m
+                .author
+                .as_deref()
+                .map(html_escape)
+                .map(|a| format!(r#"<span class="ic-meta">{a}</span>"#))
+                .unwrap_or_default();
             let att = match &m.attachment {
                 Some(a) => {
                     let url = html_escape(&a.url);
@@ -157,7 +165,7 @@ fn render_intercom(messages: &[intercom::IntercomMessage]) -> String {
                 }
                 None => String::new(),
             };
-            format!(r#"<li>{text}{att}</li>"#)
+            format!(r#"<li>{meta}{text}{att}</li>"#)
         })
         .collect()
 }
@@ -472,6 +480,7 @@ fn build_landing_page(config: &AppConfig) -> String {
         }}
         .ic-list li {{ color: var(--text); font-size: 0.92rem; line-height: 1.5; word-break: break-word; border-bottom: 1px solid var(--border); padding: 4px 0; }}
         .ic-list li:last-child {{ border-bottom: none; }}
+        .ic-list .ic-meta {{ display: block; color: var(--text-muted, #888); font-size: 0.75rem; margin-bottom: 1px; }}
         .ic-list .ic-att {{ display: block; color: var(--accent); font-size: 0.85rem; text-decoration: none; }}
         .ic-list .ic-att:hover {{ text-decoration: underline; }}
         .ic-box {{ display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.75rem; text-align: left; }}
@@ -983,6 +992,13 @@ fn build_router(config: Arc<AppConfig>) -> Router {
     router
         .merge(protected)
         .route("/metrics", get(handle_metrics))
+        // Picked-file uploads arrive as raw bodies; axum's DefaultBodyLimit
+        // (2 MiB) would silently 413 everything between 2 and 5 MiB before
+        // the handler's own MAX_UPLOAD check could produce a clean 400.
+        // One shared limit — upload routes + JSON posts live here together.
+        .layer(axum::extract::DefaultBodyLimit::max(
+            intercom::MAX_UPLOAD as usize + 1024,
+        ))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(track_metrics))
         .with_state(config)
@@ -997,8 +1013,27 @@ struct IntercomPost {
     attachment_url: Option<String>,
 }
 
-async fn handle_intercom_list(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
-    Json(serde_json::json!({ "messages": config.intercom_store.list() }))
+/// Polling-friendly listing: `?since=<id>` returns only newer messages
+/// (delta), no param = the full newest-first list. Response also carries
+/// `latest` so clients can initialize their cursor without a second hit.
+#[derive(Deserialize)]
+struct IntercomListQuery {
+    #[serde(default)]
+    since: Option<u64>,
+}
+
+async fn handle_intercom_list(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<IntercomListQuery>,
+) -> impl IntoResponse {
+    let messages = match q.since {
+        Some(since) => config.intercom_store.list_since(since),
+        None => config.intercom_store.list(),
+    };
+    Json(serde_json::json!({
+        "messages": messages,
+        "latest": config.intercom_store.latest_id(),
+    }))
 }
 
 /// Team-notes persistence layout: INTERCOM_DATA_PATH holds the JSON store,
@@ -1031,6 +1066,7 @@ struct IntercomUploadQuery {
 /// query. Posts the note directly with the stored attachment.
 async fn handle_intercom_upload(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     axum::extract::Query(q): axum::extract::Query<IntercomUploadQuery>,
     headers: axum::http::HeaderMap,
     bytes: axum::body::Bytes,
@@ -1078,7 +1114,9 @@ async fn handle_intercom_upload(
         size: Some(bytes.len() as u64),
         content_type,
     };
-    let msg = config.intercom_store.push(text, Some(attachment));
+    let msg = config
+        .intercom_store
+        .push(text, Some(session.name.clone()), Some(attachment));
     metrics::global().inc_intercom_message();
     (
         StatusCode::CREATED,
@@ -1093,16 +1131,32 @@ async fn handle_intercom_file(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Path((token, name)): axum::extract::Path<(String, String)>,
 ) -> impl IntoResponse {
-    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
     match config.intercom_store.read_attachment(&token, &name) {
-        Some((bytes, ct)) => (
-            [
-                (CONTENT_TYPE, ct),
-                (CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
-            ],
-            bytes,
-        )
-            .into_response(),
+        Some((bytes, ct)) => {
+            // Active content (svg/html/xml…) is never inline: it would
+            // run attacker JS in the portal's own origin (stored XSS).
+            let disposition = if intercom::serve_inline(&name) {
+                format!("inline; filename=\"{name}\"")
+            } else {
+                format!("attachment; filename=\"{name}\"")
+            };
+            // Token-addressed immutable content — safe to cache hard.
+            // `private`: the route is session-gated, shared caches must
+            // never store it.
+            (
+                [
+                    (CONTENT_TYPE, ct),
+                    (CONTENT_DISPOSITION, disposition),
+                    (
+                        CACHE_CONTROL,
+                        "private, max-age=31536000, immutable".to_string(),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -1315,19 +1369,31 @@ async fn handle_polls_file(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Path((token, name)): axum::extract::Path<(String, String)>,
 ) -> impl IntoResponse {
-    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
     let Some(store) = &config.polls else {
         return StatusCode::NOT_FOUND.into_response();
     };
     match store.read_attachment_local(&token, &name) {
-        Some((bytes, ct)) => (
-            [
-                (CONTENT_TYPE, ct),
-                (CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
-            ],
-            bytes,
-        )
-            .into_response(),
+        Some((bytes, ct)) => {
+            // Same active-content rule as intercom (shared mime helper).
+            let disposition = if intercom::serve_inline(&name) {
+                format!("inline; filename=\"{name}\"")
+            } else {
+                format!("attachment; filename=\"{name}\"")
+            };
+            (
+                [
+                    (CONTENT_TYPE, ct),
+                    (CONTENT_DISPOSITION, disposition),
+                    (
+                        CACHE_CONTROL,
+                        "private, max-age=31536000, immutable".to_string(),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -1381,6 +1447,7 @@ async fn resolve_cloud_attachment(
 
 async fn handle_intercom_post(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     Json(post): Json<IntercomPost>,
 ) -> impl IntoResponse {
     use axum::response::IntoResponse;
@@ -1404,7 +1471,9 @@ async fn handle_intercom_post(
             Err(e) => return bad(&e).into_response(),
         };
 
-    let msg = config.intercom_store.push(text, attachment);
+    let msg = config
+        .intercom_store
+        .push(text, Some(session.name.clone()), attachment);
     metrics::global().inc_intercom_message();
     (
         StatusCode::CREATED,
@@ -1501,6 +1570,11 @@ fn load_config() -> Arc<AppConfig> {
         session: session::SessionConfig::from_env(),
         intercom_client: {
             let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+            // The metadata HEAD must stay on the allowlisted host: without
+            // this, a 302 off the allowed cloud would make reqwest follow
+            // redirects and snapshot metadata from an arbitrary host
+            // (allowlist bypass). No attachment flow needs redirects.
+            builder = builder.redirect(reqwest::redirect::Policy::none());
             // Egress-restricted hosts reach the cloud (attachment metadata
             // HEAD, poll uploads) only through the egress proxy — same
             // wiring as the feed client.
@@ -1947,14 +2021,15 @@ mod tests {
     fn intercom_messages_rendered_escaped_into_page() {
         let cfg = cfg_with("", None, "");
         cfg.intercom_store
-            .push("note <script>alert(1)</script>".into(), None);
+            .push("note <script>alert(1)</script>".into(), None, None);
         let att = intercom::parse_attachment_metadata(
             "https://cloud.example/s/f.pdf",
             Some("application/pdf"),
             Some(2048),
             Some("attachment; filename=\"Rechnung<script>.pdf\""),
         );
-        cfg.intercom_store.push("see attached".into(), Some(att));
+        cfg.intercom_store
+            .push("see attached".into(), None, Some(att));
         let html = build_landing_page(&cfg);
         assert!(!html.contains("<script>alert(1)"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));

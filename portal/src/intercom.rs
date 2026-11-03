@@ -23,6 +23,9 @@ pub const MAX_URL: usize = 2048;
 pub const MAX_MESSAGES: usize = 50;
 pub const MAX_UPLOAD: u64 = 5 * 1024 * 1024;
 
+/// Env knob for the FIFO cap (10..=500, default MAX_MESSAGES).
+pub const ENV_MAX_MESSAGES: &str = "INTERCOM_MAX_MESSAGES";
+
 /// Attachment reference snapshot taken when the message was sent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Attachment {
@@ -37,6 +40,10 @@ pub struct Attachment {
 pub struct IntercomMessage {
     pub id: u64,
     pub text: String,
+    /// Login display name of the sender — None only for pre-author
+    /// persisted stores (serde default keeps old JSON loadable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
     pub created_at: String,
@@ -95,6 +102,8 @@ impl IntercomConfig {
 pub struct IntercomStore {
     messages: RwLock<VecDeque<IntercomMessage>>,
     next_id: AtomicU64,
+    /// FIFO cap — INTERCOM_MAX_MESSAGES, clamped 10..=500.
+    max_messages: usize,
     /// JSON persistence file; None = in-memory only.
     data_path: Option<PathBuf>,
     /// Directory for picked-file uploads; None = uploads disabled.
@@ -106,6 +115,7 @@ impl Default for IntercomStore {
         Self {
             messages: RwLock::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
+            max_messages: MAX_MESSAGES,
             data_path: None,
             attachments_dir: None,
         }
@@ -117,9 +127,15 @@ impl IntercomStore {
     /// uploads under `attachments_dir`. Loads existing messages (missing
     /// file = fresh store; corrupt file = rename aside, start fresh).
     pub fn open(data_path: Option<PathBuf>, attachments_dir: Option<PathBuf>) -> Self {
+        let max_messages = std::env::var(ENV_MAX_MESSAGES)
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .map(|n| n.clamp(10, 500))
+            .unwrap_or(MAX_MESSAGES);
         let store = Self {
             messages: RwLock::new(VecDeque::new()),
             next_id: AtomicU64::new(1),
+            max_messages,
             data_path,
             attachments_dir,
         };
@@ -198,7 +214,12 @@ impl IntercomStore {
         })
     }
 
-    fn push_internal(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
+    fn push_internal(
+        &self,
+        text: String,
+        author: Option<String>,
+        attachment: Option<Attachment>,
+    ) -> IntercomMessage {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         // Unix seconds — enough for ordering; no extra time crate needed.
         let created_at = std::time::SystemTime::now()
@@ -208,24 +229,63 @@ impl IntercomStore {
         IntercomMessage {
             id,
             text,
+            author,
             attachment,
             created_at,
         }
     }
 
-    pub fn push(&self, text: String, attachment: Option<Attachment>) -> IntercomMessage {
-        let msg = self.push_internal(text, attachment);
+    pub fn push(
+        &self,
+        text: String,
+        author: Option<String>,
+        attachment: Option<Attachment>,
+    ) -> IntercomMessage {
+        let msg = self.push_internal(text, author, attachment);
         // Single write-lock for mutate + snapshot: no second acquisition,
         // and the persisted snapshot can never race another push.
         let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
         messages.push_back(msg.clone());
-        while messages.len() > MAX_MESSAGES {
-            messages.pop_front();
+        // Rotated-out messages: their picked-file uploads die with the
+        // note (cloud links survive — the file stays in the cloud).
+        let mut dropped = Vec::new();
+        while messages.len() > self.max_messages {
+            if let Some(old) = messages.pop_front() {
+                dropped.push(old);
+            }
         }
         let snapshot: Vec<IntercomMessage> = messages.iter().cloned().collect();
         drop(messages);
         self.persist(&snapshot);
+        for old in dropped {
+            self.gc_local_attachment(&old);
+        }
         msg
+    }
+
+    /// Best-effort delete of a rotated-out message's picked-file upload:
+    /// only exact /api/intercom/files/<token>/<name> URLs, laid out as
+    /// attachments_dir/<token>_<name>. Never touches anything else.
+    fn gc_local_attachment(&self, msg: &IntercomMessage) {
+        let Some(dir) = self.attachments_dir.as_ref() else {
+            return;
+        };
+        let Some(att) = msg.attachment.as_ref() else {
+            return;
+        };
+        let Some(rest) = att.url.strip_prefix("/api/intercom/files/") else {
+            return;
+        };
+        let Some((token, name)) = rest.split_once('/') else {
+            return;
+        };
+        if token.is_empty()
+            || !token.bytes().all(|b| b.is_ascii_hexdigit())
+            || sanitize_name(name) != name
+        {
+            return;
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{token}_{name}")));
     }
 
     pub fn list(&self) -> Vec<IntercomMessage> {
@@ -236,6 +296,30 @@ impl IntercomStore {
             .rev()
             .cloned()
             .collect()
+    }
+
+    /// Delta listing for polling clients: newest-first messages with
+    /// id > `since` (since = 0 behaves like a full list()).
+    pub fn list_since(&self, since: u64) -> Vec<IntercomMessage> {
+        self.messages
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .rev()
+            .filter(|m| m.id > since)
+            .cloned()
+            .collect()
+    }
+
+    /// Highest id currently held (0 on an empty store) — lets polling
+    /// clients initialize their cursor.
+    pub fn latest_id(&self) -> u64 {
+        self.messages
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .back()
+            .map(|m| m.id)
+            .unwrap_or(0)
     }
 }
 
@@ -286,6 +370,18 @@ pub(crate) fn mime_for(name: &str) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
+}
+
+/// Active-content extensions are served with `Content-Disposition:
+/// attachment` — never inline. An inline `image/svg+xml` (or html/xml)
+/// from the own origin executes attacker JS in the PORTAL's origin and
+/// can act on the victim's session (stored XSS via picked file).
+pub(crate) fn serve_inline(name: &str) -> bool {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    !matches!(
+        ext.as_str(),
+        "svg" | "svgz" | "html" | "htm" | "xhtml" | "xml" | "swf"
+    )
 }
 
 // ── Validation ────────────────────────────────────────────────────────────
@@ -533,7 +629,7 @@ mod tests {
     fn store_caps_fifo_and_lists_newest_first() {
         let store = IntercomStore::default();
         for i in 0..(MAX_MESSAGES + 10) {
-            store.push(format!("m{i}"), None);
+            store.push(format!("m{i}"), None, None);
         }
         let listed = store.list();
         assert_eq!(listed.len(), MAX_MESSAGES);
@@ -550,8 +646,10 @@ mod tests {
             Some(7),
             Some("attachment; filename=\"a.pdf\""),
         );
-        let m = store.push("see attached".into(), Some(att.clone()));
-        assert_eq!(store.list()[0].attachment.as_ref().unwrap().name, "a.pdf");
+        let m = store.push("see attached".into(), Some("Bob".into()), Some(att.clone()));
+        let stored = &store.list()[0];
+        assert_eq!(stored.attachment.as_ref().unwrap().name, "a.pdf");
+        assert_eq!(stored.author.as_deref(), Some("Bob"));
         assert_eq!(m.id, 1);
     }
 
@@ -565,7 +663,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         let store = IntercomStore::open(Some(path.clone()), None);
-        store.push("persistent".into(), None);
+        store.push("persistent".into(), Some("Anna".into()), None);
         drop(store);
 
         let store2 = IntercomStore::open(Some(path.clone()), None);
@@ -573,7 +671,10 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].text, "persistent");
         // id counter continues after reload
-        assert_eq!(store2.push("second".into(), None).id, listed[0].id + 1);
+        assert_eq!(
+            store2.push("second".into(), None, None).id,
+            listed[0].id + 1
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -586,7 +687,7 @@ mod tests {
 
         let store = IntercomStore::open(Some(path.clone()), None);
         for i in 0..(MAX_MESSAGES + 5) {
-            store.push(format!("m{i}"), None);
+            store.push(format!("m{i}"), None, None);
         }
         drop(store);
         let store2 = IntercomStore::open(Some(path), None);
@@ -607,6 +708,96 @@ mod tests {
         assert!(store.list().is_empty());
         assert!(path.with_extension("json.corrupt").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── author + delta listing ───────────────────────────────────────
+
+    #[test]
+    fn author_stamped_and_persisted() {
+        let dir = std::env::temp_dir().join(format!("ic-test-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+        let _ = std::fs::remove_file(&path);
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        store.push("hallo".into(), Some("Tobias".into()), None);
+        drop(store);
+
+        let re = IntercomStore::open(Some(path.clone()), None);
+        assert_eq!(re.list()[0].author.as_deref(), Some("Tobias"));
+
+        // Pre-author JSON (no author key) still loads: author = None.
+        std::fs::write(&path, r#"[{"id":1,"text":"legacy","created_at":"1"}]"#).unwrap();
+        let legacy = IntercomStore::open(Some(path), None);
+        assert_eq!(legacy.list()[0].author, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_since_is_delta_and_latest_id_tracks() {
+        let store = IntercomStore::default();
+        assert_eq!(store.latest_id(), 0);
+        for i in 0..5 {
+            store.push(format!("m{i}"), None, None);
+        }
+        assert_eq!(store.latest_id(), 5);
+        let delta = store.list_since(3);
+        assert_eq!(delta.iter().map(|m| m.id).collect::<Vec<_>>(), vec![5, 4]);
+        assert!(store.list_since(5).is_empty());
+        // since=0 = full list
+        assert_eq!(store.list_since(0).len(), store.list().len());
+    }
+
+    #[test]
+    fn rotated_upload_files_are_gc_collected() {
+        let dir = std::env::temp_dir().join(format!(
+            "ic-test-gc-{}-{}",
+            std::process::id(),
+            random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Push MAX+2 notes each with an upload; the first notes rotate out
+        // and their upload files must be gc-collected, later ones stay.
+        let data = dir.join("data.json");
+        let atts = dir.join("attachments");
+        std::fs::create_dir_all(&atts).unwrap();
+        let store = IntercomStore::open(Some(data), Some(atts.clone()));
+        let mut first_url = None;
+        for i in 0..(MAX_MESSAGES + 2) {
+            let bytes = format!("body-{i}").into_bytes();
+            let (token, name) = store.save_attachment(&format!("f{i}.txt"), &bytes).unwrap();
+            let att = Attachment {
+                url: format!("/api/intercom/files/{token}/{name}"),
+                name: name.clone(),
+                size: Some(bytes.len() as u64),
+                content_type: "text/plain".into(),
+            };
+            if i == 0 {
+                first_url = Some(att.url.clone());
+            }
+            store.push(format!("m{i}"), None, Some(att));
+        }
+        // The first message rotated out — its upload file must be gone.
+        let remaining = std::fs::read_dir(&atts).unwrap().count();
+        assert_eq!(remaining, MAX_MESSAGES, "rotated file must be gc'd");
+        let first = first_url.unwrap();
+        let rest = first.strip_prefix("/api/intercom/files/").unwrap();
+        let (token, name) = rest.split_once('/').unwrap();
+        assert!(!atts.join(format!("{token}_{name}")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn serve_inline_blocks_active_content() {
+        assert!(!serve_inline("evil.svg"));
+        assert!(!serve_inline("evil.svgz"));
+        assert!(!serve_inline("page.html"));
+        assert!(!serve_inline("data.xml"));
+        // no extension → rsplit gives the whole name → not blocked → inline
+        assert!(serve_inline("noext"));
+        assert!(serve_inline("photo.png"));
+        assert!(serve_inline("report.pdf"));
+        assert!(serve_inline("notes.txt"));
     }
 
     // ── picked-file attachments ─────────────────────────────────────

@@ -213,11 +213,31 @@
       return (bytes / 1048576).toFixed(1) + " MB";
     }
 
+    function fmtTime(unixSecs) {
+      if (!unixSecs) return "";
+      var d = new Date(Number(unixSecs) * 1000);
+      if (isNaN(d.getTime())) return "";
+      var hh = String(d.getHours()).padStart(2, "0");
+      var mm = String(d.getMinutes()).padStart(2, "0");
+      return hh + ":" + mm;
+    }
+
     function renderMessages(messages) {
       icList.textContent = "";
       (messages || []).forEach(function (m) {
         var li = document.createElement("li");
-        li.textContent = m.text;
+        // meta line: author · time — textContent only, never innerHTML
+        var meta = [];
+        if (m.author) meta.push(m.author);
+        var t = fmtTime(m.created_at);
+        if (t) meta.push(t);
+        if (meta.length) {
+          var span = document.createElement("span");
+          span.className = "ic-meta";
+          span.textContent = meta.join(" · ");
+          li.appendChild(span);
+        }
+        li.appendChild(document.createTextNode(m.text));
         if (m.attachment) {
           var a = document.createElement("a");
           a.className = "ic-att";
@@ -235,12 +255,52 @@
       });
     }
 
+    // Delta polling: keep a client-side mirror of the newest-first list,
+    // fetch only messages newer than our cursor (?since=<id>), merge and
+    // re-render. First load (cursor 0) pulls everything in one call.
+    var icAll = [];
+    var icLastId = 0;
+
+    function mergeMessages(incoming) {
+      if (!(incoming && incoming.length)) return;
+      var byId = {};
+      icAll.forEach(function (m) { byId[m.id] = m; });
+      incoming.forEach(function (m) { byId[m.id] = m; });
+      icAll = Object.keys(byId)
+        .map(function (k) { return byId[k]; })
+        .sort(function (a, b) { return a.id - b.id; })
+        .slice(-MAX_MESSAGES_CLIENT);
+      if (icAll.length) icLastId = icAll[icAll.length - 1].id;
+      renderMessages(icAll.slice().reverse());
+    }
+    var MAX_MESSAGES_CLIENT = 50;
+
     function refresh() {
-      fetch("/api/intercom")
+      fetch("/api/intercom?since=" + icLastId)
         .then(function (r) { return r.json(); })
-        .then(function (d) { renderMessages(d.messages); })
+        .then(function (d) {
+          var latest = d.latest || 0;
+          if (latest < icLastId) {
+            // Store reset behind our cursor (portal restart, fresh store):
+            // ids restart at 1 — the stale cursor would hide every new
+            // note. Full reload and merge from scratch.
+            icAll = [];
+            icLastId = 0;
+            fetch("/api/intercom?since=0")
+              .then(function (r2) { return r2.json(); })
+              .then(function (full) { mergeMessages(full.messages); })
+              .catch(function () {});
+            return;
+          }
+          if (latest) icLastId = latest;
+          mergeMessages(d.messages);
+        })
         .catch(function () {});
     }
+
+    // Teammates' notes appear without a reload (30 s is plenty for a
+    // short-message panel; the delta keeps each poll tiny).
+    setInterval(refresh, 30 * 1000);
 
     icSend.addEventListener("click", function () {
       var text = (icText.value || "").trim();

@@ -221,6 +221,38 @@ def main() -> int:
             if t2_page else "note text rendered unescaped on the page!"
         )
 
+        # T5: the note carries the LOGIN NAME as author (from the OIDC
+        # session) — teammates see who wrote it
+        who = session.get(portal + "/api/session", timeout=T).json()
+        login_name = ((who.get("user") or {}).get("name")) or ""
+        t5_author = sent.json().get("message", {}).get("author") or ""
+        (result.ok if (login_name and t5_author == login_name) else result.fail)(
+            f"note stamped with author '{login_name}'"
+            if (login_name and t5_author == login_name)
+            else f"author missing/mismatch: got '{t5_author}', session name '{login_name}'"
+        )
+
+        # T6: delta listing — ?since=<id> returns only newer notes plus a
+        # `latest` cursor (30 s polling stays cheap)
+        sent2 = session.post(portal + "/api/intercom",
+                             json={"text": "delta-poll note"}, timeout=T)
+        id2 = sent2.json().get("message", {}).get("id", 0)
+        delta = session.get(portal + f"/api/intercom?since={id2 - 1}",
+                            timeout=T).json()
+        delta_ids = [m.get("id") for m in (delta.get("messages") or [])]
+        t6_ok = (
+            sent2.status_code == 201
+            and id2 in delta_ids
+            and all(i >= id2 for i in delta_ids)
+            and delta.get("latest", 0) >= id2
+            and "Team-Meet" not in " ".join(
+                str(m.get("text")) for m in (delta.get("messages") or []))
+        )
+        (result.ok if t6_ok else result.fail)(
+            "delta listing (?since) returns only newer notes + latest cursor"
+            if t6_ok else f"delta listing broken: ids={delta_ids[:5]}, latest={delta.get('latest')}"
+        )
+
         # T3: script payloads are XSS-safely rendered (spec epic T)
         script_resp = session.post(
             portal + "/api/intercom",
