@@ -80,6 +80,21 @@ export function filterServices<T extends { name: string }>(
   return services.filter((s) => s.name.toLowerCase().includes(q));
 }
 
+/** Unix seconds → "gerade eben" / "vor 3 Min." / "vor 2 Std." / … */
+export function relativeTime(unixSeconds: number | null | undefined): string {
+  if (unixSeconds == null || Number.isNaN(unixSeconds)) return "";
+  const seconds = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (seconds < 60) return "gerade eben";
+  if (seconds < 3600) return `vor ${Math.floor(seconds / 60)} Min.`;
+  if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)} Std.`;
+  if (seconds < 7 * 86400) return `vor ${Math.floor(seconds / 86400)} Tagen`;
+  return new Date(unixSeconds * 1000).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 const VOTED_KEY = "opensme-poll-voted";
 
 /** Poll "already voted" bookkeeping in localStorage (per-browser only). */

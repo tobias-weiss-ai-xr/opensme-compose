@@ -12,6 +12,9 @@ Epic T (basic messaging), Epic U (cloud attachments), and Epic AH (resilience):
   T3  script tags in text XSS-escaped on page but raw in JSON API
   T4  blank and oversized notes rejected with 400
   T4b oversized attachment URLs rejected (MAX_URL guard)
+  T5  picked-file upload roundtrip — serving carries nosniff +
+      disposition + immutable caching, POST response carries the author
+  T5b active-content upload (svg) forced to attachment disposition
   U1  a cloud file attached by URL lands with real metadata
       (name from Content-Disposition, size, content-type)
   U2  the metadata is a snapshot from the real cloud answer — the
@@ -194,6 +197,55 @@ def main() -> int:
             "oversized attachment URLs rejected"
             if huge.status_code == 400
             else f"huge URL accepted: HTTP {huge.status_code}"
+        )
+
+        # T5: picked-file upload — roundtrip plus hardened serving headers
+        # (nosniff is the global middleware, here it is pinned for the file
+        # route; disposition depends on the extension blocklist)
+        up = session.post(portal + "/api/intercom/upload",
+                          params={"text": "mit datei", "filename": "brief.txt"},
+                          data=b"brief-inhalt", timeout=T)
+        ok_up = up.status_code == 201
+        up_msg = up.json().get("message", {}) if ok_up else {}
+        up_att = up_msg.get("attachment") or {}
+        file_url = up_att.get("url", "")
+        served = session.get(portal + file_url, timeout=T) \
+            if file_url.startswith("/api/") else None
+        t5 = [
+            ok_up,
+            served is not None and served.status_code == 200,
+            served is not None and served.content == b"brief-inhalt",
+            served is not None
+            and served.headers.get("X-Content-Type-Options") == "nosniff",
+            served is not None
+            and served.headers.get("Content-Disposition") == 'inline; filename="brief.txt"',
+            served is not None
+            and "immutable" in served.headers.get("Cache-Control", ""),
+            ok_up and up_msg.get("author") is not None,
+        ]
+        (result.ok if all(t5) else result.fail)(
+            "picked-file upload roundtrip with hardened serving headers"
+            if all(t5)
+            else f"upload/serving defect: HTTP {up.status_code}, url={file_url}"
+        )
+
+        # T5b: active content (svg) is never served inline
+        up_svg = session.post(portal + "/api/intercom/upload",
+                              params={"text": "svg note", "filename": "grau.svg"},
+                              data=b"<svg/>", timeout=T)
+        svg_att = (up_svg.json().get("message", {}) or {}).get("attachment") or {}
+        svg_url = svg_att.get("url", "")
+        svg_served = session.get(portal + svg_url, timeout=T) \
+            if svg_url.startswith("/api/") else None
+        t5b = (
+            up_svg.status_code == 201
+            and svg_served is not None
+            and svg_served.status_code == 200
+            and svg_served.headers.get("Content-Disposition", "").startswith("attachment")
+        )
+        (result.ok if t5b else result.fail)(
+            "active-content upload forced to attachment disposition"
+            if t5b else f"svg serving not hardened: {svg_url}"
         )
 
         # T2: a note lands — raw in the API, escaped on the page

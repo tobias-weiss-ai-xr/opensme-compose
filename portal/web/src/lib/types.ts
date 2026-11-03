@@ -42,12 +42,20 @@ export interface Attachment {
 }
 
 export interface IntercomMessage {
+  /** Monotonic store id — React key + delta-poll cursor. */
+  id: number;
   text: string;
+  /** Login name of the author (absent on pre-author stores). */
+  author?: string;
+  /** Unix seconds (server-truth ordering, client-side relative time). */
+  created_at?: string;
   attachment: Attachment | null;
 }
 
 export interface IntercomListResponse {
   messages: IntercomMessage[];
+  /** Highest id currently held — the delta-poll cursor seed. */
+  latest: number;
 }
 
 export interface PollOption {

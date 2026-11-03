@@ -2126,6 +2126,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn intercom_file_serving_carries_nosniff_and_disposition() {
+        // Picked-file serving must carry the SAME security headers as the
+        // HTML surfaces: nosniff denies browsers content-type sniffing on
+        // a served attachment (completes the serve_inline/disposition
+        // hardening — an octet-stream answer sniffed as html/script would
+        // otherwise still run in the portal origin).
+        let dir = std::env::temp_dir().join(format!(
+            "ic-http-{}-{}",
+            std::process::id(),
+            intercom::random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = cfg_with("", None, "");
+        cfg.intercom_store = Arc::new(intercom::IntercomStore::open(None, Some(dir.clone())));
+        let (token, name) = cfg
+            .intercom_store
+            .save_attachment("note.txt", b"body")
+            .unwrap();
+
+        // Benign extension: inline + nosniff + private immutable caching.
+        let resp = respond(
+            cfg.clone(),
+            "GET",
+            &format!("/api/intercom/files/{token}/{name}"),
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header(&resp, "x-content-type-options"), "nosniff");
+        assert_eq!(
+            header(&resp, "content-disposition"),
+            "inline; filename=\"note.txt\""
+        );
+        assert_eq!(
+            header(&resp, "cache-control"),
+            "private, max-age=31536000, immutable"
+        );
+
+        // Active content: forced to attachment — never inline.
+        let (svg_tok, svg_name) = cfg
+            .intercom_store
+            .save_attachment("evil.svg", b"<svg/>")
+            .unwrap();
+        let resp = respond(
+            cfg.clone(),
+            "GET",
+            &format!("/api/intercom/files/{svg_tok}/{svg_name}"),
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(header(&resp, "x-content-type-options"), "nosniff");
+        assert_eq!(
+            header(&resp, "content-disposition"),
+            "attachment; filename=\"evil.svg\""
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn json_endpoints_carry_security_headers_too() {
         for uri in ["/health", "/api/services", "/api/announcements"] {
             let resp = respond(cfg_with("", None, ""), "GET", uri, None).await;

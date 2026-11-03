@@ -55,8 +55,10 @@ export function fetchFeeds(): Promise<FeedResponse> {
   return getJson<FeedResponse>("/api/feeds").catch(() => ({ columns: [] }));
 }
 
-export function fetchIntercom(): Promise<IntercomListResponse> {
-  return getJson<IntercomListResponse>("/api/intercom");
+/** Full list (no cursor) or delta `?since=<id>` (newest-first). */
+export function fetchIntercom(since?: number): Promise<IntercomListResponse> {
+  const qs = since != null && since > 0 ? `?since=${since}` : "";
+  return getJson<IntercomListResponse>(`/api/intercom${qs}`);
 }
 
 export interface IntercomPayload {
@@ -64,7 +66,9 @@ export interface IntercomPayload {
   attachment_url?: string;
 }
 
-export async function postIntercom(payload: IntercomPayload): Promise<IntercomMessage> {
+export async function postIntercom(
+  payload: IntercomPayload,
+): Promise<{ message: IntercomMessage }> {
   const res = await fetch("/api/intercom", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -81,13 +85,13 @@ export async function postIntercom(payload: IntercomPayload): Promise<IntercomMe
     }
     throw new Error(error);
   }
-  return res.json() as Promise<IntercomMessage>;
+  return res.json() as Promise<{ message: IntercomMessage }>;
 }
 
 export async function postIntercomUpload(
   text: string,
   file: File,
-): Promise<IntercomMessage> {
+): Promise<{ message: IntercomMessage }> {
   const url = `/api/intercom/upload?text=${encodeURIComponent(text)}&filename=${encodeURIComponent(file.name)}`;
   const res = await fetch(url, {
     method: "POST",
@@ -105,7 +109,7 @@ export async function postIntercomUpload(
     }
     throw new Error(error);
   }
-  return res.json() as Promise<IntercomMessage>;
+  return res.json() as Promise<{ message: IntercomMessage }>;
 }
 
 export async function chatWithAi(req: AiChatRequest): Promise<AiChatResponse> {

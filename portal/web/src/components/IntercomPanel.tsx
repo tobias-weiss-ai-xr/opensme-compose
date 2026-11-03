@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { humanSize } from "@/lib/format";
+import { humanSize, relativeTime } from "@/lib/format";
 import {
   AuthError,
   fetchIntercom,
@@ -11,10 +11,20 @@ import {
 import LoginRequired from "@/components/LoginRequired";
 import type { IntercomMessage } from "@/lib/types";
 
+/** Delta-poll cadence (ms) — pauses entirely while the tab is hidden. */
+const POLL_MS = 7000;
+/** Client-side render cap — mirrors the server FIFO cap (INTERCOM_MAX_MESSAGES default). */
+const MAX_RENDERED = 50;
+
 /**
  * Team-notes panel (intercom): short notes with optional cloud attachment.
  * Native fetch against the same-origin API (rewritten to the Rust backend).
  * Renders messages as text nodes — note text is user-provided.
+ *
+ * Live updates via the backend's delta endpoint: poll `?since=<cursor>`
+ * every 7s while the tab is visible (visibilitychange triggers an
+ * immediate catch-up on show). After sending, the POST response is
+ * prepended directly — no extra roundtrip.
  */
 export default function IntercomPanel() {
   const [messages, setMessages] = useState<IntercomMessage[]>([]);
@@ -25,20 +35,80 @@ export default function IntercomPanel() {
   const [out, setOut] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const latestRef = useRef(0);
+  const authRef = useRef(false);
+  const pollingRef = useRef(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await fetchIntercom();
-      setMessages(data.messages);
-    } catch (err) {
-      if (err instanceof AuthError) setAuthRequired(true);
-      /* keep last known list */
-    }
+  const markAuthRequired = useCallback(() => {
+    authRef.current = true;
+    setAuthRequired(true);
   }, []);
 
+  /** Merge incoming notes at the top, dedupe by id, cap the render list. */
+  const mergeIncoming = useCallback((incoming: IntercomMessage[]) => {
+    if (incoming.length === 0) return;
+    setMessages((prev) => {
+      const seen = new Set(prev.map((m) => m.id));
+      const fresh = incoming.filter((m) => !seen.has(m.id));
+      if (fresh.length === 0) return prev;
+      return [...fresh, ...prev].slice(0, MAX_RENDERED);
+    });
+  }, []);
+
+  const fullLoad = useCallback(async () => {
+    try {
+      const data = await fetchIntercom();
+      latestRef.current = data.latest;
+      setMessages(data.messages.slice(0, MAX_RENDERED));
+    } catch (err) {
+      if (err instanceof AuthError) markAuthRequired();
+      /* keep last known list */
+    }
+  }, [markAuthRequired]);
+
+  const pollDelta = useCallback(async () => {
+    if (authRef.current || pollingRef.current) return;
+    pollingRef.current = true;
+    try {
+      const since = latestRef.current;
+      const data = await fetchIntercom(since > 0 ? since : undefined);
+      // Store restarted behind us (reset ids): latest < cursor → resync
+      // with a full load instead of an eternally-empty delta.
+      if (data.latest < latestRef.current) {
+        latestRef.current = 0;
+        await fullLoad();
+        return;
+      }
+      latestRef.current = data.latest;
+      mergeIncoming(data.messages);
+    } catch (err) {
+      if (err instanceof AuthError) markAuthRequired();
+      /* transient — next tick retries */
+    } finally {
+      pollingRef.current = false;
+    }
+  }, [fullLoad, markAuthRequired, mergeIncoming]);
+
+  // Initial load (full list seeds the cursor).
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void fullLoad();
+  }, [fullLoad]);
+
+  // Delta polling: 7s cadence, skipped while hidden, immediate catch-up
+  // on visibilitychange.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void pollDelta();
+    }, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) void pollDelta();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [pollDelta]);
 
   function onFileChange(f: File | null) {
     setFile(f);
@@ -54,23 +124,29 @@ export default function IntercomPanel() {
     setBusy(true);
     setOut("…");
     try {
+      let created: IntercomMessage;
       if (file) {
-        await postIntercomUpload(trimmed, file);
+        created = (await postIntercomUpload(trimmed, file)).message;
       } else {
-        await postIntercom({
-          text: trimmed,
-          ...(url.trim() ? { attachment_url: url.trim() } : {}),
-        });
+        created = (
+          await postIntercom({
+            text: trimmed,
+            ...(url.trim() ? { attachment_url: url.trim() } : {}),
+          })
+        ).message;
       }
+      // The POST returns the stored note — prepend it directly instead
+      // of triggering another fetch roundtrip.
+      latestRef.current = Math.max(latestRef.current, created.id);
+      mergeIncoming([created]);
       setText("");
       setUrl("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       setOut(null);
-      await refresh();
     } catch (err) {
       setOut(`Not sent: ${err instanceof Error ? err.message : String(err)}`);
-      if (err instanceof AuthError) setAuthRequired(true);
+      if (err instanceof AuthError) markAuthRequired();
     } finally {
       setBusy(false);
     }
@@ -96,9 +172,19 @@ export default function IntercomPanel() {
             {messages.length === 0 && (
               <li className="ic-empty">No notes yet — start the conversation.</li>
             )}
-            {messages.map((m, i) => (
-              <li key={`${m.text}-${i}`}>
+            {messages.map((m) => (
+              <li key={m.id}>
                 {m.text}
+                {(m.author || m.created_at) && (
+                  <span className="ic-meta text-xs text-dim">
+                    {[
+                      m.author ? `von ${m.author}` : null,
+                      relativeTime(m.created_at ? Number(m.created_at) : null),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                )}
                 {m.attachment && (
                   <a
                     className="ic-att"
