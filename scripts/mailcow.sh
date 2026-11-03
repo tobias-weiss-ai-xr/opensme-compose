@@ -242,22 +242,41 @@ ensure_router() {
   #    the public edge must never serve the API (the journey proves it).
   #    Journeys call the API from inside the nginx container (localhost).
   if ! grep -qF "${MARK_BEGIN}" "${DYN}"; then
-    cat >> "${DYN}" <<EOF
-${MARK_BEGIN}
-  routers:
-    mailcow-ui:
-      rule: "Host(\`${MAILCOW_HOSTNAME}\`)"
-      entrypoints: [websecure]
-      service: mailcow-web
-      tls: {}
-  services:
-    mailcow-web:
-      loadBalancer:
-        servers:
-          - url: "http://nginx-mailcow:${MAILCOW_HTTP_PORT:-28080}"
-${MARK_END}
-EOF
-    info "router injected into traefik/dynamic.yml (Host ${MAILCOW_HOSTNAME})"
+    # Insert INTO the http: section — not a blind append. Until 0d6e9ef the
+    # file happened to END inside the http: block, so `cat >>` worked by
+    # accident; since the tls: block (lab defaultCertificate) closes the
+    # section, a plain append lands `routers:` UNDER `tls:` and Traefik
+    # never creates the router (CI mailcow journey: 404 on every vhost).
+    python3 - "${DYN}" "${MARK_BEGIN}" "${MARK_END}" "${MAILCOW_HOSTNAME}" "${MAILCOW_HTTP_PORT:-28080}" <<'PYEOF'
+import sys
+path, mark_b, mark_e, host, port = sys.argv[1:6]
+block = (
+    f"{mark_b}\n"
+    "  routers:\n"
+    "    mailcow-ui:\n"
+    f"      rule: \"Host(`{host}`)\"\n"
+    "      entrypoints: [websecure]\n"
+    "      service: mailcow-web\n"
+    "      tls: {}\n"
+    "  services:\n"
+    "    mailcow-web:\n"
+    "      loadBalancer:\n"
+    "        servers:\n"
+    f"          - url: \"http://nginx-mailcow:{port}\"\n"
+    f"{mark_e}\n"
+)
+src = open(path).read()
+lines = src.splitlines(keepends=True)
+tls_idx = next((i for i, ln in enumerate(lines) if ln.startswith("tls:")), None)
+if tls_idx is None:
+    # no tls section yet — appending after the http: block is safe
+    open(path, "a").write("\n" + block)
+    print("→ mailcow router appended (no tls section)")
+else:
+    lines.insert(tls_idx, block)
+    open(path, "w").write("".join(lines))
+    print("→ mailcow router inserted before tls: section")
+PYEOF
   fi
 }
 
