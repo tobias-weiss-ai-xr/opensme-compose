@@ -98,9 +98,10 @@ Modes:
 
 Options:
   --app NAME         which client to ensure/remove: opencloud (default),
-                     portal, notes, synapse, ticketing, sogo, paperless or
-                     operaton — selects the redirect URIs and the .env keys
-                     the Zitadel-issued credentials are persisted under
+                     portal, notes, synapse, ticketing, sogo, paperless,
+                     operaton or invoiceninja — selects the redirect URIs and
+                     the .env keys the Zitadel-issued credentials are
+                     persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -129,7 +130,7 @@ while [[ $# -gt 0 ]]; do
     --remove)   MODE=remove; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless|operaton)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -316,8 +317,25 @@ case "$APP_KIND" in
     # explicitly next to the callback path.
     POST_LOGOUT_OVERRIDE=("https://${app_domain}/" "https://${app_domain}/login/oauth2/code/operaton")
     ;;
+  invoiceninja)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-invoiceninja"
+    CLIENT_ID_KEY="INVOICENINJA_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="INVOICENINJA_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
+    # Invoice Ninja v5.13 generic OIDC (config/services.php -> services.oidc,
+    # Socialite 'oidc' driver). Callback is FIXED by the app: $APP_URL/auth/oidc.
+    # Socialite (socialiteproviders/manager) authenticates at the token
+    # endpoint with client_secret_post (credentials in body) + PKCE S256, so
+    # this app must be POST (default BASIC would answer invalid_client).
+    app_domain="$(env_get INVOICE_DOMAIN "invoices.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get INVOICENINJA_OIDC_CLIENT_ID opensme-invoiceninja)"
+    base_paths=("/auth/oidc")
+    USE_POST_AUTH=1
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless|operaton)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja)"
     exit 1
     ;;
 esac
@@ -492,6 +510,34 @@ enforce_auth_method_none() {
   esac
 }
 
+# ── client_secret_post auth-method enforcement (Socialite 'oidc' driver) ────
+enforce_auth_method_post() {
+  # enforce_auth_method_post PID APP_ID — force OIDC_AUTH_METHOD_TYPE_POST
+  # (confidential client posting its secret in the token request body). Used
+  # for Invoice Ninja: its Socialite 'oidc' provider (Laravel
+  # SocialiteProviders/Manager) sends client_secret in the form body, so a
+  # BASIC app would be answered with invalid_client at token exchange.
+  local pid="$1" app_id="$2"
+  local resp code
+  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
+             '{"authMethodType":"OIDC_AUTH_METHOD_TYPE_POST"}' 2>/dev/null || true)"
+  code="$(api_http)"
+  case "$code" in
+    2??)
+      ok "Invoice Ninja app uses client_secret_post (auth method POST) (HTTP ${code})" ;;
+    *)
+      if [[ "$resp" == *"No changes"* ]]; then
+        ok "Invoice Ninja app already client_secret_post — Zitadel: 'no changes' (HTTP ${code})"
+      else
+        err "Could not set Invoice Ninja auth method POST (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
+        err "Invoice Ninja OIDC login will fail until the app is POST — fix via"
+        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
+        return 1
+      fi
+      ;;
+  esac
+}
+
 # ── persist a KEY=value into .env (upsert) ──────────────────────────────────
 # NOTE: /opt/opensme-compose/.env is a symlink onto compose/.env — a rename
 # (mv) would replace the symlink with a regular file. Write through instead.
@@ -531,7 +577,10 @@ if [[ "$DRY_RUN" == true ]]; then
   info "     -> if found: enforce access token type ${TOKEN_TYPE} via"
   info "        PUT .../apps/{id}/oidc_config, then report 'already registered', exit 0"
   info "  3. otherwise: create project '$APP_PROJECT' (if needed) and the OIDC app"
-  info "     (web, authorization-code, client_secret_basic, ${TOKEN_TYPE} access"
+  au="client_secret_basic"
+  [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && au="public/PKCE (NONE)"
+  [[ "${USE_POST_AUTH:-0}" == 1 ]] && au="client_secret_post (POST)"
+  info "     (web, authorization-code, ${au}, ${TOKEN_TYPE} access"
   info "     tokens, devMode, both http+https URIs), then enforce ${TOKEN_TYPE}"
   info "     on the new app as well"
   info "  4. write ${CLIENT_ID_KEY} + ${CLIENT_SECRET_KEY} into .env"
@@ -665,6 +714,11 @@ if [[ -n "$FOUND_APP" ]]; then
   if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
     enforce_auth_method_none "$FOUND_PROJECT" "$FOUND_APP" || exit 1
   fi
+  # Invoice Ninja's Socialite 'oidc' driver authenticates at the token
+  # endpoint with client_secret_post — a BASIC app would answer invalid_client.
+  if [[ "${USE_POST_AUTH:-0}" == 1 ]]; then
+    enforce_auth_method_post "$FOUND_PROJECT" "$FOUND_APP" || exit 1
+  fi
   info "Client credentials in .env are the working ones — idempotent beyond the token type."
   exit 0
 fi
@@ -689,6 +743,7 @@ fi
 app_body="$(jq -nc --arg name "$APP_NAME" \
   --arg tokentype "$TOKEN_TYPE" \
   --argjson pub "$( [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && echo true || echo false )" \
+  --argjson post "$( [[ "${USE_POST_AUTH:-0}" == 1 ]] && echo true || echo false )" \
   --argjson redirects "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
   --argjson logout "$(printf '%s\n' "${POST_LOGOUT[@]}" | jq -R . | jq -s -c .)" \
   '{ name: $name,
@@ -698,7 +753,9 @@ app_body="$(jq -nc --arg name "$APP_NAME" \
      responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
      grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
      appType: "OIDC_APP_TYPE_WEB",
-     authMethodType: (if $pub then "OIDC_AUTH_METHOD_TYPE_NONE" else "OIDC_AUTH_METHOD_TYPE_BASIC" end),
+     authMethodType: (if $pub then "OIDC_AUTH_METHOD_TYPE_NONE"
+                    elif $post then "OIDC_AUTH_METHOD_TYPE_POST"
+                    else "OIDC_AUTH_METHOD_TYPE_BASIC" end),
      devMode: true }')"
 
 info "Registering OIDC app '${APP_NAME}' in project '${APP_PROJECT}'..."

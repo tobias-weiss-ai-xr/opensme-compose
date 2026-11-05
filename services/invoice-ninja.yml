@@ -71,6 +71,18 @@ services:
       # recreate loses it (and the APP_KEY it auto-generated), so the key must
       # be supplied explicitly and persisted in the host .env.
       APP_KEY: ${INVOICENINJA_APP_KEY:-}
+      # OIDC SSO via Zitadel (config/services.php -> services.oidc; Socialite
+      # 'oidc' driver). Callback URI registered at the IdP: ${APP_URL}/auth/oidc
+      OIDC_ISSUER: ${INVOICENINJA_OIDC_ISSUER:-https://auth.home.opensme.graphwiz.ai}
+      OIDC_CLIENT_ID: ${INVOICENINJA_OIDC_CLIENT_ID:?}
+      OIDC_CLIENT_SECRET: ${INVOICENINJA_OIDC_CLIENT_SECRET:?}
+      OIDC_PROVIDER_LABEL: ${INVOICENINJA_OIDC_PROVIDER_LABEL:-openSME Zitadel}
+      # Outbound HTTPS via host proxy — some hosts drop container hairpin to
+      # the public IdP domain (:443); discovery/token/userinfo then go through
+      # the proxy (guzzle honours these env vars) — same pattern as the portal.
+      HTTPS_PROXY: ${INVOICENINJA_HTTPS_PROXY:-}
+      HTTP_PROXY: ${INVOICENINJA_HTTP_PROXY:-}
+      NO_PROXY: ${INVOICENINJA_NO_PROXY:-}
       APP_ENV: production
       DB_HOST: invoiceninja-db
       DB_PORT: "3306"

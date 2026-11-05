@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice Ninja — PUBLIC edge router (openSME suite, public VPS)
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy/adapt this block into the fleet traefik's file provider
+# (dynamic/invoices-standin.yml) on PUBLIC deployments. Rationale (same as
+# portal-standin.yml): the fleet traefik's docker-provider event stream dies
+# after docker daemon restarts on the OpenVZ-style host and deterministically
+# ignores some containers, so docker labels alone are not reliable.
+#
+# The URL must point at the `invoiceninja-web` container (nginx front) and
+# needs refreshing after every `docker compose up invoiceninja-web`:
+#
+#     docker inspect opensme-invoiceninja-web \
+#       --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+#
+# No auth middleware here — the browser has to complete the Zitadel OIDC
+# round trip against invoices.<domain>/auth/oidc directly.
+#
+# OIDC SSO prerequisites (see services/invoice-ninja.yml + README):
+#   - scripts/zitadel-client.sh --app invoiceninja   (client_secret_post app)
+#   - INVOICENINJA_OIDC_* keys in .env
+#   - an Invoice Ninja user whose email matches the IdP user's verified email
+#     (SSO never auto-provisions; first login links by verified email).
+# ─────────────────────────────────────────────────────────────────────────────
+http:
+  routers:
+    invoices-standin:
+      rule: "Host(`invoices.opensme.graphwiz.ai`)"
+      priority: 1000
+      service: invoices-standin
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+  services:
+    invoices-standin:
+      loadBalancer:
+        servers:
+          - url: "http://172.19.0.27:80"

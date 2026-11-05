@@ -84,8 +84,8 @@ Every service behind the portal — files, mail, groupware, invoicing, documents
 chat — authenticates through **one central identity provider**. SSO is the
 architecture default, not an optional bolt-on: the identity overlay ships
 first-class, and each service is wired to it where the application supports
-OIDC/SAML (portal, files, office, mail, groupware, notes and chat ship
-configured out of the box).
+OIDC/SAML (portal, files, office, mail, groupware, notes, invoicing and chat
+ship configured out of the box).
 
 - **One login, one user store** — no isolated accounts per service
 - **Zitadel** — Go-native, self-hosted IAM: OIDC + SAML, built-in user store,
@@ -99,6 +99,26 @@ configured out of the box).
 # Add SSO to the core stack
 COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml" docker compose up -d
 ```
+
+### Wiring an app to the IdP (example: Invoice Ninja)
+
+```bash
+# 1. register the OIDC client (client_secret_post + PKCE; saves id/secret to .env)
+scripts/zitadel-client.sh --app invoiceninja
+# 2. set the remaining keys in .env — see .env.example
+#    INVOICENINJA_OIDC_ISSUER, INVOICENINJA_OIDC_CLIENT_ID/SECRET,
+#    optional INVOICENINJA_HTTPS_PROXY
+# 3. start the service
+COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml:services/invoice-ninja.yml" docker compose --profile invoice up -d
+```
+
+Invoice Ninja's callback is fixed by the app itself: `$APP_URL/auth/oidc`
+(`https://invoices.<OPENSME_DOMAIN>/auth/oidc`). SSO never auto-provisions —
+an Invoice Ninja user whose email matches the IdP user's **verified** email
+must exist first; the first OIDC login links the two. On deployments where
+container→IdP hairpin is blocked by the host firewall, export the container's
+`HTTPS_PROXY` (see `services/invoice-ninja.yml`), and on public hosts add the
+edge file-router from `edge/invoices-standin.yml`.
 
 ### Who is this for?
 
@@ -118,7 +138,7 @@ COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml" docker compose up -d
 | **Mail** | [Stalwart](https://stalw.art/) — modern Rust SMTP/IMAP server |
 | **Groupware** | [SOGo](https://www.sogo.nu/) — webmail, calendar, contacts |
 | **Object storage** | [SeaweedFS](https://github.com/seaweedfs/seaweedfs) — S3-compatible storage for production OpenCloud (optional) |
-| **Invoicing** | [Invoice Ninja](https://invoiceninja.com/) — billing & invoicing (optional) |
+| **Invoicing** | [Invoice Ninja](https://invoiceninja.com/) — billing & invoicing, OIDC SSO via Zitadel (optional) |
 | **Documents** | [Paperless-ngx](https://docs.paperless-ngx.com/) — document management with OCR (optional) |
 | **Collaboration** | [CryptPad](https://cryptpad.org/) — collaborative docs (optional) |
 | **Chat** | [Synapse](https://matrix.org/) + [Element](https://element.io/) — Matrix messaging (optional) |
@@ -498,7 +518,7 @@ Each feature is a separate Docker Compose file. Combine via `COMPOSE_FILE`:
 | `mail/stalwart.yml` | Stalwart Mail Server | `mail.*` | Default mail backend (`MAIL_BACKEND=stalwart`) |
 | `mail/sogo.yml` | SOGo Groupware | `webmail.*` | Default mail backend (`MAIL_BACKEND=stalwart`) |
 | `mail/mailcow-dockerized` (submodule) | Full mailcow stack (mail + groupware) | `mail.*` | **Alternative** backend (`MAIL_BACKEND=mailcow`) — strict XOR, see below |
-| `services/invoice-ninja.yml` | Invoice Ninja | `invoices.*` | For invoicing (`--profile invoice`) |
+| `services/invoice-ninja.yml` | Invoice Ninja | `invoices.*` | For invoicing (`--profile invoice`); OIDC SSO via `scripts/zitadel-client.sh --app invoiceninja` |
 | `services/paperless.yml` | Paperless-ngx + Gotenberg + Tika | `paperless.*` | For document management (`--profile paperless`) |
 | `services/cryptpad.yml` | CryptPad | `pad.*` | For collaborative docs (`--profile collab`) |
 | `services/synapse.yml` | Synapse (Matrix) | `matrix.*` | For chat (`--profile chat`) |
