@@ -46,6 +46,9 @@ EXTERNAL_HOST="${ZITADEL_EXTERNAL:-$HOST}"
 DOMAIN="${ZITADEL_singleSignOnDomain:-opensme.local}"
 WAIT=false
 CLEAN=false
+RESET_PASSWORDS=false
+STATUS=false
+MONITOR=false
 DRY_RUN=false
 VERBOSE=false
 IN_DOCKER=false
@@ -61,12 +64,13 @@ while [[ $# -gt 0 ]]; do
         --domain)     DOMAIN="$2"; shift 2 ;;
         --wait)       WAIT=true; shift ;;
         --clean)      CLEAN=true; shift ;;
+        --reset-passwords) RESET_PASSWORDS=true; shift ;;
         --dry-run)    DRY_RUN=true; shift ;;
         --verbose|-v) VERBOSE=true; shift ;;
         --in-docker)  IN_DOCKER=true; shift ;;
         --component)  COMPONENT="$2"; shift 2 ;;
-        --status)     provision_status; exit $? ;;
-        --monitor)    provision_monitor; exit $? ;;
+        --status)     STATUS=true; shift ;;
+        --monitor)    MONITOR=true; shift ;;
         --help|-h)
             echo "Usage: $0 [options]"
             echo "Options:"
@@ -76,6 +80,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --domain DOM       SSO domain (default: opensme.local)"
             echo "  --wait             Wait for Zitadel to be ready"
             echo "  --clean            Delete all demo users first (zitadel only)"
+            echo "  --reset-passwords  Re-apply documented passwords to EXISTING demo users"
+            echo "                      (keeps IDs; Zitadel flags admin-set passwords — the"
+            echo "                      first login then shows a one-time change prompt)"
             echo "  --dry-run          Show plan/config and exit"
             echo "  --verbose, -v      Verbose output"
             echo "  --in-docker        Running inside docker (adjusts curl Host header)"
@@ -246,11 +253,11 @@ user_exists() {
     [[ -n "$(get_user_id "$1" "$2")" ]]
 }
 
-# Human users created by THIS script carry bare login names (v1 +
-# string initialPassword); older installs may still hold org-domain-
-# suffixed names (v2-era) — a suffix-free equals-query would miss those,
-# so compare on the '@'-stem (the same way tests/05-e2e/run.py does;
-# works for both shapes).
+# Human users created/renamed by THIS script carry bare login names
+# (v2 /users/human with bare userName, or v1 PUT /username rename of
+# legacy org-domain-suffixed v2-era accounts) — a suffix-free
+# equals-query would miss suffixed names, so compare on the '@'-stem
+# (the same way tests/05-e2e/run.py does; works for both shapes).
 get_user_id() {
     local username="$1"
     local token="$2"
@@ -266,24 +273,46 @@ delete_user() {
     api DELETE "/v2/users/$user_id" "" "$token" >/dev/null 2>&1
 }
 
+# Current login name of a user id (v2 GET). Used to detect legacy
+# org-domain-suffixed / email-form login names so they can be renamed.
+user_login_name() {
+    local user_id="$1"
+    local token="$2"
+    api GET "/v2/users/$user_id" "" "$token" 2>/dev/null |
+        jq -r '.user.loginNames[0] // empty' 2>/dev/null
+}
+
+# Rename a legacy suffixed/email-form login name to the bare demo name.
+# v1 PUT /management/v1/users/{id}/username (verified v4.19.4) — keeps
+# the user id, password and grants; only the login name changes.
+rename_user_to_bare() {
+    local user_id="$1"
+    local bare="$2"
+    local token="$3"
+    api PUT "/management/v1/users/$user_id/username" "{\"userName\":\"$bare\"}" "$token" >/dev/null 2>&1
+}
+
 create_user() {
     local json="$1"
     local token="$2"
-    # Management v1 with the string-field initialPassword — the ONLY
-    # combination that yields a bare login name AND an ACTIVE user
-    # (all verified live against v4.19.4):
-    #   • v2 /users/human sets the password fine but AUTO-APPENDS the org
-    #     domain to bare usernames (UserLoginMustBeDomain=false) — Login
-    #     v2 matches loginNames EXACTLY, so bare "testuser" would never
-    #     resolve ("user not found").
-    #   • v1 /users/human keeps the userName as given (no suffix), but the
-    #     password must ride in the top-level STRING field "initialPassword"
-    #     — a nested "password" object is silently dropped by protobuf and
-    #     leaves the user in USER_STATE_INITIAL (a dead account without
-    #     SMTP: neither v1 nor v2 SetPassword accepts INITIAL users).
-    # Human usernames cannot be renamed later (v2 PATCH → 501), so this
-    # choice is permanent per user — get it right at creation time.
-    api POST "/management/v1/users/human" "$json" "$token"
+    # Zitadel v2 /users/human with a BARE userName and an inline
+    # password{changeRequired:false} — verified live against v4.19.4 on
+    # both openSME stacks (Nov 2026):
+    #   • the bare userName STAYS bare (loginNames == [userName]). The old
+    #     belief that "v2 auto-appends the org domain" came from a v2-era
+    #     script that passed userName=$email (the FULL e-mail, which
+    #     already contained @<org-domain>) — not from Zitadel appending.
+    #   • the user lands USER_STATE_ACTIVE immediately and the password is
+    #     usable by Login v2 sessions (verified via v2 session password
+    #     check: correct → 200, wrong → 400).
+    #   • changeRequired:false ⇒ NO first-login password-change wall
+    #     (the previous v1 + string initialPassword approach forced
+    #      passwordChangeRequired=true, so the Login v2 UI showed the
+    #      change-password screen on every first login).
+    # Human usernames CAN be renamed later if needed: v1
+    # PUT /management/v1/users/{id}/username (v2 PATCH /v2/users/{id} is
+    # 501 in v4.19).
+    api POST "/v2/users/human" "$json" "$token"
 }
 
 list_users() {
@@ -713,7 +742,8 @@ provision_status() {
     local config
     config=$(jq . "$USERS_JSON") || { err "Invalid JSON in $USERS_JSON"; return 1; }
     
-    local count_total=12
+    local count_total
+    count_total=$(echo "$config" | jq '.users | length')
     local company
     company=$(echo "$config" | jq -r '.company')
     info "Company: $company"
@@ -896,15 +926,47 @@ main_zitadel() {
         uid=$(get_user_id "$username" "$PAT") || true
         
         if [[ -n "$uid" ]]; then
-            log "  - User $username already exists ($uid)"
-            skipped=$((skipped + 1))
+            # Legacy installs may hold org-domain-suffixed or email-form
+            # login names (v2-era provisioning used userName=$email).
+            # get_user_id() matches on the '@'-stem, so it would silently
+            # skip those users — rename them to the bare demo name instead
+            # (non-destructive; keeps id/password/grants).
+            local current_ln
+            current_ln=$(user_login_name "$uid" "$PAT")
+            if [[ -n "$current_ln" && "$current_ln" != "$username" ]]; then
+                if rename_user_to_bare "$uid" "$username" "$PAT"; then
+                    log "  - User $username renamed to bare login name ($uid)"
+                    updated=$((updated + 1))
+                else
+                    err "  - User $username: rename to bare login name failed ($uid)"
+                    unexpected=$((unexpected + 1))
+                fi
+            fi
+            # Existing users' live passwords are NOT reconciled by default
+            # (Zitadel has no password-compare API; provisioning can only
+            # set). Old accounts may carry an unknown legacy password while
+            # the JSON documents the demo credentials. --reset-passwords
+            # re-applies the documented one (keeps IDs).
+            if [[ "$RESET_PASSWORDS" == "true" ]]; then
+                if api POST "/management/v1/users/$uid/password" "{\"password\":\"$pwd\"}" "$PAT" >/dev/null 2>&1; then
+                    log "  - User $username password reset to documented value ($uid)"
+                    updated=$((updated + 1))
+                else
+                    err "  - User $username: password reset failed ($uid)"
+                    unexpected=$((unexpected + 1))
+                fi
+            else
+                log "  - User $username already exists ($uid)"
+                skipped=$((skipped + 1))
+            fi
         else
-            # Zitadel Management-v1 human-user shape (verified on
-            # v4.19.4): profile firstName/lastName nested, email verified
-            # (no invite mail — the stack ships no SMTP relay for the IdP),
-            # and the password as top-level STRING initialPassword — bare
-            # userName stays bare, user lands ACTIVE (see create_user()).
-            # Login v2 then resolves BOTH the bare name and the e-mail.
+            # Zitadel v2 human-user shape (verified on v4.19.4): profile
+            # givenName/familyName nested, email isVerified (no invite mail
+            # — the stack ships no SMTP relay for the IdP), and the password
+            # inline with changeRequired:false — bare userName stays bare,
+            # user lands ACTIVE with a usable password and no first-login
+            # change wall (see create_user()). Login v2 then resolves BOTH
+            # the bare name and the e-mail.
             local user_payload
             user_payload=$(jq -n \
                 --arg un "$username" \
@@ -915,14 +977,14 @@ main_zitadel() {
                 --arg pw "$pwd" \
                 '{
                     userName: $un,
-                    profile: { firstName: $fn, lastName: $ln, displayName: $dn },
-                    email:   { email: $em, isEmailVerified: true },
-                    initialPassword: $pw
+                    profile: { givenName: $fn, familyName: $ln, displayName: $dn },
+                    email:   { email: $em, isVerified: true },
+                    password: { password: $pw, changeRequired: false }
                 }')
             
             local res
             res=$(create_user "$user_payload" "$PAT") || { err "Failed to create user $username (HTTP error)"; continue; }
-            # The v1 human endpoint answers {"userId": ...}. A 200 that is NOT
+            # The v2 human endpoint answers {"userId": ...}. A 200 that is NOT
             # Zitadel JSON means the request landed on something else — the
             # classic case is the Traefik edge routing $zt_base to another
             # stack's vhost (curl -f cannot see that; only the payload can).
@@ -966,12 +1028,18 @@ main_zitadel() {
     done < <(printf '%s\n' "$users")
     
     info ""
-    info "Total active demo users: $count / 12"
+    local expected
+    expected=$(printf '%s\n' "$users" | sed '/^$/d' | wc -l | tr -d ' ')
+    info "Total active demo users: $count / $expected"
 
-    if [[ "$count" -lt 12 ]]; then
+    if [[ "$count" -lt "$expected" ]]; then
         err "Some users were not provisioned. Check logs above."
         return 1
     fi
 }
+
+# ── deferred one-shot modes (must run AFTER all function definitions) ─
+[[ "$STATUS" == "true" ]] && { provision_status; exit $?; }
+[[ "$MONITOR" == "true" ]] && { provision_monitor; exit $?; }
 
 run_components
