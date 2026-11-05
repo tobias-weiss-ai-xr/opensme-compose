@@ -154,10 +154,11 @@ CAMUNDA_DB_PASSWORD=$(openssl rand -hex 24)
 # Zitadel login v2 UI session-cookie signer (>= 32 chars enforced upstream)
 LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
 
-# Portal OIDC RP — non-empty placeholders: compose uses ${VAR:?} on these,
-# so the FIRST `docker compose up` (before the IdP is up) would fail on an
-# empty value. zitadel-client.sh --app portal below overwrites them with the
-# Zitadel-minted client id/secret once the IdP is healthy.
+# Portal OIDC RP — non-empty placeholders: compose guards these with a
+# fail-closed required-var interpolation, so the FIRST `docker compose up`
+# (before the IdP is up) would fail on an empty value. zitadel-client.sh
+# --app portal below overwrites them with the Zitadel-minted client
+# id/secret once the IdP is healthy.
 PORTAL_OIDC_CLIENT_ID=$(pw)
 PORTAL_OIDC_CLIENT_SECRET=$(pw)
 
