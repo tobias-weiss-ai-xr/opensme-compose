@@ -115,10 +115,13 @@ COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml:services/invoice-ninja.yml" doc
 Invoice Ninja's callback is fixed by the app itself: `$APP_URL/auth/oidc`
 (`https://invoices.<OPENSME_DOMAIN>/auth/oidc`). SSO never auto-provisions —
 an Invoice Ninja user whose email matches the IdP user's **verified** email
-must exist first; the first OIDC login links the two. On deployments where
-container→IdP hairpin is blocked by the host firewall, export the container's
-`HTTPS_PROXY` (see `services/invoice-ninja.yml`), and on public hosts add the
-edge file-router from `edge/invoices-standin.yml`.
+must exist first; the first OIDC login links the two. **Login is SSO-only:**
+the nginx sidecar (`services/invoice-ninja/nginx.conf`) sends browsers
+without an IN session cookie straight to `/auth/oidc` — the local
+email/password form is never shown (no click, no intermediate dialog).
+On deployments where container→IdP hairpin is blocked by the host firewall,
+export the container's `HTTPS_PROXY` (see `services/invoice-ninja.yml`), and
+on public hosts add the edge file-router from `edge/invoices-standin.yml`.
 
 ### Who is this for?
 
