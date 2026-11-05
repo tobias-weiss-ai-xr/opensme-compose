@@ -8,10 +8,12 @@
 # ignores some containers, so docker labels alone are not reliable.
 #
 # The URL must point at the `invoiceninja-web` container (nginx front) and
-# needs refreshing after every `docker compose up invoiceninja-web`:
+# needs refreshing after every `docker compose up invoiceninja-web`: fill in
+# the container's bridge IP (see `docker inspect opensme-invoiceninja-web`):
 #
 #     docker inspect opensme-invoiceninja-web \
 #       --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+#     ... then set the URL below to http://<IP>:80
 #
 # No auth middleware here — the browser has to complete the Zitadel OIDC
 # round trip against invoices.<domain>/auth/oidc directly.
@@ -36,4 +38,4 @@ http:
     invoices-standin:
       loadBalancer:
         servers:
-          - url: "http://172.19.0.27:80"
+          - url: "http://<invoiceninja-web-ip>:80"

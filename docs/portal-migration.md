@@ -38,8 +38,8 @@ Scope: compose `portal` service env + traefik file provider (`portal-standin.yml
    ```
    Values come from the stack's `.env` (never printed / committed — compose
    only ever references the variables). On the live VPS the `opensme-portal`
-   container is attached to `opensme-net` (e.g. `172.19.0.15/16`); the host
-   traefik reaches it directly at that bridge IP on port 8080.
+   container is attached to `opensme-net` (a private bridge network); the
+   host traefik reaches it directly at that bridge IP on port 8080.
 
 2. **Edge retarget** — in
    `/root/git/docker-traefik/dynamic/portal-standin.yml` change the service
@@ -66,11 +66,10 @@ curl -s -m 10 -D - -o /dev/null http://<IP>:8080/api/auth/login -H 'Host: home.o
   `/oidc/v1/authorize?client_id=...`) — before the fix it was 503.
 - Public: `https://home.opensme.graphwiz.ai/` returns 200 with the Rust portal
   UI.
-- Full e2e (VPS, from `/opt/opensme-compose/compose`):
-
-  ```sh
-  E2E_ZITADEL_LOGIN_NAME=testuser ZITADEL_ADMIN_PASSWORD=eval2026 python3 tests/05-e2e/run.py
-  ```
+- Full e2e (VPS, from `/opt/opensme-compose/compose`): run
+  `tests/05-e2e/run.py` with the demo credentials (login name `testuser` and
+  the documented demo password — see README) exported as
+  `E2E_ZITADEL_LOGIN_NAME` and `ZITADEL_ADMIN_PASSWORD`.
 
   Expect ≥ 31 passed with the portal section fully green, including
   `portal /api/services: N service(s) (signed in)` and no

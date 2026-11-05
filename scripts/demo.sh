@@ -154,6 +154,13 @@ CAMUNDA_DB_PASSWORD=$(openssl rand -hex 24)
 # Zitadel login v2 UI session-cookie signer (>= 32 chars enforced upstream)
 LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
 
+# Portal OIDC RP — non-empty placeholders: compose uses ${VAR:?} on these,
+# so the FIRST `docker compose up` (before the IdP is up) would fail on an
+# empty value. zitadel-client.sh --app portal below overwrites them with the
+# Zitadel-minted client id/secret once the IdP is healthy.
+PORTAL_OIDC_CLIENT_ID=$(pw)
+PORTAL_OIDC_CLIENT_SECRET=$(pw)
+
 # Traefik dashboard
 TRAEFIK_USERS=${TRAEFIK_HASH_ESC}
 
@@ -221,6 +228,15 @@ fi
 if ! grep -q '^LOGIN_SESSION_COOKIE_SECRET=' .env; then
   printf '\nLOGIN_SESSION_COOKIE_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
   ok "Appended LOGIN_SESSION_COOKIE_SECRET to existing .env (login v2 UI)"
+fi
+
+# Portal OIDC RP placeholders: compose uses ${VAR:?} on PORTAL_OIDC_CLIENT_ID/
+# SECRET, so an older .env that predates them breaks the first `compose up`.
+# zitadel-client.sh --app portal replaces them with the minted credentials
+# once the IdP is healthy.
+if ! grep -q '^PORTAL_OIDC_CLIENT_ID=' .env; then
+  printf '\nPORTAL_OIDC_CLIENT_ID=%s\nPORTAL_OIDC_CLIENT_SECRET=%s\n' "$(pw)" "$(pw)" >> .env
+  ok "Appended PORTAL_OIDC_CLIENT_ID/SECRET to existing .env (required placeholders)"
 fi
 
 # Provision deploy-time Zitadel artifacts via apt (no Docker Hub pulls).
