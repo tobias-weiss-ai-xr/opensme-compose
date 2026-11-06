@@ -327,8 +327,18 @@ erreichte den IdP nicht. Der Flow ist jetzt end-to-end grün
    eine App (live: Client `397489856642613268`) und schreibt
    `SOGO_OIDC_CLIENT_ID`/`SOGO_OIDC_CLIENT_SECRET` in die `.env`, die der
    Aufrufer nutzt (live: `/opt/opensme-compose/.env`, **nicht** `compose/.env`).
-   Der sogo-Branch registriert die sogo6-Callback-URI
-   `{SOGO6_PUBLIC_URL}/api/user/v1/auth/callback/{OPENSME_DOMAIN}` (auch http).
+   Der sogo-Branch registriert die sogo6-Callback-URIs
+   `{SOGO6_PUBLIC_URL}/api/user/v1/auth/callback/{OPENSME_DOMAIN}` **und**
+   `…/callback/{OPENSME_DOMAIN%%.*}.local` (auch http), denn sogo6 leitet die
+   Callback-Domain aus der **Login-Domain des Users** ab (`testuser@opensme.local`
+   → `…/callback/opensme.local`, auch auf der Public-VPS mit
+   `OPENSME_DOMAIN=opensme.graphwiz.ai`). Seit dem T1-SOGO-Fix (2026-11-06)
+   erzwingt das Skript die Allowlist auf jedem Lauf per
+   `PUT …/apps/{app_id}/oidc_config` (`redirectUris` = exakt die berechnete
+   Liste, idempotent `No changes`) — Allowlist und Server bleiben so by
+   construction synchron; ein Drift der live nur-public-Domain-Registrierung
+   (authorize → **HTTP 400 invalid_request „The requested redirect_uri is
+   missing in the client configuration“**) kann nicht mehr zurückkommen.
 2. **Domain-Einstellungen (DB)** — `opensme-sogo6-postgres`/db `sogo`,
    `sogo6_sogo_settings.settings_domain_default` → `AUTH_SETTINGS`
    (Patch im Live-SQL, Credentials aus der richtigen `.env`):
