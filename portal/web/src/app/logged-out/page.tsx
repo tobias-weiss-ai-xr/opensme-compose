@@ -22,12 +22,20 @@ export default function LoggedOutPage() {
           Sitzungen einiger Anwendungen (z.&nbsp;B. Umfragen, Archiv, Notizen)
           laufen automatisch innerhalb von 30&nbsp;Minuten ab.
         </p>
-        <Link
-          href="/"
+        {/* OIDC authorize entry: a plain GET redirect to the Rust backend via
+            the Next proxy — NOT a Next.js page, so a plain anchor is correct. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a
+          href="/api/auth/login"
           className="inline-block rounded-lg bg-accent px-8 py-3 font-semibold text-white transition hover:bg-accent-hover"
         >
-          Zurück zum Portal
-        </Link>
+          Erneut anmelden
+        </a>
+        <p className="mt-4">
+          <Link href="/" className="text-sm text-dim underline hover:text-foreground">
+            Zurück zum Portal
+          </Link>
+        </p>
         <p className="mt-6 text-xs text-dim">openSME-Portal · {SITE.domain}</p>
       </div>
     </div>
