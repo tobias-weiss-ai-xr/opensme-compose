@@ -17,8 +17,10 @@
 #              → SYNAPSE_OIDC_CLIENT_ID/SECRET
 #   ticketing  help.<domain>/auth/oidc/callback (Nosdesk)
 #              → NOSDESK_OIDC_CLIENT_ID/SECRET
-#   sogo       webmail.<domain>/SOGo[/] (webmail SSO, code lands on
-#              /SOGo/?code=...) → SOGO_OIDC_CLIENT_ID/SECRET
+#   sogo       webmail.<domain>/SOGo[/] + webmail.<domain>/api/user/v1/auth/
+#              callback/{OPENSME_DOMAIN} AND {OPENSME_DOMAIN%%.*}.local
+#              (sogo6 derives the callback from the user's login domain)
+#              → SOGO_OIDC_CLIENT_ID/SECRET
 #   operaton   bpm.<domain>/login/oauth2/code/operaton (Operaton webapps,
 #              native spring-security OAuth2) → OPERATON_OIDC_CLIENT_ID/SECRET
 #
@@ -277,10 +279,26 @@ case "$APP_KIND" in
     # sogo6 (this stack) never uses those: its OIDC RP (ModuleOIDC,
     # InterfaceAuthSSO) builds the callback as
     #   {SOGO_P_PUBLIC_BASE_URL}/api/user/v1/auth/callback/{domain}
-    # and get_login_mech hands that authorize URL to the frontend. Register
-    # the real callback (per domain) alongside the legacy /SOGo forms.
+    # and get_login_mech hands that authorize URL to the frontend. The
+    # {domain} in that callback is the TENANT domain taken from the USER's
+    # login name — so testuser@opensme.local gets a
+    # .../callback/opensme.local redirect even on the public VPS whose
+    # OPENSME_DOMAIN is opensme.graphwiz.ai. If only the public-domain
+    # callback is registered, Zitadel answers the authorize request with
+    #   HTTP 400 invalid_request "The requested redirect_uri is missing in
+    #   the client configuration"
+    # (live regression 2026-11-06, T1-SOGO). Register BOTH the configured
+    # domain and its derived .local tenant variant so the allowlist and the
+    # running server stay in sync by construction; enforce_redirect_uris()
+    # rewrites the allowlist to exactly this list on every run. Override the
+    # derived local/tenant domain with SOGO_OIDC_LOCAL_DOMAIN when the
+    # tenant suffix differs from ${OPENSME_DOMAIN%%.*}.local.
     oidc_domain="$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)"
+    local_cb_domain="$(env_get SOGO_OIDC_LOCAL_DOMAIN "${oidc_domain%%.*}.local")"
     base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback/${oidc_domain}")
+    if [[ -n "${local_cb_domain}" && "${local_cb_domain}" != "${oidc_domain}" ]]; then
+      base_paths+=("/api/user/v1/auth/callback/${local_cb_domain}")
+    fi
     ;;
   paperless)
     APP_PROJECT="opensme"
@@ -482,6 +500,43 @@ enforce_token_type() {
   esac
 }
 
+# ── redirect-URI enforcement (durable allowlist sync) ───────────────────────
+# An app's registered redirect allowlist can drift from what this script
+# computes — the sogo6-server derives its callback from the USER's login
+# domain (opensme.local) while OPENSME_DOMAIN on the public VPS is
+# opensme.graphwiz.ai, so a client registered with only the public-domain
+# callback makes Zitadel answer authorize with HTTP 400 "invalid_request:
+# The requested redirect_uri is missing in the client configuration"
+# (T1-SOGO). The same dedicated PUT .../oidc_config that flips the token
+# type also takes redirectUris; rewrite them to exactly the computed list on
+# every run so the allowlist and the running services stay in sync by
+# construction. Idempotent: an identical list answers 'No changes', which is
+# tolerated exactly like the token flip.
+enforce_redirect_uris() {
+  # enforce_redirect_uris PID APP_ID — force redirectUris=${REDIRECTS[*]}.
+  local pid="$1" app_id="$2"
+  local body resp code
+  body="$(jq -nc --argjson r "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
+             '{redirectUris: $r}')"
+  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
+             "$body" 2>/dev/null || true)"
+  code="$(api_http)"
+  case "$code" in
+    2??)
+      ok "Redirect URIs enforced for app '${APP_NAME}' (HTTP ${code})" ;;
+    *)
+      if [[ "$resp" == *"No changes"* ]]; then
+        ok "Redirect URIs already up to date for app '${APP_NAME}' — Zitadel: 'no changes' (HTTP ${code})"
+      else
+        err "Could not enforce redirect URIs (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
+        err "The app's allowlist may drift from what the running service emits — fix via"
+        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
+        return 1
+      fi
+      ;;
+  esac
+}
+
 # ── public (PKCE) auth-method enforcement ───────────────────────────────────
 enforce_auth_method_none() {
   # enforce_auth_method_none PID APP_ID — force OIDC_AUTH_METHOD_TYPE_NONE
@@ -574,8 +629,9 @@ if [[ "$DRY_RUN" == true ]]; then
   info "Plan:"
   info "  1. POST ${IDP_URL}/management/v1/projects/_search  (readiness + auth probe)"
   info "  2. scan projects' apps for '$APP_NAME' / client id '$CLIENT_ID_LABEL'"
-  info "     -> if found: enforce access token type ${TOKEN_TYPE} via"
-  info "        PUT .../apps/{id}/oidc_config, then report 'already registered', exit 0"
+  info "     -> if found: enforce access token type ${TOKEN_TYPE} AND rewrite"
+  info "        redirectUris to the list above via PUT .../apps/{id}/oidc_config,"
+  info "        then report 'already registered', exit 0"
   info "  3. otherwise: create project '$APP_PROJECT' (if needed) and the OIDC app"
   au="client_secret_basic"
   [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && au="public/PKCE (NONE)"
@@ -708,6 +764,11 @@ if [[ -n "$FOUND_APP" ]]; then
   # JWKS-validating backend rejects — flip it here on every run instead
   # of the manual/live-only fix of 2026-10-26.
   enforce_token_type "$FOUND_PROJECT" "$FOUND_APP" || exit 1
+  # Durable allowlist sync: the redirect URIs a running service emits can
+  # drift from what was registered (T1-SOGO: sogo6 emits a .../callback/
+  # opensme.local redirect from testuser@opensme.local on the public VPS).
+  # Rewrite the allowlist to exactly the computed list on every run.
+  enforce_redirect_uris "$FOUND_PROJECT" "$FOUND_APP" || exit 1
   # OpenCloud's SPA additionally requires the PUBLIC auth method (PKCE); a
   # confidential/BASIC app makes its browser token exchange fail with
   # "empty client secret". Enforce it here on every run.
@@ -802,6 +863,7 @@ new_app_id="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev
   | jq -r --arg cid "$new_client_id" '.result[]? | select((.oidcConfig.clientId // "") == $cid) | .id' 2>/dev/null | head -1 || true)"
 if [[ -n "${new_app_id:-}" ]]; then
   enforce_token_type "$pid" "$new_app_id" || exit 1
+  enforce_redirect_uris "$pid" "$new_app_id" || exit 1
   if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
     enforce_auth_method_none "$pid" "$new_app_id" || exit 1
   fi
