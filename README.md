@@ -524,7 +524,12 @@ placeholders exactly as on x86.
   upstream's Dockerfile is arm64-aware (pdfium case + multi-arch stage
   bases), so we build it from the pinned upstream tag; point
   `NOSDESK_IMAGE` at the result in `.env` (BSL 1.1 — self-hosting is
-  permitted, review before offering ticketing as a paid service)
+  permitted, review before offering ticketing as a paid service). When
+  building from a host behind a forward proxy (e.g. a `docker-container`
+  buildx worker whose driver env covers registry pulls only), the script
+  forwards any `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` set in your shell as
+  build-args so `RUN` steps (`apt-get`, `cargo`, `npm`) can reach the network:
+  `http_proxy=... https_proxy=... no_proxy=... scripts/build-nosdesk.sh`
 
 **Hardware guidance.** Pi 5 (8–16 GB) is the comfortable baseline; Pi 4 / 8 GB
 works for the demo tier. Boot from a USB3 SSD — Postgres + Zitadel churn wears

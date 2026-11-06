@@ -29,6 +29,17 @@
 #   NOSDESK_BUILDER     buildx builder name (e.g. a docker-container builder
 #                       created for multi-arch; default = active builder)
 #
+# Proxies: any HTTP_PROXY / HTTPS_PROXY / NO_PROXY (upper- or lowercase) that
+# is set in the caller's environment is forwarded to the build as --build-arg.
+# This is required for docker-container buildkit workers behind a forward
+# proxy: their driver env covers registry pulls only, while RUN steps
+# (apt-get, cargo, npm) inside the build need the proxy exposed as a build
+# arg. BuildKit treats these as predefined proxy args and exports them as
+# environment variables to every RUN command, so no Dockerfile change is
+# needed. Set http_proxy/https_proxy/no_proxy in your shell before running,
+# or pass them explicitly:
+#   http_proxy=... https_proxy=... no_proxy=... ./scripts/build-nosdesk.sh
+#
 # After building: point NOSDESK_IMAGE=<tag> in .env to stop pulling the
 # amd64-only ghcr release (see .env.example comment).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,11 +72,34 @@ Env overrides (all optional):
   NOSDESK_REMOTE    upstream git URL
   NOSDESK_BUILDER   buildx builder name (default: active builder)
 
+Proxies:
+  HTTP_PROXY / HTTPS_PROXY / NO_PROXY set in the caller environment (upper-
+  or lowercase) are forwarded to the build as --build-arg so RUN steps inside
+  a docker-container buildkit worker can reach the network.
+
 Options:
   --platform <list>  buildx --platform (comma-separated)
   --push             push to the registry named in NOSDESK_IMAGE_TAG
   -h, --help         this help
 EOF
+}
+
+# Emit "NAME=VALUE" lines for every proxy variable that is set in the caller
+# environment (both upper- and lowercase spellings). Emits nothing when no
+# proxy is configured, so non-proxied builds are unchanged.
+proxy_build_args() {
+  local key value lower
+  for key in HTTP_PROXY HTTPS_PROXY NO_PROXY; do
+    value="${!key:-}"
+    if [[ -n "$value" ]]; then
+      printf -- '%s=%s\n' "$key" "$value"
+    fi
+    lower="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    value="${!lower:-}"
+    if [[ -n "$value" ]]; then
+      printf -- '%s=%s\n' "$lower" "$value"
+    fi
+  done
 }
 
 while [[ $# -gt 0 ]]; do
@@ -106,6 +140,16 @@ build_flags=(-f backend/Dockerfile --target runtime)
 build_flags+=(--build-arg "NOSDESK_VERSION=${ver}")
 build_flags+=(--build-arg "VITE_BUILD_SHA=${head_sha}")
 build_flags+=(--platform "$platforms")
+
+# Forward caller proxy env (if any) into the build so RUN steps
+# (apt-get/cargo/npm) can reach the network from a docker-container worker.
+# Each line from proxy_build_args is a single "NAME=VALUE" token; we prepend
+# the --build-arg flag so the CLI receives distinct tokens (never a
+# space-joined "--build-arg NAME=VALUE" in one argument).
+mapfile -t proxy_args < <(proxy_build_args)
+for proxy_arg in "${proxy_args[@]}"; do
+  build_flags+=(--build-arg "$proxy_arg")
+done
 
 if [[ -n "$builder" ]]; then
   build_flags+=(--builder "$builder")
