@@ -27,4 +27,17 @@ describe("ServiceTile", () => {
     // serviceIcon("opencloud") from @/lib/format
     expect(screen.getByText("☁")).toBeInTheDocument();
   });
+
+  it("keeps the legacy func-card markup contract (a > icon, h3, .product, .open)", () => {
+    const { container } = render(<ServiceTile service={service} />);
+    const card = container.querySelector("a.func-card");
+    expect(card).not.toBeNull();
+    expect(card!.querySelector("span.func-icon")).not.toBeNull();
+    expect(card!.querySelector("h3")).not.toBeNull();
+    expect(card!.querySelector("p.product")).not.toBeNull();
+    // the Open button must remain a span.open labelled "Öffnen"
+    const open = card!.querySelector("span.open");
+    expect(open).not.toBeNull();
+    expect(open!.textContent).toBe("Öffnen");
+  });
 });
