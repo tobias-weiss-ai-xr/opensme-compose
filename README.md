@@ -483,6 +483,58 @@ All tiers run the **same Compose stack** — scale vertically, no config changes
 
 Sizing help for the top end is part of the [consulting offer](#professional-services--we-help-you-help-yourself) — the software itself has no user cap.
 
+### ARM64 / Raspberry Pi
+
+The stack is ARM-ready at the image level: every first-party and upstream image
+in the compose universe publishes `linux/arm64`, and the locally-built images
+derive from multi-arch bases, so they build natively on the Pi.
+
+**Verified against the published image manifests** (architecture lists checked
+per tag):
+
+| Image | arm64 |
+|---|---|
+| Zitadel `v4.19.4` + login v2 UI, OpenCloud `8.0.1`, Traefik, Postgres, Redis, Memcached, pgbouncer | ✅ |
+| Operaton `2.1.5`, Casdoor, Stalwart, SOGo (`salvoxia` and mailcow), Synapse, Element, Gotenberg, Tika, CryptPad, SeaweedFS, LimeSurvey, Collabora, ofelia, Prometheus, rclone | ✅ |
+| Ollama, `llama.cpp` server, `lasuite/impress*`, mailcow (dovecot / sogo / rspamd / phpfpm / …) | ✅ |
+| Paperless upstream `3.3.4` (base of `images/paperless-oidc/Dockerfile`), Invoice Ninja `5` (base of `invoiceninja-pg`), portal build stages (`rust:slim` → `distroless/cc`) | ✅ |
+
+**What runs out of the box.** `./scripts/demo.sh` on a Raspberry Pi 5 (or
+Pi 4 / 8 GB) boots the default demo stack unchanged: Traefik, Postgres,
+pgbouncer, Redis, Memcached, the Zitadel IdP + login UI, OpenCloud, and the
+Rust portal (built natively — the first `cargo build` takes ~10–20 min on the
+Pi, then it's cached). The demo serves `.local` domains behind the stack's own
+Traefik (HTTP only), so it needs no public IP or TLS. `.env` generation is
+arch-agnostic — `demo.sh` writes random secrets and the required-var
+placeholders exactly as on x86.
+
+**Locally-built images build natively on ARM** (nothing amd64-specific):
+
+- `invoiceninja-pg:5` (`services/invoice-ninja`) — FROM the arm64-capable
+  Invoice Ninja image, adds the pgsql driver
+- `raisfast:0.4.2` (`services/store`) — pulls RaisFast's static musl `aarch64`
+  release via the `${RAISFAST_ARCH}` build arg
+- `opensme/paperless-ngx:3.3.4-oidc` (`images/paperless-oidc/Dockerfile`) —
+  upstream + one allauth `INSTALLED_APPS` line, CA bundle concat; arch-neutral
+  (build once, needs the `lab-ca` named context)
+- portal (`portal/Dockerfile`), dev-agent / predictive-agent / taskfleet
+  (in-repo contexts under `monitoring/`)
+
+**Hardware guidance.** Pi 5 (8–16 GB) is the comfortable baseline; Pi 4 / 8 GB
+works for the demo tier. Boot from a USB3 SSD — Postgres + Zitadel churn wears
+out SD cards and throttles I/O. Use 64-bit Raspberry Pi OS / Debian / Ubuntu
+arm64 with Docker Engine.
+
+**Caveats.** CI (GitHub Actions, amd64) only *boots* the demo stack — the ARM
+claim above is manifest-verified per image plus native builds, so give the
+first `demo.sh` pass on the Pi a manual run. Heavy optional profiles scale
+down: Operaton (JVM) wants heap tuning on 8 GB, Synapse is memory-hungry, and
+local LLMs are best kept to ~7B Q4 on a Pi 5 (a few tok/s).
+`ghcr.io/nosdesk/nosdesk` (notes) requires registry auth to inspect — confirm
+`arm64` availability before enabling that profile. The perf-budget gates in
+`tests/run.py --static` are tier-relative, not arch-relative — no ARM-specific
+configuration to change.
+
 ## Performance & Efficiency
 
 Sized, tuned and *enforced* for each tier — reservations-first budgeting,
