@@ -519,6 +519,12 @@ placeholders exactly as on x86.
   (build once, needs the `lab-ca` named context)
 - portal (`portal/Dockerfile`), dev-agent / predictive-agent / taskfleet
   (in-repo contexts under `monitoring/`)
+- **NosDesk ticketing** (`make nosdesk-image` or `scripts/build-nosdesk.sh`) —
+  the published `ghcr.io/nosdesk/nosdesk` release is **amd64-only**, but
+  upstream's Dockerfile is arm64-aware (pdfium case + multi-arch stage
+  bases), so we build it from the pinned upstream tag; point
+  `NOSDESK_IMAGE` at the result in `.env` (BSL 1.1 — self-hosting is
+  permitted, review before offering ticketing as a paid service)
 
 **Hardware guidance.** Pi 5 (8–16 GB) is the comfortable baseline; Pi 4 / 8 GB
 works for the demo tier. Boot from a USB3 SSD — Postgres + Zitadel churn wears
@@ -530,8 +536,7 @@ claim above is manifest-verified per image plus native builds, so give the
 first `demo.sh` pass on the Pi a manual run. Heavy optional profiles scale
 down: Operaton (JVM) wants heap tuning on 8 GB, Synapse is memory-hungry, and
 local LLMs are best kept to ~7B Q4 on a Pi 5 (a few tok/s).
-`ghcr.io/nosdesk/nosdesk` (notes) requires registry auth to inspect — confirm
-`arm64` availability before enabling that profile. The perf-budget gates in
+The perf-budget gates in
 `tests/run.py --static` are tier-relative, not arch-relative — no ARM-specific
 configuration to change.
 

@@ -28,6 +28,9 @@ x-service-defaults: &service-defaults
 services:
   nosdesk:
     <<: *service-defaults
+    # The published ghcr release is amd64-only. For ARM (Pi) or reproducible
+    # builds: make nosdesk-image (scripts/build-nosdesk.sh), then set
+    # NOSDESK_IMAGE=nosdesk:1.0.12 in .env.
     image: ${NOSDESK_IMAGE:-ghcr.io/nosdesk/nosdesk:1.0.12}
     container_name: opensme-nosdesk
     restart: unless-stopped

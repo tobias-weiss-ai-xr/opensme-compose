@@ -640,3 +640,7 @@ paperless-oidc-image: ## Build the allauth/OIDC-enabled paperless image
 	  --build-context lab-ca=traefik/certs \
 	  -f images/paperless-oidc/Dockerfile images/paperless-oidc
 
+# ── NosDesk ticketing (self-built from upstream; ghcr release is amd64-only) ─
+nosdesk-image: ## Build the NosDesk ticketing image from upstream source
+	./scripts/build-nosdesk.sh
+
