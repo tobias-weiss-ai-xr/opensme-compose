@@ -76,6 +76,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  height: 100%;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -87,29 +88,36 @@ body {
     box-shadow 0.15s ease,
     transform 0.15s ease,
     border-color 0.15s ease;
+
+  .func-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+  }
+
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 700;
+  }
+
+  /* fill remaining space so .open is pushed to the card bottom */
+  .product {
+    color: var(--foreground-dim);
+    font-size: 0.88rem;
+    flex: 1;
+  }
+
+  /* pin the Open button to the same baseline across all tiles */
+  .open {
+    margin-top: auto;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
 }
 .func-card:hover {
   border-color: var(--accent);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
   transform: translateY(-1px);
-}
-.func-icon {
-  font-size: 1.6rem;
-  line-height: 1;
-}
-.func-card h3 {
-  font-size: 1.02rem;
-  font-weight: 700;
-}
-.func-card .product {
-  color: var(--foreground-dim);
-  font-size: 0.88rem;
-  flex: 1;
-}
-.func-card .open {
-  color: var(--accent);
-  font-size: 0.85rem;
-  font-weight: 600;
 }
 
 /* Tabs */
