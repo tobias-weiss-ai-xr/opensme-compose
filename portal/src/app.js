@@ -556,6 +556,33 @@
       }
     });
 
+    // ☁️ aus der Cloud: open the cloud picker (/files?picker=1) in a new
+    // tab and consume its cross-tab handback. Same-origin, so the picker
+    // tab's localStorage write reaches this page via the storage event;
+    // the focus listener covers a missed event (picker tab closed very
+    // fast). A closed-without-pick simply leaves the key absent — ignored.
+    var icCloud = icCard.querySelector(".ic-cloud");
+    if (icCloud) {
+      var CLOUD_PICK_KEY = "cloudPickResult";
+      icCloud.addEventListener("click", function () {
+        // Stale result from an earlier session must not leak into this pick.
+        try { localStorage.removeItem(CLOUD_PICK_KEY); } catch (e) {}
+        window.open("/files?picker=1", "_blank");
+        var consumePick = function () {
+          var picked = null;
+          try { picked = localStorage.getItem(CLOUD_PICK_KEY); } catch (e) { return; }
+          if (!picked) return; // picker closed without a pick — ignore
+          try { localStorage.removeItem(CLOUD_PICK_KEY); } catch (e) {}
+          if (icUrl) icUrl.value = picked;
+          if (icFile) icFile.value = ""; // either a cloud link or a picked file
+          if (icFileName) icFileName.textContent = "";
+          window.focus();
+        };
+        window.addEventListener("storage", consumePick);
+        window.addEventListener("focus", consumePick);
+      });
+    }
+
     refresh();
   }
 
@@ -805,4 +832,319 @@
   });
 
   refresh();
+})();
+
+// ── Cloud file picker (/files) — SSR page, JS enhancement ─────────────
+// The server renders the current directory's entries (no-JS browsing +
+// download work). This module re-pulls the list via the /api/cloud
+// bridge and adds upload (PUT), mkdir (POST), delete (DELETE) and the
+// SELECT handback: in ?picker=1 mode selecting a file writes its
+// canonical URL into localStorage 'cloudPickResult' (same origin) and
+// closes the tab; the host page (intercom card) consumes it.
+(function () {
+  "use strict";
+  var page = document.getElementById("cloud-page");
+  if (!page) return;
+
+  var PICK_KEY = "cloudPickResult";
+  var pickerMode = page.getAttribute("data-picker") === "1";
+
+  var grid = document.getElementById("cf-grid");
+  var trail = document.getElementById("cf-trail");
+  var msg = document.getElementById("cf-msg");
+  var fileInput = document.getElementById("cf-file");
+  var fileName = document.getElementById("cf-file-name");
+  var uploadBtn = document.getElementById("cf-upload");
+  var mkdirInput = document.getElementById("cf-mkdir-name");
+  var mkdirBtn = document.getElementById("cf-mkdir");
+  var doneBtn = document.getElementById("cf-done");
+
+  // ── path state (mirrors cloud::validate_path on the server) ──────────
+  function cleanPath(raw) {
+    var segs = String(raw || "").split("/").filter(function (s) { return s.length; });
+    for (var i = 0; i < segs.length; i++) {
+      if (segs[i] === "." || segs[i] === "..") return "";
+    }
+    return segs.join("/");
+  }
+  function pathFromSearch(search) {
+    var m = /[?&]path=([^&]*)/.exec(search || "");
+    if (!m) return "";
+    try {
+      // "+" is a space in query strings (the SSR links are form-encoded)
+      return cleanPath(decodeURIComponent(m[1].replace(/\+/g, " ")));
+    } catch (e) { return ""; }
+  }
+  var current = pathFromSearch(window.location.search);
+
+  function joinPath(dir, name) {
+    return dir ? dir + "/" + name : name;
+  }
+  function pageUrl(dir, picker) {
+    var q = [];
+    if (dir) q.push("path=" + encodeURIComponent(dir));
+    if (picker) q.push("picker=1");
+    return "/files" + (q.length ? "?" + q.join("&") : "");
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function humanSize(bytes) {
+    if (bytes == null) return "—";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
+  }
+  function say(text, ok) {
+    if (!msg) return;
+    msg.textContent = text;
+    msg.classList.toggle("is-ok", !!ok);
+    msg.hidden = false;
+  }
+  function failText(r) {
+    return r.json().then(function (e) {
+      throw new Error(e.error || ("HTTP " + r.status));
+    }, function () {
+      throw new Error("HTTP " + r.status);
+    });
+  }
+
+  // ── rendering (createElement/textContent only — file names are
+  //    user data from the cloud, never innerHTML) ─────────────────────
+  function row(entry) {
+    var rel = joinPath(current, entry.name);
+    var li = el("li", "cf-row " + (entry.is_dir ? "cf-dir" : "cf-file"));
+    var main;
+    if (entry.is_dir) {
+      // Dir click navigates in every mode — picking happens per FILE.
+      main = document.createElement("a");
+      main.href = pageUrl(rel, pickerMode);
+    } else {
+      main = el("span", "cf-main");
+    }
+    main.className = "cf-main";
+    main.appendChild(el("span", "cf-icon", entry.is_dir ? "📁" : "📄"));
+    main.appendChild(el("span", "cf-name", entry.name));
+    main.appendChild(el("span", "cf-size", entry.is_dir ? "Ordner" : humanSize(entry.size)));
+    li.appendChild(main);
+
+    var actions = el("span", "cf-actions");
+    if (!entry.is_dir) {
+      var dl = document.createElement("a");
+      dl.className = "cf-dl";
+      dl.textContent = "Download";
+      dl.href = "/api/cloud/file?path=" + encodeURIComponent(rel);
+      actions.appendChild(dl);
+      var sel = el("button", "cf-select", "Auswählen");
+      sel.type = "button";
+      sel.setAttribute("data-path", rel);
+      sel.setAttribute("data-name", entry.name);
+      actions.appendChild(sel);
+    }
+    var del = el("button", "cf-del", "🗑");
+    del.type = "button";
+    del.setAttribute("aria-label", "Löschen");
+    del.setAttribute("data-path", rel);
+    del.setAttribute("data-name", entry.name);
+    del.setAttribute("data-is-dir", entry.is_dir ? "1" : "0");
+    actions.appendChild(del);
+    li.appendChild(actions);
+    return li;
+  }
+
+  function renderTrail() {
+    if (!trail) return;
+    trail.textContent = "";
+    var root = document.createElement("a");
+    root.href = pageUrl("", pickerMode);
+    root.textContent = "☁ Cloud-Dateien";
+    trail.appendChild(root);
+    var acc = "";
+    (current ? current.split("/") : []).forEach(function (seg) {
+      trail.appendChild(el("span", "cf-sep", "›"));
+      acc = acc ? acc + "/" + seg : seg;
+      if (acc === current) {
+        trail.appendChild(el("span", "cf-here", seg));
+      } else {
+        var a = document.createElement("a");
+        a.href = pageUrl(acc, pickerMode);
+        a.textContent = seg;
+        trail.appendChild(a);
+      }
+    });
+    // keep the URL deep-linkable while browsing without a reload
+    try { window.history.replaceState(null, "", pageUrl(current, pickerMode)); } catch (e) {}
+  }
+
+  function render(entries) {
+    grid.textContent = "";
+    if (!entries.length) {
+      grid.appendChild(el("li", "cf-empty", "Dieser Ordner ist leer."));
+    } else {
+      entries.forEach(function (e) { grid.appendChild(row(e)); });
+    }
+    renderTrail();
+  }
+
+  function load() {
+    return fetch("/api/cloud/files?path=" + encodeURIComponent(current))
+      .then(function (r) {
+        if (r.status === 503) throw new Error("Cloud-Speicher ist nicht konfiguriert.");
+        if (!r.ok) return failText(r);
+        return r.json();
+      })
+      .then(function (d) { render(d.entries || []); })
+      .catch(function (err) { say("Ordner nicht ladbar: " + err.message); });
+  }
+
+  // ── select: hand the canonical URL back ─────────────────────────────
+  function handback(url, name) {
+    try { localStorage.setItem(PICK_KEY, url); } catch (e) {}
+    say("✔ Ausgewählt: " + name, true);
+    if (msg) msg.classList.add("is-ok");
+    setTimeout(function () { window.close(); }, 500);
+  }
+
+  function select(btn) {
+    var rel = btn.getAttribute("data-path") || "";
+    var name = btn.getAttribute("data-name") || rel;
+    if (!pickerMode) {
+      // Plain browse mode: selecting opens the file (download bridge).
+      window.location.href = "/api/cloud/file?path=" + encodeURIComponent(rel);
+      return;
+    }
+    say("…");
+    fetch("/api/cloud/share?path=" + encodeURIComponent(rel), { method: "POST" })
+      .then(function (r) {
+        if (!r.ok) return failText(r);
+        return r.json();
+      })
+      .then(function (d) {
+        handback(d.url || "/api/cloud/file?path=" + encodeURIComponent(rel), name);
+      })
+      .catch(function () {
+        // Share minting failed (OCS unavailable): still hand something
+        // same-origin back so the host can proceed.
+        handback("/api/cloud/file?path=" + encodeURIComponent(rel), name);
+      });
+  }
+
+  // ── grid events (delegated — covers SSR rows too, before re-render) ──
+  grid.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var dirLink = t.closest("a.cf-main");
+    if (dirLink && grid.contains(dirLink)) {
+      ev.preventDefault(); // client-side navigation: fetch + re-render
+      current = pathFromSearch("?" + (dirLink.search || ""));
+      load();
+      return;
+    }
+    var del = t.closest(".cf-del");
+    if (del && grid.contains(del)) {
+      ev.preventDefault();
+      var rel = del.getAttribute("data-path") || "";
+      if (!rel) return;
+      if (!window.confirm("„" + (del.getAttribute("data-name") || rel) + "“ löschen?")) return;
+      fetch("/api/cloud/file?path=" + encodeURIComponent(rel), { method: "DELETE" })
+        .then(function (r) {
+          if (r.status === 401) throw new Error("Sitzung abgelaufen");
+          if (r.status !== 204) return failText(r);
+          load();
+        })
+        .catch(function (err) { say("Nicht gelöscht: " + err.message); });
+      return;
+    }
+    var sel = t.closest(".cf-select");
+    if (sel && grid.contains(sel)) {
+      ev.preventDefault();
+      select(sel);
+    }
+  });
+
+  // Browser back/forward between deep-linked directories.
+  window.addEventListener("popstate", function () {
+    current = pathFromSearch(window.location.search);
+    load();
+  });
+
+  // ── upload (raw-body PUT, same pattern as intercom/polls) ────────────
+  fileInput.addEventListener("change", function () {
+    var f = fileInput.files && fileInput.files[0];
+    fileName.textContent = f ? f.name + " (" + humanSize(f.size) + ")" : "";
+  });
+
+  uploadBtn.addEventListener("click", function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (!f) {
+      say("Bitte zuerst eine Datei auswählen.");
+      return;
+    }
+    say("Lade hoch…");
+    fetch(
+      "/api/cloud/files?path=" + encodeURIComponent(current) +
+      "&name=" + encodeURIComponent(f.name),
+      {
+        method: "PUT",
+        headers: { "Content-Type": f.type || "application/octet-stream" },
+        body: f,
+      }
+    )
+      .then(function (r) {
+        if (r.status === 401) throw new Error("Sitzung abgelaufen");
+        if (!r.ok) return failText(r);
+        fileInput.value = "";
+        fileName.textContent = "";
+        say("Hochgeladen: " + f.name, true);
+        if (msg) msg.classList.add("is-ok");
+        load();
+      })
+      .catch(function (err) { say("Upload fehlgeschlagen: " + err.message); });
+  });
+
+  // ── mkdir ────────────────────────────────────────────────────────────
+  mkdirBtn.addEventListener("click", function () {
+    var name = (mkdirInput.value || "").trim();
+    if (!name || name.indexOf("/") !== -1 || name === "." || name === "..") {
+      say("Bitte einen gültigen Ordnernamen angeben.");
+      return;
+    }
+    say("Lege Ordner an…");
+    fetch(
+      "/api/cloud/files?path=" + encodeURIComponent(current) +
+      "&name=" + encodeURIComponent(name),
+      { method: "POST" }
+    )
+      .then(function (r) {
+        if (r.status === 401) throw new Error("Sitzung abgelaufen");
+        if (r.status === 409) throw new Error("Ordner existiert bereits");
+        if (!r.ok) return failText(r);
+        mkdirInput.value = "";
+        say("Ordner angelegt: " + name, true);
+        load();
+      })
+      .catch(function (err) { say("Ordner nicht angelegt: " + err.message); });
+  });
+  mkdirInput.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      mkdirBtn.click();
+    }
+  });
+
+  // ── footer ───────────────────────────────────────────────────────────
+  if (doneBtn) {
+    doneBtn.addEventListener("click", function () {
+      // window.close() works for script-opened tabs (the picker is
+      // opened via window.open); otherwise back to the portal.
+      if (!window.close()) window.location.href = "/";
+    });
+  }
+
+  // First paint is SSR; this refreshes the list through the bridge and
+  // binds the JS-only affordances for the current directory.
+  load();
 })();
