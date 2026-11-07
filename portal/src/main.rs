@@ -434,9 +434,9 @@ fn build_landing_page(config: &AppConfig) -> String {
             background: var(--accent-light); color: var(--accent); border-radius: 14px;
         }}
         .func-card h3 {{ color: var(--accent); margin-bottom: 2px; font-size: 15px; }}
-        .func-card .product {{ color: var(--text-dim); font-size: 13px; font-style: italic; }}
+        .func-card .product {{ color: var(--text-dim); font-size: 13px; font-style: italic; flex: 1; }}
         .func-card .open {{
-            display: block; margin-top: 12px;
+            display: block; margin-top: auto;
             background: var(--accent); color: #fff;
             padding: 9px 14px; border-radius: 999px;
             text-decoration: none; font-weight: 600; font-size: 14px;
