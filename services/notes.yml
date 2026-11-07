@@ -69,13 +69,14 @@ services:
     volumes:
       - notes-data:/data
     networks:
-      - opensme-net
+      opensme-net:
+        aliases:
+          - notes-y-provider
+          - opensme-notes-y-provider
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      notes-y-provider:
         condition: service_healthy
     healthcheck:
       # no curl in the image; the API answers 400 without a proper Host
@@ -152,8 +153,7 @@ services:
     profiles: ["notes"]
     environment:
       Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
-    networks:
-      - opensme-net
+    network_mode: service:notes-backend
     healthcheck:
       # every path returns 403 without an API key — "any HTTP answer" is the
       # health signal; use node fetch (wget --spider fails on 403)

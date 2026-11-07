@@ -38,8 +38,7 @@ services:
       MARIADB_ROOT_PASSWORD: ${INVOICENINJA_DB_ROOT_PASSWORD:?INVOICENINJA_DB_ROOT_PASSWORD must be set in .env}
     volumes:
       - invoiceninja-db:/var/lib/mysql
-    networks:
-      - opensme-net
+    network_mode: service:invoiceninja-web
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 15s
@@ -103,11 +102,8 @@ services:
     volumes:
       - invoiceninja-public:/var/www/app/public
       - invoiceninja-storage:/var/www/app/storage
-    networks:
-      - opensme-net
+    network_mode: service:invoiceninja-web
     depends_on:
-      invoiceninja-db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -141,10 +137,12 @@ services:
       - ./services/invoice-ninja/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - invoiceninja-public:/var/www/app/public:ro
     networks:
-      - opensme-net
-    depends_on:
-      invoiceninja:
-        condition: service_started
+      opensme-net:
+        aliases:
+          - invoiceninja
+          - invoiceninja-db
+          - opensme-invoiceninja
+          - opensme-invoiceninja-db
     labels:
       - "traefik.enable=true"
       - "com.centurylinklabs.watchtower.enable=false"

@@ -72,7 +72,10 @@ services:
     volumes:
       - limesurvey-uploads:/var/www/html/upload
     networks:
-      - opensme-net
+      opensme-net:
+        aliases:
+          - limesurvey-cloud-sync
+          - opensme-limesurvey-cloud-sync
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,10 +140,7 @@ services:
       CLOUD_WEBDAV_PASS: ${CLOUD_WEBDAV_PASS:-}
     volumes:
       - limesurvey-uploads:/data:ro
-    networks:
-      - opensme-net
-    depends_on:
-      - limesurvey
+    network_mode: service:limesurvey
     deploy:
       resources:
         limits:
