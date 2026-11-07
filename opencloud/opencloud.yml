@@ -96,6 +96,18 @@ services:
       PROXY_AUTOPROVISION_ACCOUNTS: "true"
       PROXY_USER_OIDC_CLAIM: preferred_username
       PROXY_USER_CS3_CLAIM: username
+      # Service/DAV (Basic-auth) accounts — e.g. CLOUD_WEBDAV_* used by the
+      # portal cloud picker and the limesurvey-cloud-sync sidecar — cannot
+      # carry a `name` claim (auth-basic builds claims from the IDM LDAP entry
+      # as {preferred_username, email, openclouduuid}; `name` is never
+      # included). With the default DISPLAYNAME claim (`name`) the
+      # account-resolver hits "missing claim 'name' (displayName)" and every
+      # Basic request 500s (observed: portal cloud bridge + a silently dead
+      # LimeSurvey cloud sync). Driving displayName from preferred_username is
+      # the only workable source for Basic; on the live demo instance this
+      # flattens OpenCloud's own UI display names to login names (cosmetic —
+      # Zitadel/SOGo/portal keep their own names).
+      PROXY_AUTOPROVISION_CLAIM_DISPLAYNAME: preferred_username
       # Opt-in machine auth for automation (poll-attachment upload +
       # automated public-share creation). Validates basic-auth credentials
       # against the IDM — works alongside the Zitadel IdP. Off by default;
@@ -141,8 +153,12 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Static IP: /root/git/docker-traefik/dynamic/cloud-csp.yml pins
+    # cloud.home to 172.19.0.17 (CSP override via traefik file provider) — a
+    # dynamic renumber on recreate would 502 the whole cloud UI at the edge.
     networks:
-      - opensme-net
+      opensme-net:
+        ipv4_address: 172.19.0.17
     labels:
       - "traefik.enable=true"
       - "com.centurylinklabs.watchtower.enable=false"
