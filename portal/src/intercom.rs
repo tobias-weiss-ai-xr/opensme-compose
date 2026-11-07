@@ -26,6 +26,29 @@ pub const MAX_UPLOAD: u64 = 5 * 1024 * 1024;
 /// Env knob for the FIFO cap (10..=500, default MAX_MESSAGES).
 pub const ENV_MAX_MESSAGES: &str = "INTERCOM_MAX_MESSAGES";
 
+/// Message kinds. "note" is the plain team note; "info"/"warn" turn the
+/// message into an operator broadcast banner (announcement styling).
+pub const KIND_NOTE: &str = "note";
+pub const KIND_INFO: &str = "info";
+pub const KIND_WARN: &str = "warn";
+
+/// Serde default so legacy intercom.json files (no `kind` key) load as
+/// plain notes — backward compatible with pre-kind stores.
+fn default_kind() -> String {
+    KIND_NOTE.to_string()
+}
+
+/// Validate a requested message kind. None/empty defaults to "note";
+/// anything beyond note|info|warn is rejected (HTTP 400 at the handler).
+pub fn validate_kind(raw: Option<&str>) -> Result<String, String> {
+    let kind = raw.unwrap_or(KIND_NOTE).trim();
+    match kind {
+        "" => Ok(KIND_NOTE.to_string()),
+        KIND_NOTE | KIND_INFO | KIND_WARN => Ok(kind.to_string()),
+        _ => Err("kind must be one of note, info, warn".to_string()),
+    }
+}
+
 /// Attachment reference snapshot taken when the message was sent.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Attachment {
@@ -44,6 +67,11 @@ pub struct IntercomMessage {
     /// persisted stores (serde default keeps old JSON loadable).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Severity of the note: "note" (plain), "info"/"warn" (banner
+    /// mode). Serde default keeps legacy JSON loadable as "note"; the
+    /// field is always serialized so persisted JSON stays stable.
+    #[serde(default = "default_kind")]
+    pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
     pub created_at: String,
@@ -62,19 +90,25 @@ impl IntercomConfig {
         // The cloud host is wherever OPENCLOUD_URL points (it differs per
         // deployment); also keep the classic cloud.<opensme-domain> name.
         let mut hosts = vec![format!("cloud.{}", opensme_domain)];
+        // SOGo6 webmail (WebDAV/cloud storage): intercom notes link files
+        // hosted there, e.g. https://webmail.<domain>/SOGo/dav/…
+        let webmail = format!("webmail.{}", opensme_domain);
+        if !hosts.contains(&webmail) {
+            hosts.push(webmail);
+        }
         if let Ok(oc) = std::env::var("OPENCLOUD_URL") {
-            let host = oc
-                .trim()
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .split('/')
-                .next()
-                .unwrap_or("");
-            if !host.is_empty() {
-                let host = host.to_string();
-                if !hosts.contains(&host) {
-                    hosts.push(host);
-                }
+            let host = derived_host_from_url(&oc);
+            if !host.is_empty() && !hosts.contains(&host) {
+                hosts.push(host);
+            }
+        }
+        // SOGO6_DOMAIN (e.g. https://webmail.home.opensme.graphwiz.ai or
+        // a bare host): its trimmed lowercase host joins the defaults so
+        // a SOGo6 instance off the main domain stays linkable.
+        if let Ok(sogo) = std::env::var("SOGO6_DOMAIN") {
+            let host = derived_host_from_url(&sogo);
+            if !host.is_empty() && !hosts.contains(&host) {
+                hosts.push(host);
             }
         }
         let env_hosts = std::env::var("INTERCOM_ATTACHMENT_HOSTS")
@@ -122,6 +156,20 @@ impl Default for IntercomStore {
     }
 }
 
+/// Host (or host:port) from a URL-ish env value: trims whitespace,
+/// strips an optional http(s):// scheme and any path/query, lowercases.
+/// Shared by the OPENCLOUD_URL and SOGO6_DOMAIN derivations.
+fn derived_host_from_url(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase()
+}
+
 impl IntercomStore {
     /// Build a store that persists to `data_path` and stores picked-file
     /// uploads under `attachments_dir`. Loads existing messages (missing
@@ -151,7 +199,11 @@ impl IntercomStore {
                 let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
                 let next = msgs.iter().map(|m| m.id).max().unwrap_or(0) + 1;
                 self.next_id.store(next, Ordering::Relaxed);
-                *messages = msgs.into_iter().rev().collect();
+                // The snapshot file is oldest-first (persist walks the
+                // deque front→back) — load it in the same order so
+                // newest-first list()/list_since(), latest_id() (back)
+                // and the FIFO front (oldest) all stay correct.
+                *messages = msgs.into_iter().collect();
             }
             Err(_) => {
                 // Corrupt store: keep it for forensics, start fresh.
@@ -219,6 +271,7 @@ impl IntercomStore {
         text: String,
         author: Option<String>,
         attachment: Option<Attachment>,
+        kind: String,
     ) -> IntercomMessage {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         // Unix seconds — enough for ordering; no extra time crate needed.
@@ -230,6 +283,7 @@ impl IntercomStore {
             id,
             text,
             author,
+            kind,
             attachment,
             created_at,
         }
@@ -240,8 +294,9 @@ impl IntercomStore {
         text: String,
         author: Option<String>,
         attachment: Option<Attachment>,
+        kind: String,
     ) -> IntercomMessage {
-        let msg = self.push_internal(text, author, attachment);
+        let msg = self.push_internal(text, author, attachment, kind);
         // Single write-lock for mutate + snapshot: no second acquisition,
         // and the persisted snapshot can never race another push.
         let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
@@ -270,6 +325,36 @@ impl IntercomStore {
         if let Some(dir) = self.attachments_dir.as_ref() {
             remove_local_attachment(dir, &msg.attachment, "/api/intercom/files/");
         }
+    }
+
+    /// Moderation: remove one note by id. Persists an updated snapshot
+    /// (same atomic tmp+rename as push) and best-effort GCs the note's
+    /// picked-file upload — ONE code path with the FIFO rotation
+    /// (gc_local_attachment → remove_local_attachment); cloud links
+    /// survive (the file stays in the cloud). Returns false — and
+    /// touches nothing, no persist — when the id is unknown.
+    pub fn delete(&self, id: u64) -> bool {
+        let mut messages = self.messages.write().unwrap_or_else(|e| e.into_inner());
+        let before = messages.len();
+        let mut removed: Option<IntercomMessage> = None;
+        messages.retain(|m| {
+            if removed.is_none() && m.id == id {
+                removed = Some(m.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if messages.len() == before {
+            return false;
+        }
+        let snapshot: Vec<IntercomMessage> = messages.iter().cloned().collect();
+        drop(messages);
+        self.persist(&snapshot);
+        if let Some(msg) = removed {
+            self.gc_local_attachment(&msg);
+        }
+        true
     }
 
     pub fn list(&self) -> Vec<IntercomMessage> {
@@ -496,12 +581,20 @@ pub fn parse_attachment_metadata(
 
 #[cfg(test)]
 mod tests {
+    // ── attachment hosts (derived defaults: cloud + webmail + SOGo6) ──
+
+    /// Env-mutating tests must not race each other: cargo runs them in
+    /// parallel threads inside one process. Everything that touches
+    /// process env takes this lock for its whole body.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn default_hosts_cover_opencloud_url_host_even_with_empty_env() {
         // Regression: with the composed default being a comma-joined
         // string, an empty-but-set INTERCOM_ATTACHMENT_HOSTS produced a
         // single allowlist entry containing a comma — nothing matched.
         // SAFETY: single-threaded env access in this test binary section.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             std::env::set_var("OPENCLOUD_URL", "http://cloud.opensme.local");
             std::env::set_var("INTERCOM_ATTACHMENT_HOSTS", "");
@@ -517,6 +610,77 @@ mod tests {
         assert!(ok.is_ok());
         unsafe {
             std::env::remove_var("OPENCLOUD_URL");
+            std::env::remove_var("INTERCOM_ATTACHMENT_HOSTS");
+        }
+    }
+
+    #[test]
+    fn webmail_subdomain_is_allowlisted_by_default() {
+        // SOGo6 webmail / WebDAV: notes may link files hosted on
+        // webmail.<opensme-domain> even with no env hints at all.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("OPENCLOUD_URL");
+            std::env::remove_var("INTERCOM_ATTACHMENT_HOSTS");
+            std::env::remove_var("SOGO6_DOMAIN");
+        }
+        let cfg = IntercomConfig::from_env("meine-firma.test");
+        assert!(cfg
+            .allowed_hosts
+            .contains(&"webmail.meine-firma.test".to_string()));
+        assert!(validate_attachment_url(
+            "https://webmail.meine-firma.test/SOGo/dav/freigabe.pdf",
+            &cfg
+        )
+        .is_ok());
+        unsafe {
+            std::env::remove_var("SOGO6_DOMAIN");
+        }
+    }
+
+    #[test]
+    fn sogo6_domain_env_adds_its_host_to_the_allowlist() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("OPENCLOUD_URL");
+            std::env::remove_var("INTERCOM_ATTACHMENT_HOSTS");
+            // Scheme + path are stripped; only the host is allowlisted.
+            std::env::set_var("SOGO6_DOMAIN", "https://Webmail.home.opensme.graphwiz.ai/");
+        }
+        let cfg = IntercomConfig::from_env("meine-firma.test");
+        assert!(cfg
+            .allowed_hosts
+            .contains(&"webmail.home.opensme.graphwiz.ai".to_string()));
+        assert!(validate_attachment_url(
+            "https://webmail.home.opensme.graphwiz.ai/SOGo/dav/notizen/x.pdf",
+            &cfg
+        )
+        .is_ok());
+        // A different host is still rejected.
+        assert!(validate_attachment_url("https://evil.example/x.pdf", &cfg).is_err());
+        unsafe {
+            std::env::remove_var("SOGO6_DOMAIN");
+        }
+    }
+
+    #[test]
+    fn intercom_attachment_hosts_env_still_overrides_everything() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("OPENCLOUD_URL");
+            std::env::set_var("SOGO6_DOMAIN", "https://webmail.home.opensme.graphwiz.ai");
+            std::env::set_var("INTERCOM_ATTACHMENT_HOSTS", "files.example");
+        }
+        let cfg = IntercomConfig::from_env("meine-firma.test");
+        assert_eq!(cfg.allowed_hosts, vec!["files.example".to_string()]);
+        assert!(validate_attachment_url("https://files.example/x.pdf", &cfg).is_ok());
+        // Derived hosts (cloud/webmail/SOGO6) are NOT accepted anymore.
+        assert!(validate_attachment_url("https://webmail.meine-firma.test/x", &cfg).is_err());
+        assert!(
+            validate_attachment_url("https://webmail.home.opensme.graphwiz.ai/x", &cfg).is_err()
+        );
+        unsafe {
+            std::env::remove_var("SOGO6_DOMAIN");
             std::env::remove_var("INTERCOM_ATTACHMENT_HOSTS");
         }
     }
@@ -640,7 +804,7 @@ mod tests {
     fn store_caps_fifo_and_lists_newest_first() {
         let store = IntercomStore::default();
         for i in 0..(MAX_MESSAGES + 10) {
-            store.push(format!("m{i}"), None, None);
+            store.push(format!("m{i}"), None, None, KIND_NOTE.into());
         }
         let listed = store.list();
         assert_eq!(listed.len(), MAX_MESSAGES);
@@ -657,7 +821,12 @@ mod tests {
             Some(7),
             Some("attachment; filename=\"a.pdf\""),
         );
-        let m = store.push("see attached".into(), Some("Bob".into()), Some(att.clone()));
+        let m = store.push(
+            "see attached".into(),
+            Some("Bob".into()),
+            Some(att.clone()),
+            KIND_NOTE.into(),
+        );
         let stored = &store.list()[0];
         assert_eq!(stored.attachment.as_ref().unwrap().name, "a.pdf");
         assert_eq!(stored.author.as_deref(), Some("Bob"));
@@ -674,7 +843,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         let store = IntercomStore::open(Some(path.clone()), None);
-        store.push("persistent".into(), Some("Anna".into()), None);
+        store.push(
+            "persistent".into(),
+            Some("Anna".into()),
+            None,
+            KIND_NOTE.into(),
+        );
         drop(store);
 
         let store2 = IntercomStore::open(Some(path.clone()), None);
@@ -683,7 +857,9 @@ mod tests {
         assert_eq!(listed[0].text, "persistent");
         // id counter continues after reload
         assert_eq!(
-            store2.push("second".into(), None, None).id,
+            store2
+                .push("second".into(), None, None, KIND_NOTE.into())
+                .id,
             listed[0].id + 1
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -698,7 +874,7 @@ mod tests {
 
         let store = IntercomStore::open(Some(path.clone()), None);
         for i in 0..(MAX_MESSAGES + 5) {
-            store.push(format!("m{i}"), None, None);
+            store.push(format!("m{i}"), None, None, KIND_NOTE.into());
         }
         drop(store);
         let store2 = IntercomStore::open(Some(path), None);
@@ -731,7 +907,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         let store = IntercomStore::open(Some(path.clone()), None);
-        store.push("hallo".into(), Some("Tobias".into()), None);
+        store.push(
+            "hallo".into(),
+            Some("Tobias".into()),
+            None,
+            KIND_NOTE.into(),
+        );
         drop(store);
 
         let re = IntercomStore::open(Some(path.clone()), None);
@@ -749,7 +930,7 @@ mod tests {
         let store = IntercomStore::default();
         assert_eq!(store.latest_id(), 0);
         for i in 0..5 {
-            store.push(format!("m{i}"), None, None);
+            store.push(format!("m{i}"), None, None, KIND_NOTE.into());
         }
         assert_eq!(store.latest_id(), 5);
         let delta = store.list_since(3);
@@ -786,7 +967,7 @@ mod tests {
             if i == 0 {
                 first_url = Some(att.url.clone());
             }
-            store.push(format!("m{i}"), None, Some(att));
+            store.push(format!("m{i}"), None, Some(att), KIND_NOTE.into());
         }
         // The first message rotated out — its upload file must be gone.
         let remaining = std::fs::read_dir(&atts).unwrap().count();
@@ -875,5 +1056,212 @@ mod tests {
         // the real one works
         assert!(store.read_attachment(&token, &name).is_some());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── kind / severity ──────────────────────────────────────────────
+
+    #[test]
+    fn validate_kind_accepts_only_note_info_warn() {
+        assert_eq!(validate_kind(None).unwrap(), "note");
+        assert_eq!(validate_kind(Some("")).unwrap(), "note");
+        assert_eq!(validate_kind(Some("  note ")).unwrap(), "note");
+        assert_eq!(validate_kind(Some("info")).unwrap(), "info");
+        assert_eq!(validate_kind(Some("warn")).unwrap(), "warn");
+        assert_eq!(
+            validate_kind(Some("WARM")).unwrap_err(),
+            "kind must be one of note, info, warn"
+        );
+        assert!(validate_kind(Some("banana")).is_err());
+    }
+
+    #[test]
+    fn kind_roundtrips_through_push_and_list() {
+        let store = IntercomStore::default();
+        let plain = store.push("hallo".into(), None, None, validate_kind(None).unwrap());
+        assert_eq!(plain.kind, "note");
+        let warn = store.push(
+            "wartung".into(),
+            None,
+            None,
+            validate_kind(Some("warn")).unwrap(),
+        );
+        let listed = store.list();
+        assert_eq!(listed[0].kind, "warn");
+        assert_eq!(listed[0].id, warn.id);
+        assert_eq!(listed[1].kind, "note");
+        assert_eq!(listed[1].id, plain.id);
+        // list_since keeps the kind too.
+        let delta = store.list_since(plain.id);
+        assert_eq!(delta.len(), 1);
+        assert_eq!(delta[0].kind, "warn");
+    }
+
+    #[test]
+    fn legacy_json_without_kind_loads_as_note() {
+        let dir = std::env::temp_dir().join(format!(
+            "ic-test-kind-{}-{}",
+            std::process::id(),
+            random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+        // Pre-kind JSON (author era) must still load: kind = "note".
+        std::fs::write(
+            &path,
+            r#"[{"id":1,"text":"legacy","author":"Alt","created_at":"1"}]"#,
+        )
+        .unwrap();
+        let store = IntercomStore::open(Some(path.clone()), None);
+        assert_eq!(store.list()[0].kind, "note");
+
+        // A kind written today survives reopen.
+        drop(store);
+        let store = IntercomStore::open(Some(path.clone()), None);
+        store.push(
+            "banner".into(),
+            None,
+            None,
+            validate_kind(Some("info")).unwrap(),
+        );
+        drop(store);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"kind\":\"info\""), "raw json: {raw}");
+        let re = IntercomStore::open(Some(path), None);
+        // Newest-first after reload, kind survives, cursor correct.
+        let listed = re.list();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].kind, "info");
+        assert_eq!(listed[1].kind, "note");
+        assert_eq!(re.latest_id(), listed[0].id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── moderation delete ────────────────────────────────────────────
+
+    #[test]
+    fn delete_removes_persists_and_keeps_id_space() {
+        let dir = std::env::temp_dir().join(format!(
+            "ic-test-del-{}-{}",
+            std::process::id(),
+            random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        let a = store.push("a".into(), None, None, KIND_NOTE.into());
+        let b = store.push("b".into(), None, None, KIND_NOTE.into());
+        assert!(store.delete(a.id));
+        let listed = store.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, b.id);
+        drop(store);
+
+        // The updated snapshot was persisted — reopen sees the delete.
+        let re = IntercomStore::open(Some(path.clone()), None);
+        let listed = re.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].text, "b");
+        assert_eq!(re.latest_id(), b.id, "cursor = highest id held");
+        // Deleted ids are never reused — the id counter survived.
+        assert_eq!(
+            re.push("c".into(), None, None, KIND_NOTE.into()).id,
+            b.id + 1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_unknown_id_returns_false_and_does_not_persist() {
+        let dir = std::env::temp_dir().join(format!(
+            "ic-test-delmiss-{}-{}",
+            std::process::id(),
+            random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("intercom.json");
+
+        let store = IntercomStore::open(Some(path.clone()), None);
+        let m = store.push("keep".into(), None, None, KIND_NOTE.into());
+        assert!(store.list().len() == 1);
+        // Sentinel on disk: a persist on the miss would overwrite it.
+        std::fs::write(&path, b"[]").unwrap();
+        assert!(!store.delete(m.id + 100));
+        assert_eq!(store.list().len(), 1, "unknown id must touch nothing");
+        drop(store);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"[]",
+            "a missed delete must not persist"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_gcs_picked_file_but_leaves_cloud_attachments() {
+        let dir = std::env::temp_dir().join(format!(
+            "ic-test-delgc-{}-{}",
+            std::process::id(),
+            random_token()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = dir.join("data.json");
+        let atts = dir.join("attachments");
+        std::fs::create_dir_all(&atts).unwrap();
+        let store = IntercomStore::open(Some(data), Some(atts.clone()));
+
+        let (token, name) = store.save_attachment("lokal.txt", b"body").unwrap();
+        let local = Attachment {
+            url: format!("/api/intercom/files/{token}/{name}"),
+            name: name.clone(),
+            size: Some(4),
+            content_type: "text/plain".into(),
+        };
+        let cloud = parse_attachment_metadata(
+            "https://cloud.example/s/f.pdf",
+            Some("application/pdf"),
+            Some(9),
+            Some("attachment; filename=\"f.pdf\""),
+        );
+        let m_local = store.push("lokal".into(), None, Some(local), KIND_NOTE.into());
+        let m_cloud = store.push("cloud".into(), None, Some(cloud), KIND_NOTE.into());
+        let picked_file = atts.join(format!("{token}_{name}"));
+        assert!(picked_file.exists(), "picked file stored on push");
+
+        // Cloud link: nothing on disk to remove — note goes, file path
+        // (which never existed) is untouched, remaining note intact.
+        assert!(store.delete(m_cloud.id));
+        assert!(picked_file.exists());
+        assert_eq!(store.list().len(), 1);
+
+        // Picked file: gc'd together with the note.
+        assert!(store.delete(m_local.id));
+        assert!(!picked_file.exists(), "picked file must be gc'd on delete");
+        assert!(store.list().is_empty());
+        assert_eq!(std::fs::read_dir(&atts).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fifo_cap_still_enforced_after_delete() {
+        let store = IntercomStore::default();
+        for i in 0..MAX_MESSAGES {
+            store.push(format!("m{i}"), None, None, KIND_NOTE.into());
+        }
+        assert!(store.delete(1));
+        assert_eq!(store.list().len(), MAX_MESSAGES - 1);
+        // Subsequent pushes fill up again, then rotate — cap holds and
+        // the OLDEST note (m2; m1 was already deleted) rotates out.
+        store.push("fill".into(), None, None, KIND_NOTE.into());
+        assert_eq!(store.list().len(), MAX_MESSAGES);
+        store.push("rotate".into(), None, None, KIND_NOTE.into());
+        assert_eq!(store.list().len(), MAX_MESSAGES);
+        assert!(!store.list().iter().any(|m| m.text == "m1"));
+        assert!(
+            !store.list().iter().any(|m| m.text == "m0"),
+            "oldest rotates out"
+        );
+        assert!(store.list().iter().any(|m| m.text == "fill"));
+        assert_eq!(store.list()[0].text, "rotate");
     }
 }
