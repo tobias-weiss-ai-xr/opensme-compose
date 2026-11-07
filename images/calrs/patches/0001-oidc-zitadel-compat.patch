@@ -1,0 +1,82 @@
+diff --git a/src/auth.rs b/src/auth.rs
+index 3ab91c5..64460b3 100644
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -625,8 +625,8 @@ use axum::extract::Query;
+ use openidconnect::core::{CoreClient, CoreProviderMetadata, CoreResponseType};
+ use openidconnect::{
+     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
+-    EndpointNotSet, EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
+-    RedirectUrl, Scope, TokenResponse,
++    EndpointNotSet, EndpointSet, IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
++    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
+ };
+ 
+ fn build_http_client() -> Result<openidconnect::reqwest::Client> {
+@@ -811,21 +811,28 @@ async fn oidc_callback(
+         None => return Html("No ID token in response.".to_string()).into_response(),
+     };
+ 
+-    let verifier = client.id_token_verifier();
++    // Zitadel-style IdPs put every sibling client of the project into the
++    // ID token aud claim (project token sharing) with azp set to our
++    // client_id. openidconnect requires extra audiences to be explicitly
++    // trusted; accept them (the client_id containment + azp checks above
++    // remain enforced).
++    let verifier = client
++        .id_token_verifier()
++        .set_other_audience_verifier_fn(|_aud| true);
+     let claims = match id_token.claims(&verifier, &Nonce::new(stored_nonce)) {
+         Ok(c) => c,
+         Err(e) => return Html(format!("ID token verification failed: {}", e)).into_response(),
+     };
+ 
+     let subject = claims.subject().to_string();
+-    let email = claims
++    let mut email = claims
+         .email()
+         .map(|e: &openidconnect::EndUserEmail| e.to_string())
+         .unwrap_or_default();
+     // `email_verified` is optional in the spec. If the IdP doesn't assert
+     // verification, we treat it as unverified (conservative).
+-    let email_verified = claims.email_verified().unwrap_or(false);
+-    let name = claims
++    let mut email_verified = claims.email_verified().unwrap_or(false);
++    let mut name = claims
+         .name()
+         .and_then(
+             |n: &openidconnect::LocalizedClaim<openidconnect::EndUserName>| {
+@@ -834,6 +841,33 @@ async fn oidc_callback(
+             },
+         )
+         .unwrap_or_else(|| email.split('@').next().unwrap_or("User").to_string());
++    // Zitadel v2 and other strict IdPs keep profile claims (email/name)
++    // out of the ID token entirely - fetch userinfo as the canonical
++    // source whenever the ID token did not carry them.
++    if email.is_empty() {
++        let access_token = token_response.access_token();
++        match client.user_info(access_token.clone(), None) {
++            Ok(req) => {
++                let info_result: Result<openidconnect::core::CoreUserInfoClaims, _> =
++                    req.request_async(&http_client).await;
++                match info_result {
++                    Ok(info) => {
++                        if email.is_empty() {
++                            email = info.email().map(|e| e.to_string()).unwrap_or_default();
++                        }
++                        if !email_verified {
++                            email_verified = info.email_verified().unwrap_or(false);
++                        }
++                        if let Some(n) = info.name().and_then(|n| n.get(None)) {
++                            name = n.to_string();
++                        }
++                    }
++                    Err(e) => tracing::warn!("OIDC userinfo fetch failed: {}", e),
++                }
++            }
++            Err(e) => tracing::warn!("OIDC userinfo request build failed: {}", e),
++        }
++    }
+ 
+     if email.is_empty() {
+         tracing::warn!("OIDC callback failed: no email in token");

@@ -546,14 +546,26 @@ services:
       CALRS_BASE_URL: https://${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}
       # single-file SQLite home (WAL mode, zero external deps)
       CALRS_DATA_DIR: /var/lib/calrs
-      # OIDC SSO block — documented passthrough, kept OFF unless set
-      # (blank = local-auth only). calrs 1.6.0 stores its OIDC client
-      # via the admin panel (auth_config); these envs exist so a
-      # patched/bumped calrs can pick them up without a compose edit.
+      # OIDC SSO block. LIVE on the demo deployment: calrs 1.6.0 stores the
+      # OIDC client in its SQLite auth_config (admin panel / POST
+      # /dashboard/admin/oidc), NOT in env — these passthrough envs only feed
+      # a patched/bumped calrs. The Zitadel compat patch
+      # (images/calrs/patches/0001-oidc-zitadel-compat.patch) adds multi-aud
+      # ID-token acceptance + userinfo fallback so SSO works with Zitadel.
       CALRS_OIDC_ISSUER: ${CALRS_OIDC_ISSUER:-}
       CALRS_OIDC_CLIENT_ID: ${CALRS_OIDC_CLIENT_ID:-}
       CALRS_OIDC_CLIENT_SECRET: ${CALRS_OIDC_CLIENT_SECRET:-}
       CALRS_OIDC_REDIRECT_URI: https://${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}/auth/oidc/callback
+    # calrs OIDC discovery/token exchange must reach the IdP without
+    # leaving the host (container egress is blocked in constrained
+    # deployments): map the IdP name to the host-gateway so traffic
+    # rides traefik :443 (valid cert, SNI-routed to zitadel) — the same
+    # pattern as the paperless OIDC sidecar (services/paperless.yml).
+    # NOTE calrs 1.6.0 stores the OIDC client in its SQLite auth_config
+    # (admin panel), not in these envs — enable via dashboard → admin →
+    # OIDC or POST /dashboard/admin/oidc with an admin session.
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     depends_on:
       calendar-radicale:
         condition: service_healthy

@@ -41,6 +41,16 @@ Epics / user stories (IDs appear in failure output):
     C3  the join origin equals the configured VC origin (single source
         of truth across epics)
 
+  Epic K — Calendar SSO (calrs × Zitadel OIDC)
+    K1  the calrs login page offers the SSO affordance (OIDC enabled
+        in auth_config; the demo contract — local stacks without SSO skip)
+    K2  /auth/oidc/login redirects to the IdP authorize endpoint with
+        client_id + PKCE + state (discovery + client wiring live —
+        this is the container-egress host-gateway contract)
+    K3  redirect_uri == CALENDAR_URL + /auth/oidc/callback (no drift)
+    K4  the OIDC handshake cookies are HttpOnly + Secure + SameSite
+    K5  callback state gate: bogus state is refused (CSRF contract)
+
   Epic E — Edge hardening (security-headers shadow contract)
     E1  portal: HSTS + XFO + nosniff
     E2  vc host: HSTS + XFO + nosniff (the camera/mic lift is V7)
@@ -72,6 +82,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib3
 from pathlib import Path
 
@@ -421,8 +432,65 @@ def main() -> bool:
                     result.fail(f"C3: join origin {join_origin!r} != VC_URL "
                                 f"{vc_url!r} — drift between booking and VC")
 
-    # ══ Epic E — Edge hardening ═══════════════════════════════════════
-    result.header("Epic E — Edge hardening (security-headers shadow)")
+    # ══ Epic K — Calendar SSO (calrs × Zitadel OIDC) ══════════════════
+    result.header("Epic K — Calendar SSO (calrs × Zitadel OIDC)")
+    if not cal_url:
+        result.skip("K1–K5: CALENDAR_URL not configured")
+    else:
+        r = anon.get(cal_url + "/auth/login", timeout=T)
+        sso_on = r.status_code == 200 and "auth/oidc/login" in r.text
+        if not sso_on:
+            if localish:
+                result.skip("K1–K5: calrs OIDC not enabled on this stack "
+                            "(enable via dashboard → admin → OIDC)")
+            else:
+                result.fail("K1: calrs login page offers no SSO affordance "
+                            "— OIDC disabled in auth_config (demo contract "
+                            "requires SSO; enable via dashboard admin or "
+                            "POST /dashboard/admin/oidc)")
+        else:
+            result.ok("K1: calrs login page offers the SSO affordance")
+
+            r = anon.get(cal_url + "/auth/oidc/login", timeout=T, allow_redirects=False)
+            loc = r.headers.get("location", "")
+            if r.status_code != 303 or f"{idp_base}/oauth/v2/authorize" not in loc:
+                result.fail(f"K2: /auth/oidc/login → {r.status_code} "
+                            f"{loc[:60]!r} (want 303 → IdP authorize; "
+                            "discovery needs the host-gateway extra_host)")
+            else:
+                result.ok("K2: /auth/oidc/login → 303 IdP authorize")
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+                cid, redirect = q.get("client_id", [""])[0], q.get("redirect_uri", [""])[0]
+                has_pkce = bool(q.get("code_challenge")) and q.get("code_challenge_method", [""])[0] == "S256"
+                has_state = bool(q.get("state"))
+                if has_pkce and has_state and cid:
+                    result.ok(f"K2: authorize carries client_id={cid[:8]}…, PKCE(S256), state")
+                else:
+                    result.fail(f"K2: authorize params incomplete "
+                                f"(pkce={has_pkce}, state={has_state}, cid={bool(cid)})")
+                want_redirect = cal_url.rstrip("/") + "/auth/oidc/callback"
+                if redirect.rstrip("/") == want_redirect:
+                    result.ok("K3: redirect_uri == CALENDAR_URL + /auth/oidc/callback")
+                else:
+                    result.fail(f"K3: redirect_uri {redirect!r} != {want_redirect!r}")
+
+                cookie_names = {c.name for c in anon.cookies if c.name.startswith("calrs_oidc_")}
+                flags = r.headers.get("set-cookie", "")
+                if ({"calrs_oidc_state", "calrs_oidc_nonce", "calrs_oidc_pkce"} <= cookie_names
+                        and "httponly" in flags.lower() and "samesite=lax" in flags.lower()):
+                    result.ok(f"K4: handshake cookies minted "
+                              f"({sorted(cookie_names)}), HttpOnly+SameSite=Lax")
+                else:
+                    result.warn(f"K4: handshake cookie contract not fully asserted "
+                                f"(names={sorted(cookie_names)})")
+
+                r = anon.get(cal_url + "/auth/oidc/callback?code=e2e-bogus&state=e2e-bogus",
+                             timeout=T)
+                body = r.text[:120].lower()
+                if "state" in body:
+                    result.ok("K5: callback refuses bogus state (CSRF gate)")
+                else:
+                    result.fail(f"K5: bogus-state callback accepted?! {body!r}")
     hardened(anon.get(portal_base + "/", timeout=T), result, "E1 portal")
     if vc_url:
         hardened(anon.get(vc_url + "/", timeout=T), result, "E2 vc")

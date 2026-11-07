@@ -79,7 +79,8 @@ reach the booking dashboard from the portal, and the `calrs-data` / `radicale-co
   VC link. By default calrs uses **local authentication** (the first
   registered user is admin). Optional Zitadel SSO is wired with
   [`scripts/zitadel-client.sh`](../scripts/zitadel-client.sh)
-  `--app calendar` (sets `CALRS_OIDC_*`).
+  `--app calendar` (sets `CALRS_OIDC_*`) plus the admin-panel enablement
+  and the Zitadel compat patch — see step 6 in *Setup*.
 
 ## Privacy contract (important)
 
@@ -142,7 +143,7 @@ is **opt-in** via the `calendar` profile.
    | `CALRS_ADMIN_EMAIL` | `admin@example.org` | bootstrap admin; first registered user becomes admin |
    | `CALRS_ADMIN_PASSWORD` | *(set)* | bootstrap admin password |
    | `CALRS_VC_URL` | `https://meet.example.org/` | template meeting link rendered as the booking location |
-   | `CALRS_OIDC_ISSUER` | *(empty)* | blank = local-auth only; set for Zitadel SSO |
+   | `CALRS_OIDC_ISSUER` | *(empty)* | passthrough only for calrs 1.6.0 — enablement is DB-driven (admin panel); see step 6 |
    | `CALRS_OIDC_CLIENT_ID` | *(empty)* | OIDC client id from `zitadel-client.sh --app calendar` |
    | `CALRS_OIDC_CLIENT_SECRET` | *(empty)* | OIDC client secret |
 
@@ -168,8 +169,8 @@ is **opt-in** via the `calendar` profile.
    ./scripts/calendar-setup.sh
    ```
 
-6. **Optional SSO** — register an OIDC client for the calendar app and let
-   the script wire the redirect URI into `.env`:
+6. **Optional SSO (Zitadel OIDC)** — register an OIDC client for the calendar
+   app and let the script wire the redirect URI into `.env`:
 
    ```bash
    ./scripts/zitadel-client.sh --app calendar
@@ -177,6 +178,32 @@ is **opt-in** via the `calendar` profile.
 
    Then set `CALRS_OIDC_ISSUER`/`CALRS_OIDC_CLIENT_ID`/`CALRS_OIDC_CLIENT_SECRET`
    in `.env` and recreate the `calendar` service.
+
+   **calrs 1.6.0 reality check** (three things the env vars will NOT do):
+
+   1. **Enablement is DB-driven.** calrs 1.6.0 stores the OIDC client in its
+      SQLite `auth_config` singleton, not in env — the `CALRS_OIDC_*`
+      passthrough is dead weight for stock 1.6.0. Enable SSO from the admin
+      dashboard (Settings → OIDC) or `POST /dashboard/admin/oidc` (admin web
+      session; the CSRF token comes from the `calrs_csrf` cookie — the admin
+      OIDC form itself sends no token).
+   2. **Backchannel egress.** `CoreProviderMetadata::discover_async` runs
+      inside the container; on egress-blocked bridges add
+      `extra_hosts: ["${ZITADEL_DOMAIN}:host-gateway"]` to the calendar
+      service (same pattern as `services/paperless.yml`) so discovery/token
+      calls reach the IdP via Traefik's valid cert.
+   3. **Zitadel compat patch is REQUIRED** (stock 1.6.0 dies in the callback
+      against Zitadel). Apply `images/calrs/patches/0001-oidc-zitadel-compat.patch`
+      to the v1.6.0 checkout before building `calrs:1.6.0` — it accepts
+      Zitadel's project-wide multi-audience ID tokens (`azp` still names the
+      authorized client) and falls back to userinfo for email/name claims,
+      which Zitadel v2 keeps out of ID tokens.
+
+   The shipped stack demonstrably works: login page → SSO → Zitadel
+   (PKCE + nonce) → callback → dashboard session with an auto-provisioned
+   local user. `tests/05-e2e/stories.py` Epic K pins the contract (SSO
+   affordance, 303 authorize redirect, redirect_uri, handshake cookies,
+   CSRF state gate).
 
 > **Watchtower:** the `calendar` and `calendar-radicale` services are
 > labelled `com.centurylinklabs.watchtower.enable=false` — the locally
