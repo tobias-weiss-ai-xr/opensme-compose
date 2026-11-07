@@ -325,6 +325,10 @@ e2e:
 	@$(PYTHON) tests/05-e2e/session_lifecycle.py $(DOMAIN) 2>&1
 	@$(MAKE) saga
 
+stories:
+	@echo -e "$(BLUE)── layer 5: user-story journeys across epics (requires running stack) ──$(NC)"
+	@$(PYTHON) tests/05-e2e/stories.py $(DOMAIN) 2>&1
+
 saga:
 	@echo -e "$(BLUE)── layer 5: saga journey blueprints (requires running stack) ──$(NC)"
 	@for script in saga_onboarding saga_quote_to_cash saga_leave_request \
