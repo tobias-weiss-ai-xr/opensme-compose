@@ -79,6 +79,71 @@ Epics / user stories (IDs appear in failure output):
         drift broke invoice SSO: registered invoices.<OPENSME_DOMAIN>,
         served invoices.<INVOICE_DOMAIN>)                        [PAT-gated]
 
+  Epic N — Notes (lasuite impress)
+    N1  Next SPA shell served anonymously
+    N2  API index JSON (/api/v1.0/) advertises documents/users URLs
+    N3  anonymous mutation refused (POST documents → 401), anon list
+        readable-but-empty (200)
+    N4  whoami refuses anonymous (401)
+
+  Epic W — Workflow (operaton BPM)
+    W1  anon / → 302 /operaton/app/
+    W2  full anonymous SSO chain: /operaton/app/ →
+        /oauth2/authorization/operaton → IdP authorize → login UI
+    W3  app-tier hardening on the BPM landing (nosniff+HSTS, XFO exempt)
+
+  Epic D — Surveys (limesurvey)
+    D1  public landing served (LimeSurvey)
+    D2  /admin gated behind a login redirect
+    D3  app-tier hardening on the landing
+
+  Epic O — OpenCloud (file cloud)
+    O1  SPA served anonymously
+    O2  OCS capabilities API refuses anonymous (401)
+    O3  app-tier hardening on the SPA
+
+  Epic X — Webmail (SOGo6)
+    X1  legacy /SOGo → 302 to the SPA root (retired URL contract)
+    X2  locale landing /en served
+    X3  app-tier hardening on the SPA
+
+  Epic A — Archive (paperless-ngx)
+    A1  anon / → 302 /accounts/login/
+    A2  login page carries the Zitadel OIDC affordance
+    A3  documents API refuses anonymous (401)
+    A4  app-tier hardening on the login page
+
+  Epic G — Chat & Matrix (element + synapse)
+    G1  Element SPA served on CHAT_URL
+    G2  .well-known/matrix/client advertises the homeserver
+    G3  synapse client versions endpoint answers JSON
+    G4  app-tier hardening on the Element SPA
+
+  Epic I — IdP traits (zitadel)
+    I1  discovery document: issuer == IdP base, endpoints present
+    I2  JWKS serves signing keys
+    I3  token endpoint rejects a garbage grant with 400 (no 5xx)
+    I4  bare end_session answers a graceful logout redirect
+    I5  login UI served anonymously
+
+  Epic Y — AI gating (portal)
+    Y1  /api/ai/chat route absent while AI is unconfigured (404);
+        warn-not-fail when an AI backend is configured
+
+  Portal deepening:
+    P9   /api/session anonymous introspection ({"authenticated": false})
+    P10  /api/auth/login → 303 IdP authorize carrying the portal
+         client_id + PKCE(S256) + state
+    P11  /api/auth/callback refuses a bogus state (400 CSRF gate)
+
+  Member-app deepening:
+    L9   intercom validation matrix (empty text → 400, >2000 bytes →
+         400, unknown kind → 400, unknown delete → 404, missing text
+         → clean 400 after the serde-default fix)
+    L10  intercom ?since= delta polling contract
+    L11  polls revote → 409 conflict; foreign attachment_url → 400
+         host-pin
+
   Epic E — Edge hardening (security-headers shadow contract)
     E1  portal: HSTS + XFO + nosniff
     E2  vc host: HSTS + XFO + nosniff (the camera/mic lift is V7)
@@ -294,6 +359,39 @@ def main() -> bool:
     else:
         result.fail("P4: /dashboard renders tiles anonymously")
 
+    r = anon.get(portal_base + "/api/session", timeout=T)
+    if r.status_code == 200 and (r.json() or {}).get("authenticated") is False:
+        result.ok("P9: /api/session anonymous introspection "
+                  '({"authenticated": false})')
+    else:
+        result.fail(f"P9: /api/session → {r.status_code} {r.text[:60]!r}, "
+                    "want 200 authenticated:false")
+
+    # the portal is a CONFIDENTIAL client: plain authorization-code flow
+    # with client secret (no PKCE) — pin client_id + state instead
+    r = anon.get(portal_base + "/api/auth/login", timeout=T, allow_redirects=False)
+    loc = r.headers.get("location", "")
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+    want_client = cfg("PORTAL_OIDC_CLIENT_ID")
+    client_ok = (not want_client) or q.get("client_id", [""])[0] == want_client
+    scope_ok = "openid" in (q.get("scope", [""])[0])
+    if (r.status_code in (303, 302) and f"{idp_base}/oauth/v2/authorize" in loc
+            and q.get("response_type") == ["code"]
+            and q.get("state")
+            and client_ok and scope_ok):
+        result.ok("P10: /api/auth/login → 303 IdP authorize "
+                  "(client_id, state, openid scope; confidential client)")
+    else:
+        result.fail(f"P10: auth/login → {r.status_code} {loc[:70]!r} "
+                    f"(client match: {client_ok}, scope: {scope_ok})")
+
+    r = anon.get(portal_base + "/api/auth/callback?code=e2e-bogus&state=e2e-bogus",
+                 timeout=T, allow_redirects=False)
+    if r.status_code == 400:
+        result.ok("P11: callback refuses bogus state (CSRF gate)")
+    else:
+        result.fail(f"P11: bogus callback accepted ({r.status_code})")
+
     # ── signed-in journeys ────────────────────────────────────────────
     signed = requests.Session()
     signed.verify = verify
@@ -326,7 +424,7 @@ def main() -> bool:
                 r = signed.get(portal_base + "/", timeout=T)
                 hrefs = re.findall(r'<a href="([^"]+)" class="card func-card"[^>]*data-pal="Meet"', r.text)
                 if hrefs and hrefs[0].rstrip("/") == vc_url.rstrip("/"):
-                    result.ok(f"P8: Meet tile gated in, href == VC_URL")
+                    result.ok("P8: Meet tile gated in, href == VC_URL")
                 else:
                     result.fail(f"P8: Meet tile href mismatch {hrefs!r} vs {vc_url!r}")
             else:
@@ -357,7 +455,7 @@ def main() -> bool:
 
         hostile = ["/room/../etc", "/room/has%20space", "/room/room%2Fx",
                    "/room/" + "a" * 65, "/room/r%C3%A4um", "/room/-leading"]
-        bad = [u for u in hostile if (res := session.get(vc_url + u, timeout=T)).status_code != 404]
+        bad = [u for u in hostile if session.get(vc_url + u, timeout=T).status_code != 404]
         if not bad:
             result.ok("V2: hostile room names rejected (404)")
         else:
@@ -620,13 +718,14 @@ def main() -> bool:
                 result.ok("L5: polls vote option=99 → 400")
             else:
                 result.fail(f"L5: polls vote option=99 → {r.status_code}, want 400")
-            # documented quirk: negative option is rejected by the usize
-            # extractor as a raw 422 before the handler's JSON 400
+            # negative option: i64 extractor + handler guard → clean
+            # JSON 400 (was a raw 422 usize rejection before the fix)
             r = member.post(portal_base + f"/api/polls/{pid}/vote", json={"option": -1},
                             timeout=T)
-            if r.status_code == 422:
-                result.warn("L5: polls option=-1 → raw 422 (usize extractor; "
-                            "cosmetic quirk, pinned)")
+            if r.status_code == 400:
+                result.ok("L5: polls option=-1 → clean 400 (serde-fix)")
+            elif r.status_code == 422:
+                result.warn("L5: polls option=-1 → raw 422 (pre-fix portal image)")
             else:
                 result.warn(f"L5: polls option=-1 → {r.status_code} (quirk moved?)")
             r = member.post(portal_base + f"/api/polls/{pid}/vote", json={"option": 1},
@@ -658,6 +757,71 @@ def main() -> bool:
             result.ok(f"L7: cloud share path validation {', '.join(bad_paths)}")
         else:
             result.fail(f"L7: cloud share path validation broken: {', '.join(bad_paths)}")
+
+        # intercom validation matrix
+        checks = []
+        r = member.post(portal_base + "/api/intercom", json={"text": ""}, timeout=T)
+        checks.append(f"empty→{r.status_code}"
+                      + ("✓" if r.status_code == 400 and "empty" in r.text else "✗"))
+        r = member.post(portal_base + "/api/intercom",
+                        json={"text": "x" * 5000}, timeout=T)
+        checks.append(f"oversize→{r.status_code}"
+                      + ("✓" if r.status_code == 400 and "2000" in r.text else "✗"))
+        r = member.post(portal_base + "/api/intercom",
+                        json={"text": "probe", "kind": "weird-kind"}, timeout=T)
+        checks.append(f"bad-kind→{r.status_code}"
+                      + ("✓" if r.status_code == 400 else "✗"))
+        r = member.post(portal_base + "/api/intercom", json={}, timeout=T)
+        # serde default: missing text now reaches the clean 400, not a raw 422
+        checks.append(f"no-text→{r.status_code}"
+                      + ("✓" if r.status_code == 400 else "✗"))
+        r = member.delete(portal_base + "/api/intercom/999999999", timeout=T)
+        checks.append(f"del-unknown→{r.status_code}"
+                      + ("✓" if r.status_code == 404 else "✗"))
+        if all("✓" in c for c in checks):
+            result.ok(f"L9: intercom validation {', '.join(checks)}")
+        else:
+            result.fail(f"L9: intercom validation broken: {', '.join(checks)}")
+
+        # since-delta polling: create one message, ?since=<id> must see none
+        r = member.post(portal_base + "/api/intercom", json={"text": "delta-probe"},
+                        timeout=T)
+        did = (r.json().get("message") or {}).get("id")
+        if did is not None:
+            r = member.get(portal_base + f"/api/intercom?since={did}", timeout=T)
+            body = r.json() or {}
+            if r.status_code == 200 and not body.get("messages"):
+                result.ok("L10: intercom ?since= delta returns no-newer")
+            else:
+                result.fail(f"L10: since={did} → {r.status_code} "
+                            f"{len(body.get('messages') or [])} newer")
+            member.delete(portal_base + f"/api/intercom/{did}", timeout=T)
+        else:
+            result.fail(f"L10: intercom create for delta → {r.status_code}")
+
+        # polls revote conflict + foreign attachment host-pin
+        r = member.post(portal_base + "/api/polls",
+                        json={"question": "revote?", "options": ["a", "b"]},
+                        timeout=T)
+        rpid = (r.json().get("poll") or {}).get("id")
+        if rpid is not None:
+            member.post(portal_base + f"/api/polls/{rpid}/vote",
+                        json={"option": 0}, timeout=T)
+            r = member.post(portal_base + f"/api/polls/{rpid}/vote",
+                            json={"option": 1}, timeout=T)
+            if r.status_code == 409 and "already voted" in r.text:
+                result.ok("L11: polls revote → 409 conflict")
+            else:
+                result.fail(f"L11: polls revote → {r.status_code}, want 409")
+        r = member.post(portal_base + "/api/polls",
+                        json={"question": "q", "options": ["a", "b"],
+                              "attachment_url": "https://evil.example.com/f"},
+                        timeout=T)
+        if r.status_code == 400 and "host not allowed" in r.text:
+            result.ok("L11: polls attachment host-pin (foreign host → 400)")
+        else:
+            result.fail(f"L11: polls foreign attachment → {r.status_code}, "
+                        "want 400 'host not allowed'")
     else:
         result.skip("L2–L7 signed-in member journeys: no session "
                     "(set ZITADEL_ADMIN_PASSWORD + E2E_ZITADEL_LOGINCLIENT_PAT / "
@@ -777,6 +941,303 @@ def main() -> bool:
                             "(fix: PUT /management/v1/projects/<pid>/apps/<aid>/"
                             "oidc_config with the served URI — see "
                             "scripts/zitadel-client.sh enforce_redirect_uris)")
+
+    # ══ Epic N — Notes (lasuite impress) ══════════════════════════════
+    result.header("Epic N — Notes (lasuite impress)")
+    notes_host = cfg("NOTES_DOMAIN") or f"notes.{portal_host}"
+    if is_localish(notes_host):
+        result.skip("N: notes host localish")
+    else:
+        ok, _ = reachable(anon, f"{schema}{notes_host}/")
+        if not ok:
+            result.skip(f"N: notes not deployed ({notes_host})")
+        else:
+            r = anon.get(f"{schema}{notes_host}/", timeout=T)
+            if r.status_code == 200 and "_next/static" in r.text:
+                result.ok("N1: impress SPA shell served anonymously")
+            else:
+                result.fail(f"N1: notes / → {r.status_code}, want 200 SPA shell")
+            r = anon.get(f"{schema}{notes_host}/api/v1.0/", timeout=T)
+            try:
+                api = r.json()
+                docs = (api.get("documents") or "")
+                api_ok = r.status_code == 200 and notes_host in docs
+            except ValueError:
+                api_ok, docs = False, ""
+            if api_ok:
+                result.ok(f"N2: API index advertises documents URL ({docs[:52]}…)")
+            else:
+                result.fail(f"N2: API index → {r.status_code} {docs[:60]!r}")
+            r = anon.post(f"{schema}{notes_host}/api/v1.0/documents/", json={},
+                          timeout=T)
+            lst = anon.get(f"{schema}{notes_host}/api/v1.0/documents/", timeout=T)
+            if r.status_code == 401:
+                result.ok("N3: anonymous document mutation refused (401)")
+            else:
+                result.fail(f"N3: anonymous document POST → {r.status_code}, want 401")
+            if lst.status_code == 200 and (lst.json() or {}).get("count") == 0:
+                result.ok("N3: anonymous list readable-but-empty (count=0)")
+            else:
+                result.warn(f"N3: anonymous list → {lst.status_code} "
+                            f"{lst.text[:60]!r} (upstream contract moved?)")
+            r = anon.get(f"{schema}{notes_host}/api/v1.0/users/whoami/", timeout=T)
+            if r.status_code == 401:
+                result.ok("N4: whoami refuses anonymous (401)")
+            else:
+                result.fail(f"N4: whoami → {r.status_code}, want 401")
+
+    # ══ Epic W — Workflow (operaton BPM) ══════════════════════════════
+    result.header("Epic W — Workflow (operaton BPM)")
+    bpm_url = cfg("BPM_URL") or (f"{schema}bpm.{portal_host}" if portal_host else "")
+    if not bpm_url or is_localish(bpm_url.rsplit("//", 1)[-1].split("/")[0]):
+        result.skip("W: BPM host localish")
+    else:
+        ok, _ = reachable(anon, bpm_url + "/")
+        if not ok:
+            result.skip(f"W: operaton not deployed ({bpm_url})")
+        else:
+            r = anon.get(bpm_url + "/", timeout=T, allow_redirects=False)
+            if r.status_code == 302 and "/operaton/app" in r.headers.get("location", ""):
+                result.ok("W1: anon / → 302 /operaton/app/")
+            else:
+                result.fail(f"W1: bpm / → {r.status_code} "
+                            f"{r.headers.get('location', '')[:60]!r}")
+            # the full anonymous SSO chain: webapp → spring oauth2 → IdP
+            r = anon.get(bpm_url + "/operaton/app/", timeout=T, allow_redirects=False)
+            hop2 = r.headers.get("location", "")
+            chain_ok = r.status_code in (301, 302, 303, 307) \
+                and "/oauth2/authorization/" in hop2
+            hop3 = ""
+            if chain_ok:
+                r = anon.get(hop2, timeout=T, allow_redirects=False)
+                hop3 = r.headers.get("location", "")
+                chain_ok = r.status_code in (301, 302, 303, 307) \
+                    and f"{idp_base}/oauth/v2/authorize" in hop3 \
+                    and "client_id=" in hop3
+            hop4_ok = False
+            if chain_ok:
+                r = anon.get(hop3, timeout=T, allow_redirects=False)
+                hop4 = r.headers.get("location", "")
+                hop4_ok = r.status_code in (301, 302, 303, 307) \
+                    and "/ui/v2/login" in hop4
+            if chain_ok and hop4_ok:
+                result.ok("W2: anonymous SSO chain webapp→oauth2→authorize→login UI")
+            else:
+                result.fail(f"W2: SSO chain broken (hops: {hop2[:50]!r} "
+                            f"→ {hop3[:50]!r})")
+            hardened(anon.get(bpm_url + "/", timeout=T), result, "W3 bpm",
+                     xfo_required=False)
+
+    # ══ Epic D — Surveys (limesurvey) ═════════════════════════════════
+    result.header("Epic D — Surveys (limesurvey)")
+    surv_url = cfg("SURVEYS_URL") or (f"{schema}surveys.{portal_host}"
+                                      if portal_host else "")
+    if not surv_url or is_localish(surv_url.rsplit("//", 1)[-1].split("/")[0]):
+        result.skip("D: surveys host localish")
+    else:
+        ok, _ = reachable(anon, surv_url + "/")
+        if not ok:
+            result.skip(f"D: limesurvey not deployed ({surv_url})")
+        else:
+            r = anon.get(surv_url + "/", timeout=T)
+            if r.status_code == 200 and "LimeSurvey" in r.text:
+                result.ok("D1: public landing served (LimeSurvey)")
+            else:
+                result.fail(f"D1: surveys / → {r.status_code}, want 200 LimeSurvey")
+            # /admin canonicalizes (/admin → /admin/, may chain through
+            # scheme rewrites) and lands on the LimeSurvey login page
+            r = anon.get(surv_url + "/admin", timeout=T)
+            if r.history and r.status_code == 200 and "authentication" in str(r.url):
+                result.ok("D2: /admin chains to the login page "
+                          f"({len(r.history)} redirects)")
+            else:
+                result.fail(f"D2: /admin → {r.status_code} {str(r.url)[:60]!r}, "
+                            "want redirect chain to login")
+            hardened(r, result, "D3 surveys", xfo_required=False)
+
+    # ══ Epic O — OpenCloud ════════════════════════════════════════════
+    result.header("Epic O — OpenCloud")
+    conv_cloud = f"{schema}cloud.{portal_host}" if portal_host else ""
+    env_cloud = cfg("OPENCLOUD_URL") or ((cfg("OPENCLOUD_DOMAIN") and
+                                          schema + cfg("OPENCLOUD_DOMAIN")) or "")
+    # operator shells often carry stale *_DOMAIN exports that beat .env —
+    # probe env first, then the <svc>.<portal_host> convention; skip only
+    # when neither routes
+    cloud_url = ""
+    for cand in (env_cloud, conv_cloud):
+        if cand and not cloud_url:
+            ok, _ = reachable(anon, cand + "/")
+            if ok:
+                cloud_url = cand
+    if not cloud_url:
+        result.skip(f"O: opencloud not routable ({env_cloud or conv_cloud!r})")
+    else:
+        r = anon.get(cloud_url + "/", timeout=T)
+        if r.status_code == 200 and "<html" in r.text[:400].lower():
+            result.ok(f"O1: SPA served anonymously ({cloud_url})")
+        else:
+            result.fail(f"O1: cloud / → {r.status_code}, want 200 SPA")
+        r = anon.get(cloud_url + "/ocs/v2.php/cloud/capabilities", timeout=T)
+        if r.status_code in (401, 403):
+            result.ok(f"O2: OCS capabilities refuses anonymous ({r.status_code})")
+        else:
+            result.fail(f"O2: OCS capabilities → {r.status_code}, want 401/403")
+        hardened(anon.get(cloud_url + "/", timeout=T), result, "O3 cloud",
+                 xfo_required=False)
+
+    # ══ Epic X — Webmail (SOGo6) ══════════════════════════════════════
+    result.header("Epic X — Webmail (SOGo6)")
+    conv_wm = f"{schema}webmail.{portal_host}" if portal_host else ""
+    env_wm = cfg("SOGO_URL") or ((cfg("SOGO_DOMAIN") and
+                                  schema + cfg("SOGO_DOMAIN")) or "")
+    wm_url = ""
+    for cand in (env_wm, conv_wm):
+        if cand and not wm_url:
+            ok, _ = reachable(anon, cand + "/")
+            if ok:
+                wm_url = cand
+    if not wm_url:
+        result.skip(f"X: webmail not routable ({env_wm or conv_wm!r})")
+    else:
+        r = anon.get(wm_url + "/SOGo", timeout=T, allow_redirects=False)
+        if r.status_code in (301, 302, 303, 307):
+            result.ok(f"X1: legacy /SOGo → {r.status_code} "
+                      f"{r.headers.get('location', '')[:40]!r} (retired URL)")
+        else:
+            result.fail(f"X1: /SOGo → {r.status_code}, want redirect to SPA root")
+        r = anon.get(wm_url + "/en", timeout=T)
+        if r.status_code == 200:
+            result.ok("X2: locale landing /en served")
+        else:
+            result.fail(f"X2: /en → {r.status_code}, want 200")
+        hardened(anon.get(wm_url + "/en", timeout=T), result, "X3 webmail",
+                 xfo_required=False)
+
+    # ══ Epic A — Archive (paperless-ngx) ══════════════════════════════
+    result.header("Epic A — Archive (paperless-ngx)")
+    pp_url = cfg("PAPERLESS_URL") or (cfg("PAPERLESS_DOMAIN") and
+                                      schema + cfg("PAPERLESS_DOMAIN"))
+    pp_url = pp_url or (f"{schema}paperless.{portal_host}" if portal_host else "")
+    if not pp_url or is_localish(pp_url.rsplit("//", 1)[-1].split("/")[0]):
+        result.skip("A: paperless host localish")
+    else:
+        ok, _ = reachable(anon, pp_url + "/")
+        if not ok:
+            result.skip(f"A: paperless not deployed ({pp_url})")
+        else:
+            r = anon.get(pp_url + "/", timeout=T, allow_redirects=False)
+            if r.status_code in (301, 302, 303) and "/accounts/login" in \
+                    r.headers.get("location", ""):
+                result.ok("A1: anon / → 302 /accounts/login/")
+            else:
+                result.fail(f"A1: paperless / → {r.status_code}, want login redirect")
+            r = anon.get(pp_url + "/accounts/login/", timeout=T)
+            if r.status_code == 200 and "zitadel" in r.text.lower():
+                result.ok("A2: login page carries the Zitadel OIDC affordance")
+            else:
+                result.fail(f"A2: login page → {r.status_code}, oidc marker missing")
+            r = anon.get(pp_url + "/api/documents/", timeout=T)
+            if r.status_code == 401:
+                result.ok("A3: documents API refuses anonymous (401)")
+            else:
+                result.fail(f"A3: documents API → {r.status_code}, want 401")
+            hardened(anon.get(pp_url + "/accounts/login/", timeout=T), result,
+                     "A4 paperless", xfo_required=False)
+
+    # ══ Epic G — Chat & Matrix (element + synapse) ════════════════════
+    result.header("Epic G — Chat & Matrix (element + synapse)")
+    chat_url = cfg("CHAT_URL") or (f"{schema}chat.{portal_host}" if portal_host else "")
+    mx_url = cfg("MATRIX_URL") or (cfg("MATRIX_DOMAIN") and schema + cfg("MATRIX_DOMAIN"))
+    mx_url = mx_url or (f"{schema}matrix.{portal_host}" if portal_host else "")
+    if chat_url and not is_localish(chat_url.rsplit("//", 1)[-1].split("/")[0]):
+        ok, _ = reachable(anon, chat_url + "/")
+        if not ok:
+            result.skip(f"G: chat not deployed ({chat_url})")
+        else:
+            r = anon.get(chat_url + "/", timeout=T)
+            if r.status_code == 200 and "Element" in r.text:
+                result.ok("G1: Element SPA served")
+            else:
+                result.fail(f"G1: chat / → {r.status_code}, want 200 Element")
+            hardened(r, result, "G4 chat", xfo_required=False)
+    else:
+        result.skip("G1/G4: chat host localish")
+    if mx_url and not is_localish(mx_url.rsplit("//", 1)[-1].split("/")[0]):
+        r = anon.get(mx_url + "/.well-known/matrix/client", timeout=T)
+        try:
+            base = ((r.json() or {}).get("m.homeserver") or {}).get("base_url", "")
+        except ValueError:
+            base = ""
+        if r.status_code == 200 and base.rstrip("/") == mx_url.rstrip("/"):
+            result.ok(f"G2: .well-known/matrix/client advertises {base}")
+        else:
+            result.fail(f"G2: well-known → {r.status_code} {base!r} != {mx_url!r}")
+        r = anon.get(mx_url + "/_matrix/client/versions", timeout=T)
+        try:
+            vs = (r.json() or {}).get("versions") or []
+        except ValueError:
+            vs = []
+        if r.status_code == 200 and vs:
+            result.ok(f"G3: synapse versions {vs[:3]}…")
+        else:
+            result.fail(f"G3: synapse versions → {r.status_code}, want JSON list")
+    else:
+        result.skip("G2/G3: matrix host localish")
+
+    # ══ Epic I — IdP traits (zitadel) ═════════════════════════════════
+    result.header("Epic I — IdP traits (zitadel)")
+    r = anon.get(idp_base + "/.well-known/openid-configuration", timeout=T)
+    try:
+        disc = r.json()
+    except ValueError:
+        disc = {}
+    endpoints_ok = all(disc.get(k) for k in
+                       ("issuer", "authorization_endpoint", "token_endpoint",
+                        "jwks_uri", "end_session_endpoint"))
+    if r.status_code == 200 and disc.get("issuer", "").rstrip("/") \
+            == idp_base.rstrip("/") and endpoints_ok:
+        result.ok(f"I1: discovery issuer=={disc['issuer'][:44]}…, endpoints ok")
+    else:
+        result.fail(f"I1: discovery → {r.status_code} "
+                    f"issuer={disc.get('issuer', '?')!r} endpoints={endpoints_ok}")
+    r = anon.get(disc.get("jwks_uri") or idp_base + "/oauth/v2/keys", timeout=T)
+    try:
+        n_keys = len((r.json() or {}).get("keys") or [])
+    except ValueError:
+        n_keys = 0
+    if r.status_code == 200 and n_keys >= 1:
+        result.ok(f"I2: JWKS serves {n_keys} signing keys")
+    else:
+        result.fail(f"I2: JWKS → {r.status_code}, {n_keys} keys")
+    r = anon.post(idp_base + "/oauth/v2/token",
+                  data={"grant_type": "authorization_code", "code": "e2e-garbage"},
+                  timeout=T)
+    if 400 <= r.status_code < 500 and "error" in r.text:
+        result.ok(f"I3: token endpoint rejects garbage grant ({r.status_code})")
+    else:
+        result.fail(f"I3: token endpoint → {r.status_code}, want 4xx JSON error")
+    r = anon.get(idp_base + "/oidc/v1/end_session", timeout=T, allow_redirects=False)
+    if r.status_code in (301, 302, 303) and "logout" in r.headers.get("location", ""):
+        result.ok("I4: bare end_session → graceful logout redirect")
+    else:
+        result.fail(f"I4: end_session → {r.status_code} "
+                    f"{r.headers.get('location', '')[:40]!r}")
+    r = anon.get(idp_base + "/ui/v2/login", timeout=T)
+    if r.status_code == 200:
+        result.ok("I5: login UI served anonymously")
+    else:
+        result.fail(f"I5: login UI → {r.status_code}, want 200")
+
+    # ══ Epic Y — AI gating (portal) ═══════════════════════════════════
+    result.header("Epic Y — AI gating (portal)")
+    if cfg("AI_API_KEY"):
+        result.warn("Y1: AI configured — disabled-route contract not testable")
+    else:
+        r = anon.post(portal_base + "/api/ai/chat", json={"question": "hi"}, timeout=T)
+        if r.status_code == 404:
+            result.ok("Y1: /api/ai/chat route absent while AI unconfigured (404)")
+        else:
+            result.warn(f"Y1: /api/ai/chat → {r.status_code} (route live?)")
 
     # ══ Epic E — Edge hardening ═══════════════════════════════════════
     result.header("Epic E — Edge hardening (security-headers shadow)")

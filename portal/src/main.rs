@@ -391,7 +391,11 @@ fn build_landing_page(config: &AppConfig, authed: bool) -> String {
         </section>"#
         )
     };
-    let script_tag = if authed { r#"<script src="/app.js" defer></script>"# } else { "" };
+    let script_tag = if authed {
+        r#"<script src="/app.js" defer></script>"#
+    } else {
+        ""
+    };
 
     format!(
         r##"<!DOCTYPE html>
@@ -850,7 +854,10 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
     services
 }
 
-async fn handle_root(State(config): State<Arc<AppConfig>>, headers: HeaderMap) -> impl IntoResponse {
+async fn handle_root(
+    State(config): State<Arc<AppConfig>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     // Session-aware landing: the tile grid is membership content
     // (contracts/tiles.yml, decision 2026-11-01) — anonymous visitors get
     // the login CTA + public news only, never service links or the
@@ -1152,6 +1159,9 @@ fn build_router(config: Arc<AppConfig>) -> Router {
 /// is the optional severity ("note" | "info" | "warn", default note).
 #[derive(Deserialize)]
 struct IntercomPost {
+    // default: a missing text must hit the store's "message text is
+    // empty" 400, not axum's raw 422 deserializer rejection
+    #[serde(default)]
     text: String,
     #[serde(default)]
     attachment_url: Option<String>,
@@ -1364,7 +1374,11 @@ fn polls_store_from_env(http: &reqwest::Client) -> Option<Arc<polls::PollStore>>
 
 #[derive(Deserialize)]
 struct PollPost {
+    // defaults: missing question/options must reach the store's clean
+    // 400s ("question is empty" / "needs 2..10 options"), not a raw 422
+    #[serde(default)]
     question: String,
+    #[serde(default)]
     options: Vec<String>,
     /// Cloud share link (https://cloud…/s/…) — metadata snapshot only.
     #[serde(default)]
@@ -1373,7 +1387,9 @@ struct PollPost {
 
 #[derive(Deserialize)]
 struct PollVotePost {
-    option: usize,
+    // i64 instead of usize: a negative option ("option": -1) must hit
+    // the handler's JSON 400, not axum's raw 422 usize rejection
+    option: i64,
 }
 
 #[derive(Deserialize)]
@@ -1525,7 +1541,14 @@ async fn handle_polls_vote(
     let Some(store) = &config.polls else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    match store.vote(id, post.option, Some(&session.sub)) {
+    if post.option < 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "option must be >= 0" })),
+        )
+            .into_response();
+    }
+    match store.vote(id, post.option as usize, Some(&session.sub)) {
         Ok(poll) => Json(serde_json::json!({
             "poll": poll.public(Some(&session.sub))
         }))
@@ -1851,11 +1874,7 @@ async fn handle_cloud_share(
         return cloud_not_configured();
     };
     match cloud.create_share(&path).await {
-        Ok(url) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "url": url })),
-        )
-            .into_response(),
+        Ok(url) => (StatusCode::CREATED, Json(serde_json::json!({ "url": url }))).into_response(),
         Err(e) => cloud_error(&e),
     }
 }
@@ -2009,10 +2028,14 @@ fn render_cloud_files(
             .join("\n")
     };
     let notice_html = match notice {
-        Some(n) => format!(r#"<p class="cf-msg" id="cf-msg" aria-live="polite">{}</p>"#, html_escape(n)),
+        Some(n) => format!(
+            r#"<p class="cf-msg" id="cf-msg" aria-live="polite">{}</p>"#,
+            html_escape(n)
+        ),
         None => r#"<p class="cf-msg" id="cf-msg" aria-live="polite" hidden></p>"#.to_string(),
     };
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="de">
 <head>
     <meta charset="UTF-8">
@@ -2120,7 +2143,8 @@ fn render_cloud_files(
     </footer>
 </main>
 </body>
-</html>"##)
+</html>"##
+    )
 }
 
 /// GET /files — the cloud picker page (session-gated). SSR lists the
@@ -2132,12 +2156,7 @@ async fn handle_files(
 ) -> impl IntoResponse {
     let picker = q.picker.as_deref() == Some("1");
     let (dir, entries, notice, status) = match cloud_dir_or_root(&q.path) {
-        Err(e) => (
-            String::new(),
-            Vec::new(),
-            Some(e),
-            StatusCode::BAD_REQUEST,
-        ),
+        Err(e) => (String::new(), Vec::new(), Some(e), StatusCode::BAD_REQUEST),
         Ok(dir) => match &config.cloud {
             None => (
                 dir,
@@ -2638,11 +2657,10 @@ mod tests {
 
     #[test]
     fn announcements_rendered_into_page() {
-        let html = build_landing_page(&cfg_with(
-            "",
-            None,
-            r#"[{"level":"warn","text":"planned outage"}]"#,
-        ), true);
+        let html = build_landing_page(
+            &cfg_with("", None, r#"[{"level":"warn","text":"planned outage"}]"#),
+            true,
+        );
         assert!(html.contains("class=\"announcement warn\""));
         assert!(html.contains("planned outage"));
     }
@@ -2772,7 +2790,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_str(resp).await;
         assert!(body.contains("login-cta"));
-        assert!(!body.contains("data-pal="));  // no tile anchors
+        assert!(!body.contains("data-pal=")); // no tile anchors
         assert!(!body.contains("Abmelden"));
     }
 
@@ -2958,11 +2976,7 @@ mod tests {
 
     /// Anonymous variant — no session cookie, exactly what a fresh visitor
     /// sends. Used by the public-landing contract tests.
-    async fn respond_anon(
-        cfg: AppConfig,
-        method: &str,
-        uri: &str,
-    ) -> axum::http::Response<Body> {
+    async fn respond_anon(cfg: AppConfig, method: &str, uri: &str) -> axum::http::Response<Body> {
         let router = build_router(Arc::new(cfg));
         let request = axum::http::Request::builder()
             .method(method)
@@ -3121,10 +3135,23 @@ mod tests {
         // any network, missing cloud config → 503 (share minting needs
         // the OCS endpoint). This route feeds the picker's SELECT.
         let cfg = cloud_cfg(None);
-        let resp =
-            cloud_res(cfg.clone(), "POST", "/api/cloud/share?path=docs/a.pdf", None, false).await;
+        let resp = cloud_res(
+            cfg.clone(),
+            "POST",
+            "/api/cloud/share?path=docs/a.pdf",
+            None,
+            false,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        let resp = cloud_res(cfg.clone(), "POST", "/api/cloud/share?path=/etc", None, true).await;
+        let resp = cloud_res(
+            cfg.clone(),
+            "POST",
+            "/api/cloud/share?path=/etc",
+            None,
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let b = body_json(resp).await;
         assert!(b["error"]
@@ -3222,7 +3249,10 @@ mod tests {
         // the button sits inside the Notizen card's action row, next to
         // the URL input + file label + send button
         let start = html.find(r#"<div class="ic-box">"#).expect("ic-box");
-        let end = html[start..].find(r#"</div>"#).map(|i| start + i).expect("ic-box end");
+        let end = html[start..]
+            .find(r#"</div>"#)
+            .map(|i| start + i)
+            .expect("ic-box end");
         let box_html = &html[start..end];
         for marker in ["ic-url", "ic-cloud", "ic-file-label", "ic-send"] {
             assert!(box_html.contains(marker), "missing {marker} in ic-box");
