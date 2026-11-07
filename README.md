@@ -872,6 +872,8 @@ openSME-compose/
 
 The Portal is a Rust application using [Axum](https://axum.rs/). It provides the landing page, ⌘K fast-switch, optional service cards, AI assistant, RSS feeds, and a built-in intercom for short internal notes with cloud-attachment metadata (in-memory store, capped at 50 messages). Each note carries a severity `kind` — `note` (the default, plain list entry) or `info`/`warn`, which render as INFO/WARN banners in both the SSR view and the JS client. The client shows an unread badge ("N neu") on the Notizen tab, tracked purely per browser via `localStorage` (last-read message id — no server-side read-state). Any signed-in member can moderate: `DELETE /api/intercom/{id}` removes a note (204 on success, 404 for unknown ids).
 
+The portal also runs a **cloud-files bridge**: a server-side WebDAV/OCS client to OpenCloud (`CLOUD_WEBDAV_*` below) exposed as session-gated `/api/cloud/*` endpoints and a `/files` picker page (browse, upload, mkdir, delete, select). Because the portal holds the one cloud machine account, every app — intercom's "☝️ ☁️ aus der Cloud" attach button, polls attachments, anything future — reaches the cloud through the same signed-in session instead of each shipping its own credentials.
+
 ```bash
 cd portal
 cargo run
@@ -888,6 +890,10 @@ Environment variables for local development:
 | `PORTAL_HTTPS_PROXY` | *(empty — direct egress)* | HTTP CONNECT proxy for the portal's outbound feed fetches — only for egress-restricted hosts (e.g. OpenVZ without working MASQUERADE): point at a local proxy reachable from the docker bridges |
 | `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>`, `webmail.<OPENSME_DOMAIN>`, host of `OPENCLOUD_URL`, host of `SOGO6_DOMAIN` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400). When unset, **all** derived defaults above are accepted — including the SOGo6 WebDAV cloud storage hosts (`webmail.<OPENSME_DOMAIN>` plus whatever `SOGO6_DOMAIN` points at), so notes can link files like `https://webmail.<OPENSME_DOMAIN>/SOGo/dav/…`. When set, the env value replaces the derived defaults entirely |
 | `SOGO6_DOMAIN` | *(empty — no extra host)* | SOGo6 webmail origin (e.g. `https://webmail.home.opensme.graphwiz.ai`, scheme optional) — its host joins the intercom attachment-allowlist defaults above so SOGo6 WebDAV cloud-storage links stay shareable; no other effect on the portal |
+| `CLOUD_WEBDAV_URL` | *(empty — bridge off)* | WebDAV base collection for the cloud-files bridge (`/api/cloud/*`, `/files`) **and** polls attachment uploads. Point at the internal OpenCloud hostname, e.g. `http://opensme-opencloud:9200/remote.php/dav/files/<bot>` where `<bot>` is the basic-auth machine user (see `opencloud/opencloud.yml`). Paths/names given to the API are relative to this base — the portal's encoder builds the absolute DAV URLs, callers never write `remote.php/...` text. All three `CLOUD_WEBDAV_*` values must be set and non-blank; without them the bridge endpoints answer 503 and the `/files` page shows an empty listing with a "not configured" notice |
+| `CLOUD_WEBDAV_USER` | *(empty — bridge off)* | Machine-user name for WebDAV basic auth against `CLOUD_WEBDAV_URL` (the same account polls use) |
+| `CLOUD_WEBDAV_PASS` | *(empty — bridge off)* | Password / app token for the WebDAV machine user — held in memory only, redacted in `Debug` output, never logged |
+| `CLOUD_SHARE_URL` | *derived from `CLOUD_WEBDAV_URL`* | Overrides the OCS shares endpoint used to mint public read-only share links (picker SELECT, polls attachments). Default derivation keeps the DAV host's `scheme://authority` and appends `/ocs/v2.php/apps/files_sharing/api/v1/shares` — set this only when the OCS API lives at a different origin than the DAV endpoint |
 | `INTERCOM_ALLOW_HTTP` | `false` | Dev mode: allow http:// attachment URLs — NEVER enable in production (SSRF risk) |
 
 Intercom API (all routes session-gated): `GET /api/intercom` lists messages,
@@ -895,6 +901,34 @@ Intercom API (all routes session-gated): `GET /api/intercom` lists messages,
 `kind` is optional and must be `note` (default when omitted), `info` or `warn`
 (anything else → 400), and `DELETE /api/intercom/{id}` deletes a message
 (204 on success, 404 for unknown ids).
+
+Cloud files bridge — all routes session-gated (anonymous → 401 from the
+session firewall before any handler runs; `CLOUD_WEBDAV_*` unset → 503;
+relative paths/names are validated offline first, so bad input → 400 before
+any network call — no `..`, absolute paths or multi-segment names):
+
+| Route | Purpose |
+|---|---|
+| `GET /api/cloud/files?path=<dir>` | Depth:1 WebDAV listing, dirs first (blank `path` = the DAV base collection itself) |
+| `POST /api/cloud/files?path=<dir>&name=<n>` | mkdir (409 when it already exists) |
+| `PUT /api/cloud/files?path=<dir>&name=<n>` | raw-body upload — no multipart, body is the bytes, `Content-Type` is forwarded (blank `path` = root) |
+| `GET /api/cloud/file?path=<file>` | binary download (content-type from the file) |
+| `DELETE /api/cloud/file?path=<file>` | delete (204 on success, 404 unknown) |
+| `POST /api/cloud/share?path=<file>` | mint a public read-only OCS share link → `201 {url}` |
+
+The `/files` page is the bridge's UI (session-gated too): SSR first paint
+lists the current directory server-side, so no-JS browsing and downloads
+work; app.js then re-pulls the list through the bridge and adds upload,
+mkdir and delete. Deep-linkable: the full state (`?path=…`, `?picker=1`)
+lives in the URL, so reload/back/forward just work. In `?picker=1` mode the
+SELECT button becomes a cross-tab handback: the picker mints a share link
+(`POST /api/cloud/share`), writes its URL into
+`localStorage['cloudPickResult']` (same origin) and closes the tab. The
+opener — the intercom card's "☝️ ☁️ aus der Cloud" button — consumes the key
+via the `storage`/`focus` events, fills the attachment field and removes the
+key (it also clears the key before opening, so a stale pick can never leak
+into a new one). If OCS share minting fails, SELECT falls back to handing
+back the same-origin `/api/cloud/file?path=…` download URL.
 
 Domain, service-card, announcement and AI variables are documented once, in
 [Configuration](#configuration) — that table is the single source of truth.
