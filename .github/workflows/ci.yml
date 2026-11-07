@@ -295,6 +295,11 @@ jobs:
         # S1 token bounds agree end to end, S2 offline_access refresh rotates
         # without re-login, S3 one IdP session covers portal + OpenCloud.
         run: python3 tests/05-e2e/session_lifecycle.py opensme.local
+      - name: Run epic user-story journeys (Portal/Video/Booking/Edge/Catalog)
+        # contracts/tiles.yml-driven epics; legs skip when the participating
+        # app is not running (VC/calendar absent on the demo stack). Epic P
+        # (anonymous public landing + signed-in catalog) always runs here.
+        run: python3 tests/05-e2e/stories.py opensme.local
       - name: Run saga navigation smoke (no tile to nowhere)
         # Every tile the portal renders must lead to a URL that answers, and
         # /api/feeds degrades to empty columns instead of erroring. The full

@@ -323,6 +323,7 @@ e2e:
 	@$(PYTHON) tests/05-e2e/run.py $(DOMAIN) 2>&1
 	@$(PYTHON) tests/05-e2e/logout.py $(DOMAIN) 2>&1
 	@$(PYTHON) tests/05-e2e/session_lifecycle.py $(DOMAIN) 2>&1
+	@$(PYTHON) tests/05-e2e/stories.py $(DOMAIN) 2>&1
 	@$(MAKE) saga
 
 stories:

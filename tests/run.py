@@ -106,6 +106,7 @@ LAYERS = {
         "description": "SSO / OIDC flows over HTTP (Zitadel, portal, apps)",
         "scripts": [
             ("E2E tests (SSO etc.)", "tests/05-e2e/run.py"),
+            ("Epic user-story journeys", "tests/05-e2e/stories.py"),
         ],
         "requires_stack": True,
     },
