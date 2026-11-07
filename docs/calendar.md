@@ -23,6 +23,9 @@ book a video-consultation session. It is built from two compose services:
 Operator deep-dive for the compose overlay: [`services/calendar.yml`](../services/calendar.yml).
 Image pin note + build recipe: [`images/calrs/README.md`](../images/calrs/README.md).
 Provisioning script: [`scripts/calendar-setup.sh`](../scripts/calendar-setup.sh).
+Also wired into the suite: a portal tile (contracts/tiles.yml → `CALENDAR_URL`) so staff
+reach the booking dashboard from the portal, and the `calrs-data` / `radicale-config` /
+`radicale-data` volumes are part of `scripts/backup.sh --volumes`.
 
 ## URL & demo flow
 

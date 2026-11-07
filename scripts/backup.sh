@@ -35,7 +35,8 @@
 #   cryptpad-data, cryptpad-blob, synapse-data, notes-data,
 #   seaweedfs-data, paperless-data, paperless-media, paperless-export,
 #   invoiceninja-db (MariaDB), invoiceninja-public, invoiceninja-storage,
-#   limesurvey-uploads (survey file attachments/media)
+#   limesurvey-uploads (survey file attachments/media), calrs-data,
+#   radicale-config, radicale-data (public booking calendar)
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -79,6 +80,7 @@ KNOWN_VOLUMES=(
   seaweedfs-data paperless-data paperless-media paperless-export
   invoiceninja-db invoiceninja-public invoiceninja-storage
   nosdesk-uploads cms-data store-data limesurvey-uploads
+  calrs-data radicale-config radicale-data
   camunda-data
   dev-agent-state dev-maintenance-bot-state predictive-agent-state
   taskfleet-state
