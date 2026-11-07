@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     middleware,
     response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -964,6 +964,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route("/api/intercom", get(handle_intercom_list))
         .route("/api/intercom", post(handle_intercom_post))
         .route("/api/intercom/upload", post(handle_intercom_upload))
+        .route("/api/intercom/:id", delete(handle_intercom_delete))
         .route(
             "/api/intercom/files/:token/:name",
             get(handle_intercom_file),
@@ -1012,12 +1013,15 @@ fn build_router(config: Arc<AppConfig>) -> Router {
 }
 
 /// Portal intercom: a short internal note, optionally referencing one
-/// attachment from the cloud service (metadata snapshot only).
+/// attachment from the cloud service (metadata snapshot only). `kind`
+/// is the optional severity ("note" | "info" | "warn", default note).
 #[derive(Deserialize)]
 struct IntercomPost {
     text: String,
     #[serde(default)]
     attachment_url: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 /// Polling-friendly listing: `?since=<id>` returns only newer messages
@@ -1067,6 +1071,8 @@ struct IntercomUploadQuery {
     text: String,
     #[serde(default)]
     filename: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 /// File-picker upload: raw body (no multipart feature), metadata in the
@@ -1086,6 +1092,10 @@ async fn handle_intercom_upload(
     };
     let text = match intercom::validate_text(&q.text) {
         Ok(t) => t,
+        Err(e) => return bad(&e).into_response(),
+    };
+    let kind = match intercom::validate_kind(q.kind.as_deref()) {
+        Ok(k) => k,
         Err(e) => return bad(&e).into_response(),
     };
     let filename = q
@@ -1123,13 +1133,31 @@ async fn handle_intercom_upload(
     };
     let msg = config
         .intercom_store
-        .push(text, Some(session.name.clone()), Some(attachment));
+        .push(text, Some(session.name.clone()), Some(attachment), kind);
     metrics::global().inc_intercom_message();
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "message": msg })),
     )
         .into_response()
+}
+
+/// Moderation delete: remove one note by id. 204 on success (no body),
+/// 404 when the id is unknown. Same session firewall as every other
+/// intercom surface — only signed-in members reach this route.
+async fn handle_intercom_delete(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Path(id): axum::extract::Path<u64>,
+) -> impl IntoResponse {
+    if config.intercom_store.delete(id) {
+        (StatusCode::NO_CONTENT, "").into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "message not found" })),
+        )
+            .into_response()
+    }
 }
 
 /// Serve a picked-file attachment. Body from disk, content-type from the
@@ -1487,6 +1515,11 @@ async fn handle_intercom_post(
         Err(e) => return bad(&e).into_response(),
     };
 
+    let kind = match intercom::validate_kind(post.kind.as_deref()) {
+        Ok(k) => k,
+        Err(e) => return bad(&e).into_response(),
+    };
+
     let attachment =
         match resolve_cloud_attachment(&config, post.attachment_url.as_deref().unwrap_or("")).await
         {
@@ -1496,7 +1529,7 @@ async fn handle_intercom_post(
 
     let msg = config
         .intercom_store
-        .push(text, Some(session.name.clone()), attachment);
+        .push(text, Some(session.name.clone()), attachment, kind);
     metrics::global().inc_intercom_message();
     (
         StatusCode::CREATED,
@@ -2043,16 +2076,24 @@ mod tests {
     #[test]
     fn intercom_messages_rendered_escaped_into_page() {
         let cfg = cfg_with("", None, "");
-        cfg.intercom_store
-            .push("note <script>alert(1)</script>".into(), None, None);
+        cfg.intercom_store.push(
+            "note <script>alert(1)</script>".into(),
+            None,
+            None,
+            intercom::KIND_NOTE.into(),
+        );
         let att = intercom::parse_attachment_metadata(
             "https://cloud.example/s/f.pdf",
             Some("application/pdf"),
             Some(2048),
             Some("attachment; filename=\"Rechnung<script>.pdf\""),
         );
-        cfg.intercom_store
-            .push("see attached".into(), None, Some(att));
+        cfg.intercom_store.push(
+            "see attached".into(),
+            None,
+            Some(att),
+            intercom::KIND_NOTE.into(),
+        );
         let html = build_landing_page(&cfg);
         assert!(!html.contains("<script>alert(1)"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
@@ -2183,6 +2224,128 @@ mod tests {
             "attachment; filename=\"evil.svg\""
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn intercom_delete_moderation_404_then_204() {
+        let cfg = cfg_with("", None, "");
+
+        // Unknown id → 404 with the error body.
+        let resp = respond(cfg.clone(), "DELETE", "/api/intercom/9999", None).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = body_json(resp).await;
+        assert_eq!(body["error"], "message not found");
+
+        // A real post (banner kind) → 204 and the note is gone.
+        let resp = respond(
+            cfg.clone(),
+            "POST",
+            "/api/intercom",
+            Some(serde_json::json!({ "text": "moderate me", "kind": "warn" })),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created = body_json(resp).await;
+        assert_eq!(created["message"]["kind"], "warn");
+        let id = created["message"]["id"].as_u64().expect("numeric id");
+
+        let resp = respond(cfg.clone(), "DELETE", &format!("/api/intercom/{id}"), None).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            cfg.intercom_store.list().len(),
+            0,
+            "deleted note must be gone from the store"
+        );
+
+        // Deleting the same id again → 404 (idempotent-ish miss).
+        let resp = respond(cfg, "DELETE", &format!("/api/intercom/{id}"), None).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn intercom_kind_flows_through_post_list_and_is_validated() {
+        let cfg = cfg_with("", None, "");
+
+        // Invalid kind → 400 with the exact contract message.
+        let resp = respond(
+            cfg.clone(),
+            "POST",
+            "/api/intercom",
+            Some(serde_json::json!({ "text": "hi", "kind": "banana" })),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(resp).await;
+        assert_eq!(body["error"], "kind must be one of note, info, warn");
+
+        // Upload route: same validation on the query param.
+        let resp = respond(
+            cfg.clone(),
+            "POST",
+            "/api/intercom/upload?text=upload&kind=nope",
+            None,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(resp).await;
+        assert_eq!(body["error"], "kind must be one of note, info, warn");
+
+        // Missing kind defaults to "note"; explicit kind is kept and
+        // surfaced in both list and list_since responses.
+        let resp = respond(
+            cfg.clone(),
+            "POST",
+            "/api/intercom",
+            Some(serde_json::json!({ "text": "plain note" })),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created = body_json(resp).await;
+        assert_eq!(created["message"]["kind"], "note");
+        let first = created["message"]["id"].as_u64().unwrap();
+
+        let resp = respond(
+            cfg.clone(),
+            "POST",
+            "/api/intercom",
+            Some(serde_json::json!({ "text": "banner", "kind": "info" })),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let second = body_json(resp).await["message"]["id"].as_u64().unwrap();
+
+        let resp = respond(cfg.clone(), "GET", "/api/intercom", None).await;
+        let body = body_json(resp).await;
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["kind"], "info");
+        assert_eq!(msgs[1]["kind"], "note");
+
+        let resp = respond(cfg, "GET", &format!("/api/intercom?since={first}"), None).await;
+        let body = body_json(resp).await;
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["id"], second);
+        assert_eq!(msgs[0]["kind"], "info");
+    }
+
+    #[tokio::test]
+    async fn intercom_delete_is_session_gated() {
+        // The moderation DELETE route lives in the PROTECTED router:
+        // anonymous callers get the firewall's 401, never the handler.
+        let cfg = cfg_with("", None, "");
+        let router = build_router(Arc::new(cfg));
+        let req = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/intercom/1")
+            .body(Body::empty())
+            .unwrap();
+        let anon = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            anon.status(),
+            StatusCode::UNAUTHORIZED,
+            "anonymous moderation delete must be gated"
+        );
     }
 
     #[tokio::test]
