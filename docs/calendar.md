@@ -27,6 +27,16 @@ Also wired into the suite: a portal tile (contracts/tiles.yml → `CALENDAR_URL`
 reach the booking dashboard from the portal, and the `calrs-data` / `radicale-config` /
 `radicale-data` volumes are part of `scripts/backup.sh --volumes`.
 
+> **CalDAV write-back dependency (2026-11-07 deploy):** calrs only pushes bookings into
+> the dedicated Radicale calendar when an enabled `smtp_config` row exists — the push
+> runs inside the SMTP-configured branch of the booking handler (even if SMTP delivery
+> itself fails, the push still fires; seeded here via the dashboard settings or DB row,
+> `host=stalwart`, `port=25`, `from=demo@opensme.local`). Without it bookings stay only
+> in calrs's SQLite and Radicale holds no `.ics`. Admin password: the pty feeder in
+> `calendar-setup.sh` can mis-deliver the `calrs user create` password (rpassword
+> reads the controlling tty) — if `demo@opensme.local` login fails, reset the Argon2
+> hash in `calrs.db` (`users.password_hash`) with a matching argon2id PHC string.
+
 > **Live edge note (2026-11-07 deploy):** on the fleet traefik (`traefik_extra_routers`
 > in `openedusuite.org.yaml`) the docker router labels are shadowed by a file router
 > `calendar-sec` (priority 10000, `security-headers`, LE via the entrypoint's
