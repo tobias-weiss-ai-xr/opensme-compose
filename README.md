@@ -140,6 +140,7 @@ on public hosts add the edge file-router from `edge/invoices-standin.yml`.
 | **Office** | [Collabora](https://www.collaboraoffice.com/) — real-time document editing in the browser |
 | **Mail** | [Stalwart](https://stalw.art/) — modern Rust SMTP/IMAP server |
 | **Groupware** | [SOGo](https://www.sogo.nu/) — webmail, calendar, contacts |
+| **Public calendar** | [calrs](https://github.com/olivierlambert/calrs) — self-hosted booking pages for video-consultation slots, backed by a **dedicated** Radicale CalDAV store; public page is free/busy-only (optional, `--profile calendar`) |
 | **Object storage** | [SeaweedFS](https://github.com/seaweedfs/seaweedfs) — S3-compatible storage for production OpenCloud (optional) |
 | **Invoicing** | [Invoice Ninja](https://invoiceninja.com/) — billing & invoicing, OIDC SSO via Zitadel (optional) |
 | **Documents** | [Paperless-ngx](https://docs.paperless-ngx.com/) — document management with OCR (optional) |
@@ -733,6 +734,7 @@ openSME-compose/
 │   ├── store.yml               # Overlay: RaisFast e-commerce (--profile store)
 │   ├── ai.yml                  # Overlay: llama.cpp AI backend (--profile ai)
 │   ├── limesurvey.yml          # Overlay: LimeSurvey surveys (--profile surveys)
+│   ├── calendar.yml            # Overlay: Public booking calendar — calrs + dedicated Radicale CalDAV (--profile calendar)
 │   ├── synapse-setup.sh        # Synapse homeserver.yaml generator (POSIX-sh)
 │   └── cryptpad-config/        # CryptPad configuration
 ├── monitoring/
@@ -782,6 +784,7 @@ openSME-compose/
 │   ├── upgrade.sh             # Helm-free rolling upgrade with pre-flight checks (make upgrade)
 │   ├── pin-images.sh          # Resolve image tags to sha256 digests → manifests/pinned-images.env
 │   ├── rotate-backups.sh      # Prune old off-site backups via rclone (retention policy)
+│   ├── calendar-setup.sh      # Idempotent calendar bootstrap (Radicale htpasswd, calrs admin, CalDAV source, VC event type)
 │   └── provision-demo-users.sh # Provision 13 demo users across Zitadel, Operaton, Synapse, Paperless, Stalwart (--component, idempotent)
 ├── contracts/                  # Integration contracts (parsed by tests/02-contracts/)
 │   ├── README.md               # Contract format + rule types
@@ -1315,6 +1318,28 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 > the template by hand. For existing installs, re-run it or rotate the values manually
 > (`openssl rand -base64 24`).
 
+#### Public Calendar (`--profile calendar`)
+
+Opt-in booking calendar (`services/calendar.yml`): calrs (public booking
+page + dashboard, edge-routed at `CALENDAR_DOMAIN`) backed by a dedicated
+internal-only Radicale CalDAV store. **The public booking page exposes
+only free/busy slots — never event titles, attendees or staff calendars;
+bookings live only in the dedicated Radicale calendar.** Booking page:
+`https://<CALENDAR_DOMAIN>/u/<admin-user>/vc`. See
+[`docs/calendar.md`](docs/calendar.md) for the full deploy + privacy
+contract. Env keys (placeholders only — set in `.env`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `CALENDAR_DOMAIN` | `calendar.opensme.graphwiz.ai` | Public host for the booking page + dashboard |
+| `CALRS_IMAGE_TAG` | `1.6.0` | Locally-built `calrs:` tag (built from upstream `v1.6.0` via `buildx --network host`) |
+| `RADICALE_IMAGE_TAG` | `3.9.0.0` | `tomsquest/docker-radicale` tag (pulled from Docker Hub) |
+| `RADICALE_USER` / `RADICALE_PASSWORD` | *(empty)* | Booking CalDAV login, seeded into Radicale htpasswd by `scripts/calendar-setup.sh` |
+| `RADICALE_AUTH_HTPASSWD_ENCRYPTION` | `bcrypt` | htpasswd hash type (`bcrypt` or `plain`) |
+| `CALRS_ADMIN_EMAIL` / `CALRS_ADMIN_PASSWORD` | *(empty)* | Bootstrap admin (first registered user is admin) |
+| `CALRS_VC_URL` | `https://` | Template meeting link rendered as the booking location |
+| `CALRS_OIDC_ISSUER` / `CALRS_OIDC_CLIENT_ID` / `CALRS_OIDC_CLIENT_SECRET` | *(empty)* | Optional Zitadel SSO (blank = local-auth only; `scripts/zitadel-client.sh --app calendar`) |
+
 ### Optional components — maturity notes
 
 - **Nosdesk** (`--profile ticketing`): upstream license is **BSL 1.1**
@@ -1439,6 +1464,7 @@ make survey-deploy            # Seed the example LimeSurvey survey
 | `scripts/upgrade.sh` | Helm-free rolling upgrade with pre-flight contract checks (`make upgrade`) — see [docs/UPGRADE.md](docs/UPGRADE.md) |
 | `scripts/mailcow.sh` | Drive the mailcow mail backend (pinned submodule; requires `MAIL_BACKEND=mailcow` — strict XOR with Stalwart) |
 | `scripts/zitadel-client.sh` | Idempotent Zitadel OIDC app provisioning (`--app opencloud\|notes\|synapse`) — registers the client with the correct redirect URIs and persists the minted id/secret to `.env` |
+| `scripts/calendar-setup.sh` | Idempotent calendar bootstrap (Radicale htpasswd, calrs admin, CalDAV source, public `Video Consultation` event type) — see [docs/calendar.md](docs/calendar.md) |
 | `scripts/provision-demo-users.sh` | Provision the 13 demo users (`make provision-demo-users`; `--component`, `--clean`, `--dry-run`) |
 | `scripts/compliance.py` | Run the static suite and emit timestamped compliance reports (`make compliance`) |
 | `bootstrap/bpmn-deploy.sh` | Deploy sample BPMN processes to the Operaton engine |
@@ -1736,6 +1762,7 @@ Start at the [documentation index](docs/README.md). The deep dives:
 | [Backup rotation](docs/rotate-backups.md) | operators | Off-site retention with rclone |
 | [Image pinning](docs/pin-images.md) | operators | Digest-pinned manifests for reproducible deploys |
 | [Roadmap](docs/ROADMAP.md) | everyone | Current scope, in-flight work, backlog |
+| [Public Calendar](docs/calendar.md) | operators | calrs booking page + dedicated Radicale CalDAV store — deploy steps, env, privacy contract (free/busy-only public page) |
 | [Test suite](tests/README.md) | contributors | The layered test pyramid, layer by layer |
 | [Contracts](contracts/README.md) / [Specs](specs/README.md) | contributors | Contract + spec formats and rule types |
 | [OpenSpec](openspec/) | contributors | Capability specs and change proposals |
