@@ -74,6 +74,10 @@ Epics / user stories (IDs appear in failure output):
         leaks no secrets (no password/token/cookie material)
     M3  IdP pinning: Zitadel app client_id matches PORTAL_OIDC_CLIENT_ID
         and the app's redirect URI is the portal callback (PAT-gated)
+    M4  invoiceninja IdP pinning: the redirect_uri the app SERVES in its
+        /auth/oidc 302 is exactly what the Zitadel app REGISTERS (this
+        drift broke invoice SSO: registered invoices.<OPENSME_DOMAIN>,
+        served invoices.<INVOICE_DOMAIN>)                        [PAT-gated]
 
   Epic E — Edge hardening (security-headers shadow contract)
     E1  portal: HSTS + XFO + nosniff
@@ -724,6 +728,55 @@ def main() -> bool:
             result.ok(f"M3: IdP pinning verified ({detail})")
         else:
             result.fail(f"M3: IdP pinning broken ({detail or r.status_code})")
+
+    ininja_client = cfg("INVOICENINJA_OIDC_CLIENT_ID")
+    invoice_host = cfg("INVOICE_DOMAIN") or f"invoices.{portal_host}"
+    invoice_base = f"{schema}{invoice_host}"
+    if not ininja_client:
+        result.skip("M4: invoiceninja IdP pinning needs INVOICENINJA_OIDC_CLIENT_ID")
+    else:
+        # the SERVED half: what redirect_uri the app puts on its authorize
+        # bounce (derived from the APP_URL the deployment actually runs)
+        served = None
+        r = anon.get(invoice_base + "/auth/oidc", timeout=T, allow_redirects=False)
+        if r.status_code in (301, 302, 303, 307):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(
+                r.headers.get("location", "")).query)
+            served = q.get("redirect_uri", [None])[0]
+        if not pat or not served:
+            result.skip("M4: served redirect unverifiable "
+                        f"(served={served!r}, PAT={'yes' if pat else 'no'})")
+        else:
+            want_served = invoice_base + "/auth/oidc"
+            served_ok = served.rstrip("/") == want_served.rstrip("/")
+            # the REGISTERED half: the IdP app must allow exactly that URI
+            registered = None
+            if pat:
+                h = {"Authorization": f"Bearer {pat}"}
+                r = requests.post(f"{idp_base}/management/v1/projects/_search",
+                                  headers=h, json={}, timeout=T, verify=verify)
+                if r.status_code == 200:
+                    for proj in r.json().get("result", []):
+                        ra = requests.post(
+                            f"{idp_base}/management/v1/projects/{proj['id']}/apps/_search",
+                            headers=h, json={}, timeout=T, verify=verify)
+                        for app in ra.json().get("result", []):
+                            if (app.get("oidcConfig") or {}).get("clientId") == ininja_client:
+                                registered = app["oidcConfig"].get("redirectUris") or []
+            reg_ok = registered is not None and any(
+                u.rstrip("/") == served.rstrip("/") for u in registered)
+            if served_ok and reg_ok:
+                result.ok("M4: invoiceninja IdP pinning verified "
+                          f"(served == registered == {served})")
+            elif not served_ok:
+                result.fail(f"M4: invoiceninja serves redirect {served!r}, "
+                            f"want {want_served!r} (APP_URL/routing drift)")
+            else:
+                result.fail(f"M4: invoiceninja redirect drift — served {served!r} "
+                            f"but IdP registers {registered!r} "
+                            "(fix: PUT /management/v1/projects/<pid>/apps/<aid>/"
+                            "oidc_config with the served URI — see "
+                            "scripts/zitadel-client.sh enforce_redirect_uris)")
 
     # ══ Epic E — Edge hardening ═══════════════════════════════════════
     result.header("Epic E — Edge hardening (security-headers shadow)")

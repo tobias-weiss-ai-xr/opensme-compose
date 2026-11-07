@@ -66,6 +66,12 @@ services:
     profiles: ["invoice"]
     environment:
       APP_URL: "https://invoices.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+      # HOSTING NOTE: on live chains opensme-coexist.yml overrides APP_URL
+      # and the router to ${INVOICE_DOMAIN} (invoices.home.… convention).
+      # The Zitadel app's registered redirect URI MUST match whatever this
+      # deployment serves at /auth/oidc — a plain-env registration bakes in
+      # invoices.<OPENSME_DOMAIN> and breaks SSO (redirect_uri mismatch).
+      # tests/05-e2e/stories.py M4 pins served == registered.
       # The entrypoint bakes .env into the container layer on first boot — a
       # recreate loses it (and the APP_KEY it auto-generated), so the key must
       # be supplied explicitly and persisted in the host .env.
