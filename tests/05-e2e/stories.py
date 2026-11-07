@@ -51,6 +51,30 @@ Epics / user stories (IDs appear in failure output):
     K4  the OIDC handshake cookies are HttpOnly + Secure + SameSite
     K5  callback state gate: bogus state is refused (CSRF contract)
 
+  Epic L — Member apps (intercom / polls / cloud picker)
+    L1  member APIs refuse anonymous reads and writes
+    L2  intercom signed-in CRUD roundtrip (post → list → delete)
+    L3  intercom attachment host-pin: foreign attachment_url → 400
+        "attachment host not allowed" (SSRF pinning)
+    L4  covered by L1 (polls gate checked alongside intercom's)
+    L5  polls validation matrix: 1 option → 400, 11 options → 400,
+        vote option out of range → 400 (negative = raw 422 quirk,
+        warned not failed)
+    L6  polls signed-in create + vote + list roundtrip (no delete
+        route — polls persist by design)
+    L7  cloud share: anonymous refused; traversal ("../") → 400
+        "refusing"; absolute path → 400 "must be relative"
+    L8  announcements + feeds are anonymous-readable JSON envelopes
+
+  Epic M — Session lifecycle & observability
+    M1  signed-in logout → 303 to IdP end_session with
+        post_logout_redirect_uri, clears the session cookies
+        (Max-Age=0) and actually terminates the portal session
+    M2  /metrics answers anonymously in Prometheus text format and
+        leaks no secrets (no password/token/cookie material)
+    M3  IdP pinning: Zitadel app client_id matches PORTAL_OIDC_CLIENT_ID
+        and the app's redirect URI is the portal callback (PAT-gated)
+
   Epic E — Edge hardening (security-headers shadow contract)
     E1  portal: HSTS + XFO + nosniff
     E2  vc host: HSTS + XFO + nosniff (the camera/mic lift is V7)
@@ -491,6 +515,218 @@ def main() -> bool:
                     result.ok("K5: callback refuses bogus state (CSRF gate)")
                 else:
                     result.fail(f"K5: bogus-state callback accepted?! {body!r}")
+
+    # ══ Epic L — Member apps (intercom / polls / cloud picker) ════════
+    result.header("Epic L — Member apps (intercom / polls / cloud picker)")
+
+    # ── anonymous gates ──────────────────────────────────────────────
+    gates = []
+    for label, url in (("intercom", portal_base + "/api/intercom"),
+                       ("polls", portal_base + "/api/polls"),
+                       ("cloud-share", portal_base + "/api/cloud/share?path=x.txt")):
+        r = anon.get(url, timeout=T, allow_redirects=False)
+        r2 = anon.post(url, json={"x": 1}, timeout=T, allow_redirects=False)
+        ok = r.status_code in (401, 403, 303) and r2.status_code in (401, 403, 303)
+        gates.append(f"{label} {r.status_code}/{r2.status_code}{'✓' if ok else '✗'}")
+    if all("✓" in g for g in gates):
+        result.ok(f"L1/L4/L7: member APIs refuse anonymous ({'; '.join(gates)})")
+    else:
+        result.fail(f"L1/L4/L7: anonymous gate broken: {'; '.join(gates)}")
+
+    r = anon.get(portal_base + "/api/announcements", timeout=T)
+    r2 = anon.get(portal_base + "/api/feeds", timeout=T)
+    try:
+        ann_ok = r.status_code == 200 and "announcements" in r.json()
+        feeds_ok = r2.status_code == 200 and "columns" in r2.json()
+    except ValueError:
+        ann_ok = feeds_ok = False
+    if ann_ok and feeds_ok:
+        result.ok("L8: announcements + feeds anonymous JSON envelopes (200)")
+    else:
+        result.fail(f"L8: announcements {r.status_code}/feeds {r2.status_code} "
+                    "anonymous envelope broken")
+
+    # ── signed-in member-app journeys ────────────────────────────────
+    member = requests.Session()
+    member.verify = verify
+    if portal_login(member, portal_base, idp_base):
+        # intercom CRUD roundtrip (serde ignores unknown fields by design)
+        r = member.post(portal_base + "/api/intercom",
+                        json={"text": "e2e-story roundtrip",
+                              "bogus_unknown_field": 1}, timeout=T)
+        mid = None
+        if r.status_code == 201:
+            msg = r.json().get("message") or {}
+            mid = msg.get("id")
+        if mid is not None:
+            result.ok("L2: intercom post created (201, serde-tolerant payload)")
+            r = member.get(portal_base + "/api/intercom", timeout=T)
+            listed = any(str(m.get("id")) == str(mid)
+                         for m in (r.json().get("messages") or []))
+            if listed:
+                result.ok("L2: intercom list carries the new message")
+            else:
+                result.fail("L2: intercom list missing the created message")
+            r = member.delete(portal_base + f"/api/intercom/{mid}", timeout=T)
+            if r.status_code < 400:
+                result.ok("L2: intercom delete cleans up")
+            else:
+                result.fail(f"L2: intercom delete → {r.status_code}")
+        else:
+            result.fail(f"L2: intercom post → {r.status_code} {r.text[:60]!r}")
+
+        r = member.post(portal_base + "/api/intercom",
+                        json={"text": "e2e", "kind": "note",
+                              "attachment_url": "https://evil.example.com/x.png"},
+                        timeout=T)
+        if r.status_code == 400 and "host not allowed" in r.text:
+            result.ok("L3: intercom attachment host-pin (foreign host → 400)")
+        else:
+            result.fail(f"L3: intercom foreign attachment → {r.status_code}, "
+                        "want 400 'host not allowed' (SSRF pinning)")
+
+        # polls create validation matrix
+        matrix = []
+        for label, payload in (("empty question", {"question": "", "options": ["a", "b"]}),
+                               ("one option", {"question": "q", "options": ["only"]}),
+                               ("eleven options", {"question": "q",
+                                                   "options": [f"o{i}" for i in range(11)]})):
+            r = member.post(portal_base + "/api/polls", json=payload, timeout=T)
+            ok = r.status_code == 400
+            matrix.append(f"{label}→{r.status_code}{'✓' if ok else '✗'}")
+        if all("✓" in m for m in matrix):
+            result.ok(f"L5: polls create validation {', '.join(matrix)}")
+        else:
+            result.fail(f"L5: polls create validation broken: {', '.join(matrix)}")
+
+        # polls roundtrip + vote range
+        r = member.post(portal_base + "/api/polls",
+                        json={"question": "e2e-story poll?", "options": ["yes", "no"]},
+                        timeout=T)
+        pid = None
+        if r.status_code == 201:
+            pid = (r.json().get("poll") or {}).get("id")
+        if pid is not None:
+            result.ok("L6: polls create")
+            # vote range probes FIRST — a real vote latches the
+            # already-voted 409 guard ahead of the option check
+            r = member.post(portal_base + f"/api/polls/{pid}/vote", json={"option": 99},
+                            timeout=T)
+            if r.status_code == 400:
+                result.ok("L5: polls vote option=99 → 400")
+            else:
+                result.fail(f"L5: polls vote option=99 → {r.status_code}, want 400")
+            # documented quirk: negative option is rejected by the usize
+            # extractor as a raw 422 before the handler's JSON 400
+            r = member.post(portal_base + f"/api/polls/{pid}/vote", json={"option": -1},
+                            timeout=T)
+            if r.status_code == 422:
+                result.warn("L5: polls option=-1 → raw 422 (usize extractor; "
+                            "cosmetic quirk, pinned)")
+            else:
+                result.warn(f"L5: polls option=-1 → {r.status_code} (quirk moved?)")
+            r = member.post(portal_base + f"/api/polls/{pid}/vote", json={"option": 1},
+                            timeout=T)
+            if r.status_code == 200:
+                result.ok("L6: polls vote accepted")
+            else:
+                result.fail(f"L6: polls vote → {r.status_code}")
+            r = member.get(portal_base + "/api/polls", timeout=T)
+            listed = any(str(p.get("id")) == str(pid)
+                         for p in (r.json().get("polls") or []))
+            if listed:
+                result.ok("L6: polls list carries the new poll")
+            else:
+                result.fail("L6: polls list missing the created poll")
+        else:
+            result.fail(f"L6: polls create → {r.status_code} {r.text[:60]!r}")
+
+        # cloud share path validation
+        bad_paths = []
+        for label, path, marker in (("traversal", "../etc/passwd", "refusing"),
+                                    ("absolute", "/abs/path", "must be relative"),
+                                    ("dot-dot", "a/../../b", "refusing")):
+            r = member.post(portal_base + f"/api/cloud/share?path={urllib.parse.quote(path)}",
+                            timeout=T)
+            ok = r.status_code == 400 and marker in r.text
+            bad_paths.append(f"{label}→{r.status_code}{'✓' if ok else '✗'}")
+        if all("✓" in m for m in bad_paths):
+            result.ok(f"L7: cloud share path validation {', '.join(bad_paths)}")
+        else:
+            result.fail(f"L7: cloud share path validation broken: {', '.join(bad_paths)}")
+    else:
+        result.skip("L2–L7 signed-in member journeys: no session "
+                    "(set ZITADEL_ADMIN_PASSWORD + E2E_ZITADEL_LOGINCLIENT_PAT / "
+                    "E2E_ZITADEL_PAT)")
+
+    # ══ Epic M — Session lifecycle & observability ════════════════════
+    result.header("Epic M — Session lifecycle & observability")
+
+    if portal_login(member, portal_base, idp_base):
+        r = member.post(portal_base + "/api/logout", timeout=T, allow_redirects=False)
+        loc = r.headers.get("location", "")
+        cleared = r.headers.get("set-cookie", "").lower()
+        if r.status_code == 303 and f"{idp_base}/oidc/v1/end_session" in loc \
+                and "post_logout_redirect_uri=" in loc:
+            result.ok("M1: logout 303 → IdP end_session + post_logout_redirect_uri")
+        else:
+            result.fail(f"M1: logout → {r.status_code} {loc[:70]!r}")
+        if "max-age=0" in cleared and "httponly" in cleared:
+            result.ok("M1: logout clears session cookies (Max-Age=0, HttpOnly)")
+        else:
+            result.fail("M1: logout does not clear session cookies")
+        r = member.get(portal_base + "/api/services", timeout=T, allow_redirects=False)
+        if r.status_code in (401, 403):
+            result.ok("M1: session actually terminated after logout")
+        else:
+            result.fail(f"M1: /api/services still answers after logout ({r.status_code})")
+    else:
+        result.skip("M1: no session (portal login unavailable)")
+
+    r = anon.get(portal_base + "/metrics", timeout=T)
+    if r.status_code == 200 and ("# HELP" in r.text or "# TYPE" in r.text
+                                 or "http_requests" in r.text):
+        leak_markers = [m for m in ("password", "secret", "token", "set-cookie",
+                                    "session=") if m in r.text.lower()]
+        if leak_markers:
+            result.fail(f"M2: /metrics leaks sensitive markers: {leak_markers}")
+        else:
+            result.ok("M2: /metrics anonymous Prometheus body, no secret markers")
+        hardened(r, result, "M2 metrics", xfo_required=False)
+    else:
+        result.fail(f"M2: /metrics → {r.status_code}, want 200 prometheus text")
+
+    pat = cfg("E2E_ZITADEL_PAT")
+    portal_client = cfg("PORTAL_OIDC_CLIENT_ID")
+    if not (pat and portal_client):
+        result.skip("M3: IdP pinning needs E2E_ZITADEL_PAT + PORTAL_OIDC_CLIENT_ID")
+    else:
+        h = {"Authorization": f"Bearer {pat}"}
+        r = requests.post(f"{idp_base}/management/v1/projects/_search", headers=h,
+                          json={}, timeout=T, verify=verify)
+        pinned, detail = False, ""
+        if r.status_code == 200:
+            for proj in r.json().get("result", []):
+                ra = requests.post(
+                    f"{idp_base}/management/v1/projects/{proj['id']}/apps/_search",
+                    headers=h, json={}, timeout=T, verify=verify)
+                for app in ra.json().get("result", []):
+                    oc = app.get("oidcConfig") or {}
+                    if oc.get("clientId") == portal_client:
+                        uris = oc.get("redirectUris") or []
+                        want = f"{portal_base}/api/auth/callback"
+                        if any(u.rstrip("/") == want.rstrip("/") for u in uris):
+                            pinned = True
+                            detail = f"client {portal_client[:8]}… redirect == {want}"
+                        else:
+                            detail = f"client {portal_client[:8]}… redirect {uris!r} != {want!r}"
+        if pinned:
+            result.ok(f"M3: IdP pinning verified ({detail})")
+        else:
+            result.fail(f"M3: IdP pinning broken ({detail or r.status_code})")
+
+    # ══ Epic E — Edge hardening ═══════════════════════════════════════
+    result.header("Epic E — Edge hardening (security-headers shadow)")
     hardened(anon.get(portal_base + "/", timeout=T), result, "E1 portal")
     if vc_url:
         hardened(anon.get(vc_url + "/", timeout=T), result, "E2 vc")
