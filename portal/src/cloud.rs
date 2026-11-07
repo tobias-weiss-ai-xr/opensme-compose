@@ -65,6 +65,19 @@ pub fn parse_share_url(body: &[u8]) -> Result<String, String> {
     Ok(url.to_string())
 }
 
+/// Extract the upstream HTTP status an operation error carries
+/// (`"MKCOL x failed: HTTP 405"` → 405). None for transport-level
+/// failures (`unreachable`) and parse errors — callers map those to a
+/// gateway status. Offline-testable core of the bridge error passthrough.
+pub fn http_status(err: &str) -> Option<u16> {
+    let at = err.find("HTTP ")?;
+    let rest = &err[at + "HTTP ".len()..];
+    let digits = &rest[..rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len())];
+    digits.parse().ok()
+}
+
 // ── path building (the safety-critical part) ─────────────────────────
 
 /// Percent-encode ONE path segment per RFC 3986 `pchar`: unreserved +
@@ -135,6 +148,61 @@ pub fn dav_url(dav_base: &str, rel_path: &str) -> Result<String, String> {
         url.push_str(&encode_segment(seg));
     }
     Ok(url)
+}
+
+/// Validate a RELATIVE directory/file path for the portal bridge:
+/// non-empty (after trim), no leading `/` (absolute request URLs under
+/// `remote.php/…` are built by [`dav_url`] — callers never supply
+/// absolute text), no empty segments (leading/trailing/double slashes)
+/// and no `..`/`.` segments. Returns the trimmed path. This is the gate
+/// the `/api/cloud` handlers run BEFORE any network call; `dav_url`
+/// re-checks when the request URL is built (defense in depth).
+pub fn validate_path(raw: &str) -> Result<String, String> {
+    let path = raw.trim();
+    if path.is_empty() {
+        return Err(format!("invalid cloud path {raw:?}: empty path"));
+    }
+    if path.starts_with('/') {
+        return Err(format!(
+            "invalid cloud path {raw:?}: path must be relative (no leading '/')"
+        ));
+    }
+    for seg in path.split('/') {
+        if seg.is_empty() {
+            return Err(format!("invalid cloud path {raw:?}: empty path segment"));
+        }
+        if seg == ".." || seg == "." {
+            return Err(format!(
+                "invalid cloud path {raw:?}: refusing {seg:?} segment"
+            ));
+        }
+    }
+    Ok(path.to_string())
+}
+
+/// Validate a single entry NAME (mkdir/upload): one non-empty segment
+/// after trim, no `/` (path structure), not `..` or `.` (traversal).
+/// Percent-encoding of everything else happens in the encoder.
+pub fn validate_name(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(format!("invalid cloud name {raw:?}: empty name"));
+    }
+    if name.contains('/') {
+        return Err(format!(
+            "invalid cloud name {raw:?}: name must be a single path segment"
+        ));
+    }
+    if name == ".." || name == "." {
+        return Err(format!("invalid cloud name {raw:?}: refusing {name:?}"));
+    }
+    Ok(name.to_string())
+}
+
+/// Join a validated directory path and a validated entry name into the
+/// relative remote path (`dir/name`).
+pub fn join(dir: &str, name: &str) -> String {
+    format!("{dir}/{name}")
 }
 
 /// Percent-decode `%XX` sequences; malformed ones pass through verbatim.
@@ -399,6 +467,15 @@ pub fn list(body: &[u8], request_path: &str) -> Result<Vec<CloudEntry>, String> 
     Ok(entries)
 }
 
+/// A downloaded cloud file: raw bytes plus the server's Content-Type.
+/// The download bridge falls back to `application/octet-stream` when
+/// the cloud omits the header.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloudDownload {
+    pub bytes: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
 /// OpenCloud WebDAV + OCS client. All remote paths are relative to
 /// `dav_base`; the `http` client is injectable so callers can share the
 /// portal's wired reqwest client (timeouts, egress proxy, no redirects).
@@ -565,6 +642,14 @@ impl CloudFiles {
     /// GET `<dav_base>/<remote_path>` bytes.
     #[allow(dead_code)] // generalized client — consumers adopt incrementally
     pub async fn get(&self, remote_path: &str) -> Result<Vec<u8>, String> {
+        Ok(self.download(remote_path).await?.bytes)
+    }
+
+    /// GET `<dav_base>/<remote_path>` — raw bytes plus the server's
+    /// Content-Type (None when omitted; callers fall back to
+    /// `application/octet-stream`). This is what the portal's
+    /// `/api/cloud/file` download bridge serves.
+    pub async fn download(&self, remote_path: &str) -> Result<CloudDownload, String> {
         let url = dav_url(&self.dav_base, remote_path)?;
         let res = self
             .http
@@ -579,11 +664,20 @@ impl CloudFiles {
                 res.status().as_u16()
             ));
         }
-        let body = res
+        let content_type = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let bytes = res
             .bytes()
             .await
             .map_err(|e| format!("GET {remote_path} response unreadable: {e}"))?;
-        Ok(body.to_vec())
+        Ok(CloudDownload {
+            bytes: bytes.to_vec(),
+            content_type,
+        })
     }
 
     /// DELETE `<dav_base>/<remote_path>`.
@@ -718,6 +812,86 @@ mod tests {
         // benign single/multi-segment paths stay fine
         assert!(dav_url(BASE, "Umfragen").is_ok());
         assert!(dav_url(BASE, "Umfragen/key").is_ok());
+    }
+
+    // ── bridge validation (the /api/cloud gate — pure, no network) ───
+
+    #[test]
+    fn validate_path_accepts_relative_multi_segment_paths() {
+        assert_eq!(validate_path("Umfragen").unwrap(), "Umfragen");
+        assert_eq!(validate_path(" Umfragen/2026 ").unwrap(), "Umfragen/2026");
+        assert_eq!(
+            validate_path("Anträge/Antrag 1.pdf").unwrap(),
+            "Anträge/Antrag 1.pdf"
+        );
+    }
+
+    #[test]
+    fn validate_path_rejects_empty_absolute_traversal_and_slash_nonsense() {
+        for bad in [
+            "",
+            "   ",
+            "/abs",
+            "/",
+            "..",
+            "../x",
+            "a/../b",
+            "./x",
+            "a/./b",
+            "Umfragen/",
+            "a//b",
+            ".",
+        ] {
+            let err = validate_path(bad).unwrap_err();
+            assert!(
+                err.starts_with("invalid cloud path"),
+                "path {bad:?} must be rejected, got: {err}"
+            );
+        }
+        // Callers must never supply absolute remote.php text.
+        assert!(validate_path("/remote.php/dav/files/u/x.pdf").is_err());
+        // absolute text is the ONLY reject with its own message
+        assert!(validate_path("/x")
+            .unwrap_err()
+            .contains("must be relative"));
+    }
+
+    #[test]
+    fn validate_name_is_exactly_one_sane_segment() {
+        assert_eq!(validate_name("Antrag 2026.pdf").unwrap(), "Antrag 2026.pdf");
+        assert_eq!(validate_name(" neu ").unwrap(), "neu");
+        for bad in ["", "  ", "..", ".", "a/b", "a/b/c", " / "] {
+            let err = validate_name(bad).unwrap_err();
+            assert!(
+                err.starts_with("invalid cloud name"),
+                "name {bad:?} must be rejected, got: {err}"
+            );
+        }
+        // a joined path is rejected as a NAME and caught as a PATH instead
+        assert!(validate_name("Docs/neu")
+            .unwrap_err()
+            .contains("single path segment"));
+    }
+
+    #[test]
+    fn join_prepends_the_directory_segment() {
+        assert_eq!(join("Umfragen", "x.pdf"), "Umfragen/x.pdf");
+        // joined results must survive both validators (round-trip)
+        let full = join("Umfragen/2026", "Antrag 1.pdf");
+        assert_eq!(validate_path(&full).unwrap(), full);
+    }
+
+    #[test]
+    fn http_status_extracts_upstream_codes_only() {
+        assert_eq!(http_status("MKCOL Docs/neu failed: HTTP 405"), Some(405));
+        assert_eq!(http_status("GET x.pdf failed: HTTP 404"), Some(404));
+        assert_eq!(http_status("PROPFIND Docs failed: HTTP 207"), Some(207));
+        assert_eq!(
+            http_status("PROPFIND Docs unreachable: connection refused"),
+            None
+        );
+        assert_eq!(http_status("share response carries no url"), None);
+        assert_eq!(http_status("HTTP "), None);
     }
 
     #[test]

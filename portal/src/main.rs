@@ -45,6 +45,9 @@ struct AppConfig {
     intercom_store: Arc<intercom::IntercomStore>,
     intercom_client: reqwest::Client,
     polls: Option<Arc<polls::PollStore>>,
+    /// Cloud files bridge (`/api/cloud/*`): `None` (→ 503 on every
+    /// bridge route) unless CLOUD_WEBDAV_URL/_USER/_PASS are all set.
+    cloud: Option<cloud::CloudFiles>,
     feed_fetcher: Arc<feeds::FeedFetcher>,
     session: session::SessionConfig,
 }
@@ -1009,7 +1012,21 @@ fn build_router(config: Arc<AppConfig>) -> Router {
             "/api/intercom/files/:token/:name",
             get(handle_intercom_file),
         )
-        .route("/api/services", get(handle_services));
+        .route("/api/services", get(handle_services))
+        // Cloud files bridge — registered UNCONDITIONALLY so a missing
+        // cloud config surfaces as a clean 503 "not configured" instead
+        // of a bare 404; anonymous callers are stopped by the session
+        // firewall below (401 runs first, before any handler logic).
+        .route(
+            "/api/cloud/files",
+            get(handle_cloud_list)
+                .post(handle_cloud_mkdir)
+                .put(handle_cloud_upload),
+        )
+        .route(
+            "/api/cloud/file",
+            get(handle_cloud_download).delete(handle_cloud_delete),
+        );
 
     // The AI proxy is the one METERED endpoint (the operator pays per
     // upstream token) — it must sit behind the session firewall like
@@ -1483,6 +1500,239 @@ async fn handle_polls_file(
     }
 }
 
+// ── Cloud files bridge (/api/cloud/*) ────────────────────────────────
+//
+// Thin wrappers over `cloud::CloudFiles`: relative paths/names are
+// validated offline FIRST (400 before any network call — the pure
+// helpers live in cloud.rs and are unit-tested there), a missing cloud
+// config answers 503, and upstream errors are mapped through
+// `cloud_error` (404/409/400/502 passthrough). The routes live in the
+// `protected` router, so anonymous callers get 401 from the session
+// firewall before any of this runs. Absolute paths under the dav root
+// are built by the module's encoder from these relative inputs —
+// callers never supply `remote.php/...` text.
+
+/// One relative path (list directory / download+delete file).
+#[derive(Deserialize)]
+struct CloudPathQuery {
+    #[serde(default)]
+    path: String,
+}
+
+/// Parent directory + single-segment name (mkdir / upload).
+#[derive(Deserialize)]
+struct CloudCreateQuery {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    name: String,
+}
+
+fn cloud_bad(msg: &str) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
+}
+
+/// Every bridge route when CLOUD_WEBDAV_* is not wired up.
+fn cloud_not_configured() -> axum::response::Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({ "error": "cloud storage not configured" })),
+    )
+        .into_response()
+}
+
+/// Map a `cloud::CloudFiles` error string onto a status + JSON body:
+/// upstream 404 → 404, 405/409/423 (exists/locked per RFC 4918) → 409,
+/// other upstream 4xx → 400, upstream 5xx and transport failures
+/// (`unreachable`) → 502 (the portal is the gateway to the internal
+/// cloud host). The message itself is passed through verbatim.
+fn cloud_error(err: &str) -> axum::response::Response {
+    let status = match cloud::http_status(err) {
+        Some(404) => StatusCode::NOT_FOUND,
+        Some(405 | 409 | 423) => StatusCode::CONFLICT,
+        Some(c) if (400..500).contains(&c) => StatusCode::BAD_REQUEST,
+        Some(_) => StatusCode::BAD_GATEWAY,
+        None => StatusCode::BAD_GATEWAY,
+    };
+    (status, Json(serde_json::json!({ "error": err }))).into_response()
+}
+
+/// MKCOL answers 405 when the collection already exists — surface that
+/// as a clean 409 instead of the raw upstream text.
+fn cloud_mkdir_error(err: &str) -> axum::response::Response {
+    if err.contains("HTTP 405") {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "directory already exists" })),
+        )
+            .into_response();
+    }
+    cloud_error(err)
+}
+
+/// GET /api/cloud/files?path=<dir> — Depth:1 listing, dirs first.
+async fn handle_cloud_list(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+) -> impl IntoResponse {
+    let dir = match cloud::validate_path(&q.path) {
+        Ok(d) => d,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    match cloud.list(&dir).await {
+        Ok(entries) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "entries": entries })),
+        )
+            .into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
+/// POST /api/cloud/files?path=<dir>&name=<n> — mkdir (409 on exists).
+async fn handle_cloud_mkdir(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudCreateQuery>,
+) -> impl IntoResponse {
+    let dir = match cloud::validate_path(&q.path) {
+        Ok(d) => d,
+        Err(e) => return cloud_bad(&e),
+    };
+    let name = match cloud::validate_name(&q.name) {
+        Ok(n) => n,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    let full = cloud::join(&dir, &name);
+    match cloud.mkdir(&full).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "path": full })),
+        )
+            .into_response(),
+        Err(e) => cloud_mkdir_error(&e),
+    }
+}
+
+/// PUT /api/cloud/files?path=<dir>&name=<n> — raw-body upload (same
+/// shape as the intercom/polls picked-file routes; the global
+/// DefaultBodyLimit enforces intercom::MAX_UPLOAD, re-checked here).
+async fn handle_cloud_upload(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudCreateQuery>,
+    headers: axum::http::HeaderMap,
+    bytes: axum::body::Bytes,
+) -> impl IntoResponse {
+    let dir = match cloud::validate_path(&q.path) {
+        Ok(d) => d,
+        Err(e) => return cloud_bad(&e),
+    };
+    let name = match cloud::validate_name(&q.name) {
+        Ok(n) => n,
+        Err(e) => return cloud_bad(&e),
+    };
+    if bytes.is_empty() {
+        return cloud_bad("upload body is empty");
+    }
+    if bytes.len() as u64 > intercom::MAX_UPLOAD {
+        return cloud_bad(&format!("upload exceeds {} bytes", intercom::MAX_UPLOAD));
+    }
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    let full = cloud::join(&dir, &name);
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim()
+        .to_string();
+    match cloud.put(&full, &bytes, &content_type).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "path": full })),
+        )
+            .into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
+/// GET /api/cloud/file?path=<file> — binary download, content-type from
+/// the cloud (fallback octet-stream), inline. Active-content extensions
+/// (svg/html/…) are forced to `attachment` — same stored-XSS rule as the
+/// intercom/polls file routes, since these bytes render in portal origin.
+async fn handle_cloud_download(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+) -> impl IntoResponse {
+    use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    let path = match cloud::validate_path(&q.path) {
+        Ok(p) => p,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    match cloud.download(&path).await {
+        Ok(file) => {
+            let content_type = file
+                .content_type
+                .unwrap_or_else(|| "application/octet-stream".into());
+            // header-safe filename (quotes/backslashes would break out
+            // of the quoted-string)
+            let name = path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&path)
+                .replace(['"', '\\'], "");
+            let disposition = if intercom::serve_inline(&name) {
+                format!("inline; filename=\"{name}\"")
+            } else {
+                format!("attachment; filename=\"{name}\"")
+            };
+            (
+                [
+                    (CONTENT_TYPE, content_type),
+                    (CONTENT_DISPOSITION, disposition),
+                ],
+                file.bytes,
+            )
+                .into_response()
+        }
+        Err(e) => cloud_error(&e),
+    }
+}
+
+/// DELETE /api/cloud/file?path=<file> — 204 / 404 / 400.
+async fn handle_cloud_delete(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+) -> impl IntoResponse {
+    let path = match cloud::validate_path(&q.path) {
+        Ok(p) => p,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    match cloud.delete(&path).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
 /// Resolve an "attachment from the cloud" URL into a metadata snapshot:
 /// SSRF/allowlist guards + HEAD + Content-Disposition/Length/Type. The
 /// file itself stays in the cloud — the portal never mediates bodies.
@@ -1683,6 +1933,9 @@ fn load_config() -> Arc<AppConfig> {
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
         polls: polls_store_from_env(&intercom_client),
+        // Cloud files bridge client — rides the shared wired client
+        // (timeout, no redirects, egress proxy + internal-host bypass).
+        cloud: cloud::CloudFiles::from_env().map(|c| c.with_client(intercom_client.clone())),
         session: session::SessionConfig::from_env(),
         intercom_client,
         feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(&load_env(
@@ -1707,6 +1960,7 @@ async fn main() {
         ai_enabled = config.ai.is_some(),
         announcements = config.announcements.len(),
         polls_enabled = config.polls.is_some(),
+        cloud_files = config.cloud.is_some(),
         feed_columns = config.feed_fetcher.columns().len(),
         "starting opensme-portal"
     );
@@ -1767,6 +2021,7 @@ mod tests {
             },
             intercom_store: Arc::new(intercom::IntercomStore::default()),
             polls: None,
+            cloud: None,
             intercom_client: reqwest::Client::new(),
             feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(""))),
             session: session::SessionConfig {
@@ -2237,6 +2492,208 @@ mod tests {
             .to_str()
             .map(str::to_string)
             .unwrap()
+    }
+
+    // ── Cloud files bridge contract tests ─────────────────────────────
+    // Same in-process oneshot pattern, plus an anonymous variant (no
+    // session cookie) to pin the firewall 401s and raw bodies for the
+    // PUT upload route.
+    async fn cloud_res(
+        cfg: AppConfig,
+        method: &str,
+        uri: &str,
+        body: Option<Vec<u8>>,
+        authenticated: bool,
+    ) -> axum::http::Response<Body> {
+        let mut builder = axum::http::Request::builder().method(method).uri(uri);
+        if authenticated {
+            let cookie = session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
+            builder = builder.header(
+                "cookie",
+                format!("{}={cookie}", session::PORTAL_SESSION_COOKIE),
+            );
+        }
+        let request = match body {
+            Some(b) => builder.body(Body::from(b)).unwrap(),
+            None => builder.body(Body::empty()).unwrap(),
+        };
+        build_router(Arc::new(cfg)).oneshot(request).await.unwrap()
+    }
+
+    fn cloud_cfg(cloud: Option<cloud::CloudFiles>) -> AppConfig {
+        let mut cfg = cfg_with("", None, "");
+        cfg.cloud = cloud;
+        cfg
+    }
+
+    #[tokio::test]
+    async fn cloud_bridge_is_behind_the_session_firewall() {
+        // Anonymous callers never reach the handlers — every bridge
+        // route answers 401 from the firewall, even with a bad path.
+        let cfg = cloud_cfg(None);
+        for (method, uri) in [
+            ("GET", "/api/cloud/files?path=docs"),
+            ("POST", "/api/cloud/files?path=docs&name=sub"),
+            ("PUT", "/api/cloud/files?path=docs&name=a.pdf"),
+            ("GET", "/api/cloud/file?path=docs/a.pdf"),
+            ("DELETE", "/api/cloud/file?path=docs/a.pdf"),
+        ] {
+            let resp = cloud_res(cfg.clone(), method, uri, None, false).await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_bridge_rejects_bad_paths_with_400_before_any_network() {
+        // cloud = None on purpose: path/name/body validation must fire
+        // BEFORE the 503 config check and long before any network call.
+        let cfg = cloud_cfg(None);
+        let cases: &[(&str, &str, Option<Vec<u8>>)] = &[
+            // path: missing / empty / absolute / traversal / slash noise
+            ("GET", "/api/cloud/files", None),
+            ("GET", "/api/cloud/files?path=", None),
+            ("GET", "/api/cloud/files?path=%20%20", None),
+            ("GET", "/api/cloud/files?path=/etc", None),
+            ("GET", "/api/cloud/files?path=..", None),
+            ("GET", "/api/cloud/files?path=docs/../x", None),
+            ("GET", "/api/cloud/files?path=docs//x", None),
+            (
+                "GET",
+                "/api/cloud/file?path=/remote.php/dav/files/u/x",
+                None,
+            ),
+            ("GET", "/api/cloud/file?path=docs/", None),
+            ("DELETE", "/api/cloud/file?path=", None),
+            // name: missing / traversal / multi-segment
+            ("POST", "/api/cloud/files?path=docs", None),
+            ("POST", "/api/cloud/files?path=docs&name=..", None),
+            ("POST", "/api/cloud/files?path=docs&name=a/b", None),
+            ("PUT", "/api/cloud/files?path=docs&name=.", None),
+            // upload: empty body (valid path+name, no bytes)
+            (
+                "PUT",
+                "/api/cloud/files?path=docs&name=a.pdf",
+                Some(Vec::new()),
+            ),
+        ];
+        for (method, uri, body) in cases {
+            let resp = cloud_res(cfg.clone(), method, uri, body.clone(), true).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{method} {uri}");
+            let b = body_json(resp).await;
+            let err = b["error"].as_str().unwrap_or_default();
+            assert!(
+                err.starts_with("invalid cloud") || err == "upload body is empty",
+                "{method} {uri} → unexpected error {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_bridge_answers_503_when_cloud_is_not_configured() {
+        let cfg = cloud_cfg(None); // CLOUD_WEBDAV_* absent → None
+        for (method, uri, body) in [
+            ("GET", "/api/cloud/files?path=docs", None),
+            ("POST", "/api/cloud/files?path=docs&name=sub", None),
+            (
+                "PUT",
+                "/api/cloud/files?path=docs&name=a.pdf",
+                Some(b"x".to_vec()),
+            ),
+            ("GET", "/api/cloud/file?path=docs/a.pdf", None),
+            ("DELETE", "/api/cloud/file?path=docs/a.pdf", None),
+        ] {
+            let resp = cloud_res(cfg.clone(), method, uri, body, true).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{method} {uri}"
+            );
+            let b = body_json(resp).await;
+            assert_eq!(b["error"], "cloud storage not configured", "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_bridge_maps_upstream_errors_passthrough() {
+        // Pure mapping of the exact error strings cloud.rs emits.
+        let status = |e: &str| cloud_error(e).status();
+        assert_eq!(
+            status("GET docs/a.pdf failed: HTTP 404"),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status("DELETE docs failed: HTTP 404"),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status("MKCOL Docs/neu failed: HTTP 405"),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(status("PUT a.pdf failed: HTTP 409"), StatusCode::CONFLICT);
+        assert_eq!(status("MKCOL a failed: HTTP 423"), StatusCode::CONFLICT);
+        assert_eq!(
+            status("PUT a.pdf failed: HTTP 403"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status("PROPFIND docs failed: HTTP 507"),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            status("PROPFIND docs unreachable: connection refused"),
+            StatusCode::BAD_GATEWAY
+        );
+        // body passes the message through verbatim
+        let resp = cloud_error("GET x failed: HTTP 404");
+        assert_eq!(body_json(resp).await["error"], "GET x failed: HTTP 404");
+
+        // mkdir 405 (RFC 4918 "already exists") becomes a clean 409
+        let resp = cloud_mkdir_error("MKCOL Docs/neu failed: HTTP 405");
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(body_json(resp).await["error"], "directory already exists");
+        // every other mkdir error flows through the generic mapping
+        assert_eq!(
+            cloud_mkdir_error("MKCOL a failed: HTTP 404").status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_bridge_surfaces_cloud_failures_as_502_json() {
+        // CloudFiles wired to a closed local port: the bridge must
+        // surface the transport failure as 502 JSON on every route —
+        // no panic, no 500. No live cloud involved.
+        let cfg = cloud_cfg(Some(cloud::CloudFiles::from_parts(
+            "http://127.0.0.1:1/remote.php/dav/files/portal".into(),
+            "u".into(),
+            "p".into(),
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap(),
+        )));
+        for (method, uri, body) in [
+            ("GET", "/api/cloud/files?path=docs", None),
+            ("POST", "/api/cloud/files?path=docs&name=sub", None),
+            (
+                "PUT",
+                "/api/cloud/files?path=docs&name=a.pdf",
+                Some(b"x".to_vec()),
+            ),
+            ("GET", "/api/cloud/file?path=docs/a.pdf", None),
+            ("DELETE", "/api/cloud/file?path=docs/a.pdf", None),
+        ] {
+            let resp = cloud_res(cfg.clone(), method, uri, body, true).await;
+            assert_eq!(resp.status(), StatusCode::BAD_GATEWAY, "{method} {uri}");
+            let b = body_json(resp).await;
+            assert!(
+                b["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("unreachable"),
+                "{method} {uri} → {b}"
+            );
+        }
     }
 
     #[tokio::test]
