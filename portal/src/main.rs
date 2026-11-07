@@ -127,12 +127,20 @@ fn parse_announcements(raw: &str) -> Vec<Announcement> {
 /// after each post (textContent, never innerHTML).
 fn render_intercom(messages: &[intercom::IntercomMessage]) -> String {
     if messages.is_empty() {
-        return r#"<li class=\"ic-empty\">No notes yet — start the conversation.</li>"#.into();
+        return r#"<li class="ic-empty">No notes yet — start the conversation.</li>"#.into();
     }
     messages
         .iter()
         .map(|m| {
             let text = html_escape(&m.text);
+            // Kind pill: "note" (the default) stays badge-free, info/warn
+            // get a fixed literal — never the raw kind string, so nothing
+            // unvalidated can reach the page (app.js does the same).
+            let kind = match m.kind.as_str() {
+                intercom::KIND_INFO => r#"<span class="ic-kind ic-kind-info">INFO</span>"#,
+                intercom::KIND_WARN => r#"<span class="ic-kind ic-kind-warn">WARN</span>"#,
+                _ => "",
+            };
             // Author line — escaped, muted. Local HH:MM is app.js' job
             // (no time crate in tree for SSR civil-time math).
             let meta = m
@@ -160,12 +168,18 @@ fn render_intercom(messages: &[intercom::IntercomMessage]) -> String {
                     };
                     let ct = html_escape(&a.content_type);
                     format!(
-                        r#"<a class=\"ic-att\" href=\"{url}\" target=\"_blank\" rel=\"noopener noreferrer\">📎 {name}{size_attr} · {ct}</a>"#
+                        r#"<a class="ic-att" href="{url}" target="_blank" rel="noopener noreferrer">📎 {name}{size_attr} · {ct}</a>"#
                     )
                 }
                 None => String::new(),
             };
-            format!(r#"<li>{meta}{text}{att}</li>"#)
+            // Dismiss control — inert without JS (app.js binds the DELETE
+            // call); the id is a server-side u64, so no escaping surface.
+            let del = format!(
+                r#"<button class="ic-del" type="button" data-id="{}" aria-label="Löschen">✕</button>"#,
+                m.id
+            );
+            format!(r#"<li>{kind}{meta}{text}{att}{del}</li>"#)
         })
         .collect()
 }
@@ -478,11 +492,36 @@ fn build_landing_page(config: &AppConfig) -> String {
             list-style: none; display: flex; flex-direction: column; gap: 0.5rem;
             max-height: 16rem; overflow-y: auto; margin-top: 12px; text-align: left;
         }}
-        .ic-list li {{ color: var(--text); font-size: 0.92rem; line-height: 1.5; word-break: break-word; border-bottom: 1px solid var(--border); padding: 4px 0; }}
+        .ic-list li {{ position: relative; color: var(--text); font-size: 0.92rem; line-height: 1.5; word-break: break-word; border-bottom: 1px solid var(--border); padding: 4px 22px 4px 0; }}
         .ic-list li:last-child {{ border-bottom: none; }}
         .ic-list .ic-meta {{ display: block; color: var(--text-muted, #888); font-size: 0.75rem; margin-bottom: 1px; }}
         .ic-list .ic-att {{ display: block; color: var(--accent); font-size: 0.85rem; text-decoration: none; }}
         .ic-list .ic-att:hover {{ text-decoration: underline; }}
+        .ic-del {{
+            position: absolute; top: 3px; right: 0; margin: 0; padding: 2px 5px;
+            background: none; border: none; cursor: pointer; font: inherit;
+            font-size: 0.78rem; line-height: 1; color: var(--text-dim);
+            border-radius: 4px;
+        }}
+        .ic-del:hover, .ic-del:focus-visible {{ background: #A93226; color: #fff; }}
+        .ic-kind {{
+            display: inline-block; font-size: 0.62rem; font-weight: 700;
+            letter-spacing: 0.06em; line-height: 1.5; border-radius: 999px;
+            padding: 0 7px; margin-bottom: 2px;
+        }}
+        .ic-kind-info {{ background: var(--accent-light); color: var(--accent); }}
+        .ic-kind-warn {{ background: #FFF4E5; color: #B25E00; }}
+        .ic-unread {{
+            display: inline-block; margin-left: 0.45rem; vertical-align: middle;
+            background: var(--accent); color: #fff; border-radius: 999px;
+            padding: 1px 8px; font-size: 0.68rem; font-weight: 700;
+            line-height: 1.5; white-space: nowrap;
+        }}
+        .ic-unread[hidden] {{ display: none; }}
+        /* The Notizen panel starts hidden — mirror the count on the
+           always-visible tab button (light pill: readable on the blue
+           header and on the white active tab alike). */
+        .tab-btn .ic-unread {{ background: #FFF4E5; color: #B25E00; }}
         .ic-box {{ display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.75rem; text-align: left; }}
         .ic-text, .ic-url {{
             border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
@@ -2100,6 +2139,60 @@ mod tests {
         assert!(html.contains("Rechnung&lt;script&gt;.pdf"));
         assert!(html.contains("2.0 KB"));
         assert!(html.contains("application/pdf"));
+    }
+
+    #[test]
+    fn intercom_renders_kind_badges_and_delete_buttons() {
+        let cfg = cfg_with("", None, "");
+        cfg.intercom_store.push(
+            "plain note".into(),
+            Some("Ana".into()),
+            None,
+            intercom::KIND_NOTE.into(),
+        );
+        cfg.intercom_store.push(
+            "maintenance hint".into(),
+            Some("Ben".into()),
+            None,
+            intercom::KIND_INFO.into(),
+        );
+        cfg.intercom_store.push(
+            "cert expiring".into(),
+            None,
+            None,
+            intercom::KIND_WARN.into(),
+        );
+        let html = build_landing_page(&cfg);
+        let start = html.find(r#"<ul class="ic-list""#).expect("ic-list ul");
+        let end = start + html[start..].find("</ul>").expect("closing ul");
+        let list = &html[start..end];
+        // info/warn carry a fixed-label pill (never the raw kind string)
+        assert!(list.contains(r#"<span class="ic-kind ic-kind-info">INFO</span>"#));
+        assert!(list.contains(r#"<span class="ic-kind ic-kind-warn">WARN</span>"#));
+        // "note" stays badge-free: exactly the two pills above
+        assert_eq!(list.matches(r#"class="ic-kind "#).count(), 2);
+        // one dismiss control per message, id echoed, no-JS-safe label
+        assert_eq!(list.matches(r#"class="ic-del""#).count(), 3);
+        assert!(list.contains(
+            r#"<button class="ic-del" type="button" data-id="2" aria-label="Löschen">✕</button>"#
+        ));
+        // Attributes must not leak literal backslashes (raw-string escaping
+        // bug that used to break the class/href of the SSR list items).
+        assert!(!list.contains("\\"), "no literal backslash in the list");
+        assert!(list.contains(r#"<span class="ic-meta">"#));
+        // CSS for the three affordances ships with the page (format!
+        // collapses the doubled braces, so the served selector is ".x {")
+        for selector in [
+            ".ic-del {",
+            ".ic-del:hover, .ic-del:focus-visible {",
+            ".ic-kind {",
+            ".ic-kind-info {",
+            ".ic-kind-warn {",
+            ".ic-unread {",
+            ".ic-unread[hidden] {",
+        ] {
+            assert!(html.contains(selector), "missing css: {selector}");
+        }
     }
 
     // ── In-process HTTP contract tests (tower oneshot — no sockets) ────

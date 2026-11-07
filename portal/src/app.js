@@ -231,6 +231,15 @@
       icList.textContent = "";
       (messages || []).forEach(function (m) {
         var li = document.createElement("li");
+        // Kind badge: "note" stays badge-free (the default), info/warn get
+        // a tiny pill. Class is built from a checked whitelist, label from
+        // textContent — never innerHTML (XSS).
+        if (m.kind === "info" || m.kind === "warn") {
+          var kind = document.createElement("span");
+          kind.className = "ic-kind ic-kind-" + m.kind;
+          kind.textContent = m.kind === "warn" ? "WARN" : "INFO";
+          li.appendChild(kind);
+        }
         // meta line: author · time — textContent only, never innerHTML
         var meta = [];
         if (m.author) meta.push(m.author);
@@ -256,6 +265,15 @@
           a.textContent = label; // textContent — never innerHTML (XSS)
           li.appendChild(a);
         }
+        // Dismiss control (moderation): a plain button carrying the id it
+        // deletes; the single delegated listener below does the rest.
+        var del = document.createElement("button");
+        del.type = "button";
+        del.className = "ic-del";
+        del.setAttribute("data-id", String(m.id));
+        del.setAttribute("aria-label", "Löschen");
+        del.textContent = "\u2715";
+        li.appendChild(del);
         icList.appendChild(li);
       });
     }
@@ -277,8 +295,156 @@
         .slice(-MAX_MESSAGES_CLIENT);
       if (icAll.length) icLastId = icAll[icAll.length - 1].id;
       renderMessages(icAll.slice().reverse());
+      updateUnread();
     }
     var MAX_MESSAGES_CLIENT = 50;
+
+    // ── Unread "N neu" (pure client state, persisted in localStorage) ──
+    // icLastRead is the newest id the user has effectively seen; anything
+    // above it counts as new. Survives reloads (and the store-reset path,
+    // which already rewinds icLastId/icAll to 0).
+    var IC_READ_KEY = "intercomLastRead";
+    var icLastRead = 0;
+    try {
+      icLastRead = parseInt(localStorage.getItem(IC_READ_KEY), 10) || 0;
+    } catch (e) {
+      icLastRead = 0; // storage blocked (private mode): session-only badge
+    }
+
+    // The Notizen panel starts hidden, so a badge inside the card is
+    // invisible until that tab is opened — mirror the count on the
+    // always-visible tab button too, so new notes are discoverable from
+    // every tab.
+    var icBadgeHosts = [];
+    var icCardTitle = icCard.querySelector("h3");
+    if (icCardTitle) icBadgeHosts.push(icCardTitle);
+    var icTabBtn = document.querySelector('.tab-btn[data-tab="notizen"]');
+    if (icTabBtn) icBadgeHosts.push(icTabBtn);
+    var icUnreadEls = [];
+
+    function unreadBadges() {
+      if (!icUnreadEls.length) {
+        icBadgeHosts.forEach(function (host) {
+          var b = document.createElement("span");
+          b.className = "ic-unread";
+          b.setAttribute("role", "status");
+          b.hidden = true;
+          host.appendChild(b); // textContent only — never innerHTML
+          icUnreadEls.push(b);
+        });
+      }
+      return icUnreadEls;
+    }
+
+    function updateUnread() {
+      var n = 0;
+      for (var i = 0; i < icAll.length; i++) {
+        if (icAll[i].id > icLastRead) n++;
+      }
+      unreadBadges().forEach(function (b) {
+        if (n > 0) {
+          b.textContent = n + " neu";
+          b.hidden = false;
+        } else {
+          b.hidden = true;
+        }
+      });
+    }
+
+    function markRead() {
+      // Never while the tab is hidden — coming back must still show how
+      // much arrived in the meantime.
+      if (document.hidden) return;
+      var latest = icAll.length ? icAll[icAll.length - 1].id : 0;
+      if (!latest || icLastRead >= latest) {
+        updateUnread();
+        return;
+      }
+      icLastRead = latest;
+      try {
+        localStorage.setItem(IC_READ_KEY, String(latest));
+      } catch (e) {
+        /* storage blocked — the badge just resets on next load */
+      }
+      updateUnread();
+    }
+
+    function cardOnScreen() {
+      if (document.hidden) return false;
+      // Notizen tab not open (the panel is display:none) → not seen.
+      if (icCard.closest && icCard.closest("[hidden]")) return false;
+      var r = icCard.getBoundingClientRect();
+      return r.height > 0 && r.bottom > 0 && r.top < (window.innerHeight || 0);
+    }
+
+    // Auto mark-read once the card is actually looked at: first paint in
+    // view (IntersectionObserver fires the moment the Notizen tab opens),
+    // plus interactive clicks/focus inside the card.
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(
+        function (entries) {
+          for (var i = 0; i < entries.length; i++) {
+            if (entries[i].isIntersecting) {
+              markRead();
+              break;
+            }
+          }
+        },
+        { threshold: 0.1 }
+      ).observe(icCard);
+    } else {
+      var seenCheck = function () {
+        if (cardOnScreen()) markRead();
+      };
+      window.addEventListener("scroll", seenCheck, { passive: true });
+      document.addEventListener("visibilitychange", seenCheck);
+    }
+    ["click", "focusin"].forEach(function (evt) {
+      icCard.addEventListener(evt, markRead, true);
+    });
+
+    // Delete (moderation): one delegated listener for every .ic-del in
+    // the list — the buttons themselves carry no handlers.
+    icList.addEventListener("click", function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest(".ic-del") : null;
+      if (!btn || !icList.contains(btn)) return;
+      ev.preventDefault();
+      if (!window.confirm("Nachricht löschen?")) return;
+      var id = btn.getAttribute("data-id") || "";
+      fetch("/api/intercom/" + encodeURIComponent(id), { method: "DELETE" })
+        .then(function (r) {
+          if (r.status === 401) {
+            icStopPolling(); // session gone — same rule as refresh()
+            throw new Error("session expired");
+          }
+          if (r.status === 404) {
+            refresh(); // someone else deleted it first — just resync
+            return;
+          }
+          if (r.status !== 204) throw new Error("HTTP " + r.status);
+          // Drop the mirror and the cursor, then pull the whole list
+          // again so the remaining notes re-render and icLastId stays
+          // truthful (the deleted id must not linger in either).
+          icAll = [];
+          icLastId = 0;
+          return fetch("/api/intercom?since=0")
+            .then(function (r2) {
+              if (r2.status === 401) {
+                icStopPolling();
+                throw new Error("session expired");
+              }
+              return r2.json();
+            })
+            .then(function (full) {
+              mergeMessages(full.messages);
+              markRead(); // the user is looking at the list right now
+            });
+        })
+        .catch(function (err) {
+          icOut.textContent = "Not deleted: " + ((err && err.message) || "unknown error");
+          icOut.hidden = false;
+        });
+    });
 
     var icPollTimer = null;
     function icStopPolling() {
@@ -290,9 +456,10 @@
 
     function refresh() {
       // Hidden tab: skip this tick (the visibilitychange listener below
-      // catches up the moment the tab is shown again).
+      // catches up the moment the tab is shown again). Returns the
+      // in-flight promise so callers (send/delete) can chain markRead().
       if (document.hidden) return;
-      fetch("/api/intercom?since=" + icLastId)
+      return fetch("/api/intercom?since=" + icLastId)
         .then(function (r) {
           // Session gone (logged out / expired): stop polling for good —
           // each further tick would just 401 against the gate.
@@ -310,11 +477,10 @@
             // note. Full reload and merge from scratch.
             icAll = [];
             icLastId = 0;
-            fetch("/api/intercom?since=0")
+            return fetch("/api/intercom?since=0")
               .then(function (r2) { return r2.json(); })
               .then(function (full) { mergeMessages(full.messages); })
               .catch(function () {});
-            return;
           }
           if (latest) icLastId = latest;
           mergeMessages(d.messages);
@@ -374,7 +540,9 @@
           icFile.value = "";
           icFileName.textContent = "";
           icOut.hidden = true;
-          refresh();
+          var p = refresh();
+          // The author has obviously seen their own note.
+          if (p) p.then(markRead);
         })
         .catch(function (err) {
           icOut.textContent = "Not sent: " + err.message;
