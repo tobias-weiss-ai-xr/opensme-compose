@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware,
     response::{Html, IntoResponse, Json},
     routing::{delete, get, post},
@@ -240,7 +240,7 @@ fn render_feed_cards(columns: &[feeds::FeedColumn]) -> String {
         .join("\n")
 }
 
-fn build_landing_page(config: &AppConfig) -> String {
+fn build_landing_page(config: &AppConfig, authed: bool) -> String {
     let services = get_services(config);
     let cards: String = services
         .iter()
@@ -342,6 +342,57 @@ fn build_landing_page(config: &AppConfig) -> String {
     let feed_cards = render_feed_cards(config.feed_fetcher.columns());
     let domain = html_escape(&config.opensme_domain);
 
+    // Signed-in shell: tabs + logout form in the nav, full function grid
+    // (cards + AI + polls + notes panels) in the main area.
+    let user_nav = if authed {
+        format!(
+            r#"<button class="tab-btn is-active" type="button" role="tab" aria-selected="true" data-tab="dienste">Dienste</button>
+                {umfragen_tab}
+                <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="notizen">Notizen</button>
+                <form class="logout-form" method="post" action="/api/logout">
+                    <button class="btn-ghost" type="submit">Abmelden</button>
+                </form>"#
+        )
+    } else {
+        // Anonymous: login CTA instead of tabs/logout — no signed-in
+        // affordance may leak onto the public landing.
+        r#"<a class="btn-ghost login-link" href="/api/auth/login">Anmelden</a>"#.to_string()
+    };
+    let main_sections = if authed {
+        format!(
+            r#"<section class="tab-panel is-active" id="tab-dienste" aria-label="Dienste" role="tabpanel">
+            <h2 class="section-title">Dienste</h2>
+            <div class="func-grid">
+                {cards}
+                {ai_card}
+            </div>
+            <h2 class="section-title">Aktuelles</h2>
+            <div class="feeds">
+                {feed_cards}
+            </div>
+        </section>
+        {polls_panel}
+        {notizen_panel}"#
+        )
+    } else {
+        // Public landing (contracts/tiles.yml header): login CTA + public
+        // news — the tile catalog is membership content, service links
+        // never render here.
+        format!(
+            r#"<section class="public-landing" aria-label="Anmeldung">
+            <h2 class="section-title">Willkommen bei openSME</h2>
+            <p class="public-note">Die Funktionen der Suite — Cloud, Mail, Zusammenarbeit,
+            Rechnungen, Workflows und mehr — stehen nach der Anmeldung zur Verfügung.</p>
+            <p><a class="login-cta" href="/api/auth/login">Mit dem Betriebs-Konto anmelden</a></p>
+            <h2 class="section-title">Aktuelles</h2>
+            <div class="feeds">
+                {feed_cards}
+            </div>
+        </section>"#
+        )
+    };
+    let script_tag = if authed { r#"<script src="/app.js" defer></script>"# } else { "" };
+
     format!(
         r##"<!DOCTYPE html>
 <html lang="de">
@@ -356,7 +407,7 @@ fn build_landing_page(config: &AppConfig) -> String {
     <meta property="og:type" content="website">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23005cb9'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3EoS%3C/text%3E%3C/svg%3E">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src 'self';">
-    <script src="/app.js" defer></script>
+    {script_tag}
     <style>
         :root {{
             --bg: #F3F5F7;
@@ -640,29 +691,12 @@ fn build_landing_page(config: &AppConfig) -> String {
                 <p>Dein Startpunkt für alle Dienste</p>
             </div>
             <nav class="user-nav" aria-label="Navigation">
-                <button class="tab-btn is-active" type="button" role="tab" aria-selected="true" data-tab="dienste">Dienste</button>
-                {umfragen_tab}
-                <button class="tab-btn" type="button" role="tab" aria-selected="false" data-tab="notizen">Notizen</button>
-                <form class="logout-form" method="post" action="/api/logout">
-                    <button class="btn-ghost" type="submit">Abmelden</button>
-                </form>
+                {user_nav}
             </nav>
         </div>
     </header>
     <main class="container">
-        <section class="tab-panel is-active" id="tab-dienste" aria-label="Dienste" role="tabpanel">
-            <h2 class="section-title">Dienste</h2>
-            <div class="func-grid">
-                {cards}
-                {ai_card}
-            </div>
-            <h2 class="section-title">Aktuelles</h2>
-            <div class="feeds">
-                {feed_cards}
-            </div>
-        </section>
-        {polls_panel}
-        {notizen_panel}
+        {main_sections}
     </main>
     <footer>
         <div class="container">
@@ -816,8 +850,15 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
     services
 }
 
-async fn handle_root(State(config): State<Arc<AppConfig>>) -> impl IntoResponse {
-    let html = build_landing_page(&config);
+async fn handle_root(State(config): State<Arc<AppConfig>>, headers: HeaderMap) -> impl IntoResponse {
+    // Session-aware landing: the tile grid is membership content
+    // (contracts/tiles.yml, decision 2026-11-01) — anonymous visitors get
+    // the login CTA + public news only, never service links or the
+    // logout affordance. A stale/garbage cookie simply reads as anonymous.
+    let authed = session::cookie_value(&headers, session::PORTAL_SESSION_COOKIE)
+        .and_then(|tok| session::verify_session(&config.session, &tok))
+        .is_some();
+    let html = build_landing_page(&config, authed);
     Html(html)
 }
 
@@ -2588,10 +2629,10 @@ mod tests {
             model: "test-model".into(),
             api_key: None,
         };
-        let html = build_landing_page(&cfg_with("", Some(ai.clone()), ""));
+        let html = build_landing_page(&cfg_with("", Some(ai.clone()), ""), true);
         assert!(html.contains("id=\"ai-card\""));
 
-        let plain = build_landing_page(&cfg_with("", None, ""));
+        let plain = build_landing_page(&cfg_with("", None, ""), true);
         assert!(!plain.contains("id=\"ai-card\""));
     }
 
@@ -2601,21 +2642,21 @@ mod tests {
             "",
             None,
             r#"[{"level":"warn","text":"planned outage"}]"#,
-        ));
+        ), true);
         assert!(html.contains("class=\"announcement warn\""));
         assert!(html.contains("planned outage"));
     }
 
     #[test]
     fn fast_switch_marker_on_cards() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         assert!(html.contains("data-pal="));
         assert!(html.contains("/app.js"));
     }
 
     #[test]
     fn head_carries_favicon_and_meta() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         // Inline SVG favicon (data URI — CSP allows img-src data:)
         assert!(html.contains("rel=\"icon\""));
         assert!(html.contains("data:image/svg+xml"));
@@ -2632,14 +2673,14 @@ mod tests {
 
     #[test]
     fn landing_page_mentions_opensme() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         assert!(html.to_lowercase().contains("opensme"));
         assert!(html.contains("lang=\"de\""));
     }
 
     #[test]
     fn landing_page_renders_feed_cards_per_configured_column() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         // Default columns are rendered server-side; the client fills the
         // lists from /api/feeds (no network needed for the shell).
         assert!(html.contains("id=\"feed-startup\""));
@@ -2673,14 +2714,14 @@ mod tests {
 
     #[test]
     fn intercom_card_always_on_page() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         assert!(html.contains("id=\"intercom-card\""));
         assert!(html.contains("ic-send"));
     }
 
     #[test]
     fn tab_bar_has_dienste_notizen_and_logout() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         // Dienste + Notizen tabs always present
         assert!(html.contains("data-tab=\"dienste\""));
         assert!(html.contains("data-tab=\"notizen\""));
@@ -2693,14 +2734,57 @@ mod tests {
     }
 
     #[test]
+    fn anonymous_landing_hides_tiles_and_signedin_chrome() {
+        // contracts/tiles.yml, decision 2026-11-01: the tile catalog is
+        // membership content — the anonymous landing shows login CTA +
+        // public news, never service links or the logout affordance.
+        let html = build_landing_page(&cfg_with("", None, ""), false);
+        assert!(html.contains("href=\"/api/auth/login\""));
+        assert!(html.contains("Anmelden"));
+        // public news stays
+        assert!(html.contains("Aktuelles"));
+        assert!(html.contains("id=\"feed-startup\""));
+        // signed-in chrome must NOT leak
+        assert!(!html.contains("Abmelden"));
+        assert!(!html.contains("action=\"/api/logout\""));
+        // tile markup only — CSS class selectors legitimately mention
+        // func-card, so assert on the generated tile anchor instead
+        assert!(!html.contains("class=\"card func-card\""));
+        assert!(!html.contains("data-pal="));
+        assert!(!html.contains("id=\"ai-card\""));
+        assert!(!html.contains("id=\"intercom-card\""));
+        assert!(!html.contains("id=\"tab-notizen\""));
+    }
+
+    #[test]
+    fn anonymous_landing_needs_no_client_js() {
+        // The public page is static shell + server-rendered news; app.js
+        // (tabs, intercom, polls, AI) is pointless — and would only fire
+        // authenticated fetches that answer 401.
+        let html = build_landing_page(&cfg_with("", None, ""), false);
+        assert!(!html.contains("/app.js"));
+    }
+
+    #[tokio::test]
+    async fn root_without_session_renders_public_landing() {
+        let cfg = cfg_with("", None, "");
+        let resp = respond_anon(cfg, "GET", "/").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_str(resp).await;
+        assert!(body.contains("login-cta"));
+        assert!(!body.contains("data-pal="));  // no tile anchors
+        assert!(!body.contains("Abmelden"));
+    }
+
+    #[test]
     fn umfragen_tab_gated_on_polls_config() {
-        let plain = build_landing_page(&cfg_with("", None, ""));
+        let plain = build_landing_page(&cfg_with("", None, ""), true);
         assert!(!plain.contains("data-tab=\"umfragen\""));
         assert!(!plain.contains("id=\"tab-umfragen\""));
 
         let mut c = cfg_with("", None, "");
         c.polls = Some(Arc::new(polls::PollStore::open(None, None, None)));
-        let html = build_landing_page(&c);
+        let html = build_landing_page(&c, true);
         assert!(html.contains("data-tab=\"umfragen\""));
         assert!(html.contains("id=\"tab-umfragen\""));
         assert!(html.contains("id=\"polls-card\""));
@@ -2712,7 +2796,7 @@ mod tests {
         // the Dienste section never contains intercom/polls markup.
         let mut c = cfg_with("", None, "");
         c.polls = Some(Arc::new(polls::PollStore::open(None, None, None)));
-        let html = build_landing_page(&c);
+        let html = build_landing_page(&c, true);
         let grid = html.find("func-grid").expect("services grid");
         let notizen = html.find("id=\"tab-notizen\"").expect("notizen panel");
         let umfragen = html.find("id=\"tab-umfragen\"").expect("umfragen panel");
@@ -2735,7 +2819,7 @@ mod tests {
         // White-on-#A93226 = 6.62:1 (WCAG AA); the button must NOT regress
         // to a thin red border on blue (1.83:1) or a transparent ghost
         // (white 3.56:1 on the border — both fail AA).
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         // Render output: format! already collapsed {{ }} → { }
         let css = &html[html.find(".logout-form { margin-left").expect("logout css")..];
         assert!(css.contains("background: #A93226"), "solid red fill");
@@ -2749,7 +2833,7 @@ mod tests {
 
     #[test]
     fn dienste_tab_is_default_active() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         assert!(html.contains("class=\"tab-panel is-active\""));
         // Notizen panel starts hidden (aria-label sits between id and hidden)
         let notizen = html.find("id=\"tab-notizen\"").expect("notizen panel");
@@ -2777,7 +2861,7 @@ mod tests {
             Some(att),
             intercom::KIND_NOTE.into(),
         );
-        let html = build_landing_page(&cfg);
+        let html = build_landing_page(&cfg, true);
         assert!(!html.contains("<script>alert(1)"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("Rechnung&lt;script&gt;.pdf"));
@@ -2806,7 +2890,7 @@ mod tests {
             None,
             intercom::KIND_WARN.into(),
         );
-        let html = build_landing_page(&cfg);
+        let html = build_landing_page(&cfg, true);
         let start = html.find(r#"<ul class="ic-list""#).expect("ic-list ul");
         let end = start + html[start..].find("</ul>").expect("closing ul");
         let list = &html[start..end];
@@ -2869,6 +2953,22 @@ mod tests {
                 .unwrap(),
             None => builder.body(Body::empty()).unwrap(),
         };
+        router.oneshot(request).await.unwrap()
+    }
+
+    /// Anonymous variant — no session cookie, exactly what a fresh visitor
+    /// sends. Used by the public-landing contract tests.
+    async fn respond_anon(
+        cfg: AppConfig,
+        method: &str,
+        uri: &str,
+    ) -> axum::http::Response<Body> {
+        let router = build_router(Arc::new(cfg));
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
         router.oneshot(request).await.unwrap()
     }
 
@@ -3113,7 +3213,7 @@ mod tests {
 
     #[test]
     fn intercom_card_carries_cloud_picker_button_and_css() {
-        let html = build_landing_page(&cfg_with("", None, ""));
+        let html = build_landing_page(&cfg_with("", None, ""), true);
         assert!(html.contains(
             r#"<button class="ic-cloud" type="button" title="Datei aus der Cloud auswählen">☁️ aus der Cloud</button>"#
         ));

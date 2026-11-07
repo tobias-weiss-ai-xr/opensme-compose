@@ -239,7 +239,7 @@ pub fn mint_state() -> String {
     b64(&buf)
 }
 
-fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let header = headers.get(COOKIE)?.to_str().ok()?;
     for part in header.split(';') {
         let (key, value) = part.trim().split_once('=')?;
