@@ -318,6 +318,7 @@ fn build_landing_page(config: &AppConfig) -> String {
                     <textarea class="ic-text" rows="2" placeholder="Kurze Notiz für das Team…" aria-label="Nachricht" maxlength="2000"></textarea>
                     <input class="ic-url" type="url" placeholder="Anhang aus der Cloud — geteilten Link einfügen (https://cloud…/s/…)" aria-label="Anhang-URL">
                     <div class="ic-actions">
+                        <button class="ic-cloud" type="button" title="Datei aus der Cloud auswählen">☁️ aus der Cloud</button>
                         <label class="ic-file-label" for="ic-file">📎 Datei…</label>
                         <input class="ic-file" id="ic-file" type="file" aria-label="Datei anhängen" hidden>
                         <span class="ic-file-name" aria-live="polite"></span>
@@ -544,6 +545,14 @@ fn build_landing_page(config: &AppConfig) -> String {
             padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
         }}
         .ic-file-label:hover {{ background: #d7e7f8; }}
+        /* ☁️ "aus der Cloud": opens /files?picker=1 in a new tab; same
+           pill styling as the file label so the row reads as one group. */
+        .ic-cloud {{
+            background: var(--accent-light); color: var(--accent); border: none;
+            border-radius: 999px; padding: 6px 14px; font-size: 13px;
+            font-weight: 600; cursor: pointer; font-family: inherit;
+        }}
+        .ic-cloud:hover {{ background: #d7e7f8; }}
         .ic-file-name {{ color: var(--text-dim); font-size: 0.85rem; }}
         .ic-out {{ color: var(--text-dim); font-size: 0.88rem; }}
 
@@ -1026,7 +1035,13 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         .route(
             "/api/cloud/file",
             get(handle_cloud_download).delete(handle_cloud_delete),
-        );
+        )
+        .route("/api/cloud/share", post(handle_cloud_share))
+        // Cloud picker page (browse + upload + select; ?picker=1 turns
+        // it into the cross-tab attachment picker). Session-gated like
+        // the bridge it drives — anonymous callers get 401 from the
+        // firewall below.
+        .route("/files", get(handle_files));
 
     // The AI proxy is the one METERED endpoint (the operator pays per
     // upstream token) — it must sit behind the session firewall like
@@ -1519,13 +1534,36 @@ struct CloudPathQuery {
     path: String,
 }
 
-/// Parent directory + single-segment name (mkdir / upload).
+/// Parent directory + single-segment name (mkdir / upload). A blank
+/// `dir` means the WebDAV base collection itself (the picker's root).
 #[derive(Deserialize)]
 struct CloudCreateQuery {
     #[serde(default)]
     path: String,
     #[serde(default)]
     name: String,
+}
+
+/// Validate a bridge path where blank = the dav root (`CloudFiles`
+/// explicitly supports an empty dir for the base collection; only the
+/// page and the JS bridge surface it — deeper invalid paths still 400
+/// before any network call).
+fn cloud_dir_or_root(raw: &str) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        Ok(String::new())
+    } else {
+        cloud::validate_path(raw)
+    }
+}
+
+/// Join a possibly-root directory with a validated name (`join` keeps
+/// its dir-non-empty contract; cloud.rs is out of this task's scope).
+fn cloud_child(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        cloud::join(dir, name)
+    }
 }
 
 fn cloud_bad(msg: &str) -> axum::response::Response {
@@ -1579,7 +1617,7 @@ async fn handle_cloud_list(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
 ) -> impl IntoResponse {
-    let dir = match cloud::validate_path(&q.path) {
+    let dir = match cloud_dir_or_root(&q.path) {
         Ok(d) => d,
         Err(e) => return cloud_bad(&e),
     };
@@ -1601,7 +1639,7 @@ async fn handle_cloud_mkdir(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Query(q): axum::extract::Query<CloudCreateQuery>,
 ) -> impl IntoResponse {
-    let dir = match cloud::validate_path(&q.path) {
+    let dir = match cloud_dir_or_root(&q.path) {
         Ok(d) => d,
         Err(e) => return cloud_bad(&e),
     };
@@ -1612,7 +1650,7 @@ async fn handle_cloud_mkdir(
     let Some(cloud) = &config.cloud else {
         return cloud_not_configured();
     };
-    let full = cloud::join(&dir, &name);
+    let full = cloud_child(&dir, &name);
     match cloud.mkdir(&full).await {
         Ok(()) => (
             StatusCode::CREATED,
@@ -1632,7 +1670,7 @@ async fn handle_cloud_upload(
     headers: axum::http::HeaderMap,
     bytes: axum::body::Bytes,
 ) -> impl IntoResponse {
-    let dir = match cloud::validate_path(&q.path) {
+    let dir = match cloud_dir_or_root(&q.path) {
         Ok(d) => d,
         Err(e) => return cloud_bad(&e),
     };
@@ -1649,7 +1687,7 @@ async fn handle_cloud_upload(
     let Some(cloud) = &config.cloud else {
         return cloud_not_configured();
     };
-    let full = cloud::join(&dir, &name);
+    let full = cloud_child(&dir, &name);
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -1731,6 +1769,332 @@ async fn handle_cloud_delete(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => cloud_error(&e),
     }
+}
+
+/// POST /api/cloud/share?path=<file> — mint a public read-only share
+/// link (OCS). This is what the picker's SELECT hands back: a share URL
+/// addresses the cloud by name over https, so it passes the intercom /
+/// polls attachment allowlist and the note can reference the file
+/// without the portal mediating its bytes.
+async fn handle_cloud_share(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+) -> impl IntoResponse {
+    let path = match cloud::validate_path(&q.path) {
+        Ok(p) => p,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    match cloud.create_share(&path).await {
+        Ok(url) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "url": url })),
+        )
+            .into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
+// ── Cloud picker page (GET /files) ────────────────────────────────────
+//
+// SSR first paint WITHOUT JS: the current directory is listed straight
+// from the cloud (cloud::CloudFiles::list), dirs are plain links and
+// files carry download links, so a no-JS member can browse and fetch.
+// app.js enhances the same page: fresh list via /api/cloud/files,
+// upload (PUT), mkdir (POST), delete (DELETE) and — the reason this
+// page exists — SELECT: /files?picker=1 writes the picked file's
+// canonical URL into localStorage 'cloudPickResult' and closes the tab;
+// the host page (intercom card) consumes it cross-tab (same origin).
+
+/// /files query: current directory (`path`, blank = dav root) plus the
+/// picker flag (`picker=1` → selection hands the URL back to the opener
+/// instead of just browsing).
+#[derive(Deserialize)]
+struct CloudFilesPageQuery {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    picker: Option<String>,
+}
+
+/// Build a portal link with form-urlencoded query params (reqwest's
+/// `Url` — already a dependency, so no encoder crate comes in).
+fn portal_link(path: &str, params: &[(&str, String)]) -> String {
+    let mut url = reqwest::Url::parse("https://portal.internal").expect("static base");
+    url.set_path(path);
+    {
+        let mut pairs = url.query_pairs_mut();
+        for (k, v) in params {
+            pairs.append_pair(k, v);
+        }
+    }
+    match url.query() {
+        Some(q) => format!("{path}?{q}"),
+        None => path.to_string(),
+    }
+}
+
+/// /files link for `dir`, preserving picker mode (deep-linkable: the
+/// browser URL always carries the full state — reload/back just works).
+fn files_link(dir: &str, picker: bool) -> String {
+    let mut params: Vec<(&str, String)> = Vec::new();
+    if !dir.is_empty() {
+        params.push(("path", dir.to_string()));
+    }
+    if picker {
+        params.push(("picker", "1".to_string()));
+    }
+    portal_link("/files", &params)
+}
+
+/// Portal download-bridge link for a file (no-JS row action).
+fn cloud_file_link(rel: &str) -> String {
+    portal_link("/api/cloud/file", &[("path", rel.to_string())])
+}
+
+/// Human size for a file row (mirrors app.js' humanSize / the intercom
+/// SSR formatting).
+fn cloud_fmt_size(size: Option<u64>) -> String {
+    match size {
+        None => "—".to_string(),
+        Some(b) if b < 1024 => format!("{b} B"),
+        Some(b) if b < 1024 * 1024 => format!("{:.1} KB", b as f64 / 1024.0),
+        Some(b) => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+    }
+}
+
+/// Breadcrumb trail: root link + one link per ancestor segment, current
+/// segment as plain text. Every href is a deep link back into the same
+/// place on the /files page (picker flag preserved).
+fn render_cloud_trail(dir: &str, picker: bool) -> String {
+    let mut out = format!(
+        r#"<a href="{}">☁ Cloud-Dateien</a>"#,
+        files_link("", picker)
+    );
+    let mut acc = String::new();
+    for seg in dir.split('/').filter(|s| !s.is_empty()) {
+        if !acc.is_empty() {
+            acc.push('/');
+        }
+        acc.push_str(seg);
+        let label = html_escape(seg);
+        if acc == dir {
+            out.push_str(&format!(
+                r#"<span class="cf-sep" aria-hidden="true">›</span><span class="cf-here">{label}</span>"#
+            ));
+        } else {
+            out.push_str(&format!(
+                r#"<span class="cf-sep" aria-hidden="true">›</span><a href="{}">{label}</a>"#,
+                files_link(&acc, picker)
+            ));
+        }
+    }
+    out
+}
+
+/// One row of the SSR file grid — markup mirrors exactly what app.js'
+/// row() builds (createElement/textContent), so the JS re-render after
+/// a fetch is visually identical to the SSR paint.
+fn render_cloud_row(dir: &str, entry: &cloud::CloudEntry, picker: bool) -> String {
+    let name = html_escape(&entry.name);
+    let rel = if dir.is_empty() {
+        entry.name.clone()
+    } else {
+        format!("{dir}/{}", entry.name)
+    };
+    let rel_attr = html_escape(&rel);
+    if entry.is_dir {
+        let href = html_escape(&files_link(&rel, picker));
+        format!(
+            r#"<li class="cf-row cf-dir"><a class="cf-main" href="{href}"><span class="cf-icon" aria-hidden="true">📁</span><span class="cf-name">{name}</span><span class="cf-size">Ordner</span></a><span class="cf-actions"><button class="cf-del" type="button" data-path="{rel_attr}" data-name="{name}" data-is-dir="1" aria-label="Löschen">🗑</button></span></li>"#
+        )
+    } else {
+        let size = html_escape(&cloud_fmt_size(entry.size));
+        let dl = html_escape(&cloud_file_link(&rel));
+        format!(
+            r#"<li class="cf-row cf-file"><span class="cf-main"><span class="cf-icon" aria-hidden="true">📄</span><span class="cf-name">{name}</span><span class="cf-size">{size}</span></span><span class="cf-actions"><a class="cf-dl" href="{dl}">Download</a><button class="cf-select" type="button" data-path="{rel_attr}" data-name="{name}">Auswählen</button><button class="cf-del" type="button" data-path="{rel_attr}" data-name="{name}" data-is-dir="0" aria-label="Löschen">🗑</button></span></li>"#
+        )
+    }
+}
+
+/// Server-render the whole /files document. `notice` carries the
+/// not-configured / unreadable / bad-path message (error styling until
+/// app.js flips it green).
+fn render_cloud_files(
+    dir: &str,
+    entries: &[cloud::CloudEntry],
+    picker: bool,
+    notice: Option<&str>,
+) -> String {
+    let picker_attr = if picker { "1" } else { "0" };
+    let dir_attr = html_escape(dir);
+    let trail = render_cloud_trail(dir, picker);
+    let hint = if picker {
+        "Datei auswählen — der Link wird ins Portal übernommen."
+    } else {
+        "Ordner im Cloud-Speicher durchsehen, Dateien hochladen und teilen."
+    };
+    let rows = if entries.is_empty() {
+        r#"<li class="cf-empty">Dieser Ordner ist leer.</li>"#.to_string()
+    } else {
+        entries
+            .iter()
+            .map(|e| render_cloud_row(dir, e, picker))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let notice_html = match notice {
+        Some(n) => format!(r#"<p class="cf-msg" id="cf-msg" aria-live="polite">{}</p>"#, html_escape(n)),
+        None => r#"<p class="cf-msg" id="cf-msg" aria-live="polite" hidden></p>"#.to_string(),
+    };
+    format!(r##"<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud-Dateien — openSME-Portal</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23005cb9'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3EoS%3C/text%3E%3C/svg%3E">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src 'self';">
+    <script src="/app.js" defer></script>
+    <style>
+        :root {{
+            --bg: #F3F5F7; --card: #FFFFFF; --border: #E2E6EA;
+            --text: #22272E; --text-dim: #5F6B7A;
+            --accent: #005CB9; --accent-light: #E8F1FB; --accent-hover: #E5732D;
+            --radius: 10px; --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: "Helvetica Neue", Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }}
+        .cf-page {{ max-width: 760px; margin: 0 auto; padding: 28px 20px 48px; }}
+        .cf-head h1 {{ color: var(--accent); font-size: 22px; margin-bottom: 2px; }}
+        .cf-sub {{ color: var(--text-dim); font-size: 0.9rem; }}
+        .cf-trail {{ margin: 16px 0 10px; font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }}
+        .cf-trail a {{ color: var(--accent); text-decoration: none; }}
+        .cf-trail a:hover {{ text-decoration: underline; }}
+        .cf-sep {{ color: var(--text-dim); }}
+        .cf-here {{ font-weight: 700; word-break: break-word; }}
+        .cf-tools {{
+            display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 10px 12px;
+        }}
+        .cf-file-label {{
+            background: var(--accent-light); color: var(--accent); border-radius: 999px;
+            padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+        }}
+        .cf-file-label:hover {{ background: #d7e7f8; }}
+        .cf-btn {{
+            background: var(--accent); color: #fff; border: none; border-radius: 999px;
+            padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+        }}
+        .cf-btn:hover {{ background: var(--accent-hover); }}
+        .cf-btn-ghost {{
+            background: #fff; color: var(--accent); border: 1px solid var(--accent);
+            border-radius: 999px; padding: 5px 13px; font-size: 13px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+        }}
+        .cf-btn-ghost:hover {{ background: var(--accent-light); }}
+        .cf-mkdir-name {{
+            border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+            font-size: 13px; width: 11rem; color: var(--text); font-family: inherit; background: #fff;
+        }}
+        .cf-file-name {{ color: var(--text-dim); font-size: 0.85rem; }}
+        .cf-msg {{ margin: 10px 2px 0; font-size: 0.9rem; color: #A93226; }}
+        .cf-msg.is-ok {{ color: #1B7A3D; }}
+        .cf-grid {{
+            list-style: none; margin-top: 12px; background: var(--card);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 4px 14px;
+        }}
+        .cf-row {{ display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid var(--border); padding: 8px 0; }}
+        .cf-row:last-child {{ border-bottom: none; }}
+        .cf-main {{ display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 0; color: inherit; text-decoration: none; }}
+        a.cf-main:hover .cf-name {{ text-decoration: underline; color: var(--accent); }}
+        .cf-icon {{ flex: none; }}
+        .cf-name {{ flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.92rem; }}
+        .cf-size {{ flex: none; color: var(--text-dim); font-size: 0.8rem; }}
+        .cf-actions {{ display: flex; align-items: center; gap: 0.4rem; flex: none; }}
+        .cf-dl {{ color: var(--accent); font-size: 0.82rem; text-decoration: none; font-weight: 600; }}
+        .cf-dl:hover {{ text-decoration: underline; }}
+        .cf-select {{ background: #fff; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 11px; font-size: 0.8rem; font-weight: 700; cursor: pointer; font-family: inherit; }}
+        .cf-select:hover {{ background: var(--accent-light); }}
+        .cf-del {{
+            background: none; border: none; cursor: pointer; font: inherit;
+            font-size: 0.85rem; line-height: 1; color: var(--text-dim);
+            border-radius: 4px; padding: 2px 5px;
+        }}
+        .cf-del:hover, .cf-del:focus-visible {{ background: #A93226; color: #fff; }}
+        .cf-empty {{ padding: 14px 0; color: var(--text-dim); font-size: 0.9rem; }}
+        .cf-foot {{ display: flex; justify-content: space-between; margin-top: 16px; gap: 0.6rem; }}
+        .cf-cancel {{ color: var(--text-dim); text-decoration: none; font-size: 0.9rem; }}
+        .cf-cancel:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+<main class="cf-page" id="cloud-page" data-picker="{picker_attr}" data-path="{dir_attr}">
+    <header class="cf-head">
+        <h1>Cloud-Dateien</h1>
+        <p class="cf-sub">{hint}</p>
+    </header>
+    <nav class="cf-trail" id="cf-trail" aria-label="Ordnerpfad">{trail}</nav>
+    <div class="cf-tools">
+        <label class="cf-file-label" for="cf-file">📎 Datei…</label>
+        <input id="cf-file" type="file" aria-label="Datei zum Hochladen" hidden>
+        <button class="cf-btn" id="cf-upload" type="button">Hochladen</button>
+        <input class="cf-mkdir-name" id="cf-mkdir-name" type="text" placeholder="Neuer Ordner…" aria-label="Neuer Ordner">
+        <button class="cf-btn-ghost" id="cf-mkdir" type="button">Neuer Ordner</button>
+        <span class="cf-file-name" id="cf-file-name" aria-live="polite"></span>
+    </div>
+    {notice_html}
+    <ul class="cf-grid" id="cf-grid">
+{rows}
+    </ul>
+    <footer class="cf-foot">
+        <a class="cf-cancel" href="/">✕ Abbrechen — zurück zum Portal</a>
+        <button class="cf-btn" id="cf-done" type="button">Fertig</button>
+    </footer>
+</main>
+</body>
+</html>"##)
+}
+
+/// GET /files — the cloud picker page (session-gated). SSR lists the
+/// current directory so the page is meaningful without JS; invalid
+/// paths answer 400 with the same document + notice.
+async fn handle_files(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudFilesPageQuery>,
+) -> impl IntoResponse {
+    let picker = q.picker.as_deref() == Some("1");
+    let (dir, entries, notice, status) = match cloud_dir_or_root(&q.path) {
+        Err(e) => (
+            String::new(),
+            Vec::new(),
+            Some(e),
+            StatusCode::BAD_REQUEST,
+        ),
+        Ok(dir) => match &config.cloud {
+            None => (
+                dir,
+                Vec::new(),
+                Some("Cloud-Speicher ist nicht konfiguriert (CLOUD_WEBDAV_* fehlt).".to_string()),
+                StatusCode::OK,
+            ),
+            Some(cloud) => match cloud.list(&dir).await {
+                Ok(entries) => (dir.clone(), entries, None, StatusCode::OK),
+                Err(e) => (
+                    dir,
+                    Vec::new(),
+                    Some(format!("Cloud-Ordner nicht lesbar: {e}")),
+                    StatusCode::BAD_GATEWAY,
+                ),
+            },
+        },
+    };
+    let html = render_cloud_files(&dir, &entries, picker, notice.as_deref());
+    (status, Html(html)).into_response()
 }
 
 /// Resolve an "attachment from the cloud" URL into a metadata snapshot:
@@ -2485,6 +2849,12 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response body is JSON")
     }
 
+    /// HTML bodies (the /files picker page) as plain text.
+    async fn body_str(resp: axum::http::Response<Body>) -> String {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("response body is UTF-8")
+    }
+
     fn header(resp: &axum::http::Response<Body>, name: &str) -> String {
         resp.headers()
             .get(name)
@@ -2547,12 +2917,12 @@ mod tests {
     async fn cloud_bridge_rejects_bad_paths_with_400_before_any_network() {
         // cloud = None on purpose: path/name/body validation must fire
         // BEFORE the 503 config check and long before any network call.
+        // A BLANK path is valid since the picker arrived — it names the
+        // dav root collection (cloud_files_bridge_lists_root_on_blank_
+        // path pins that); everything else malformed still 400s here.
         let cfg = cloud_cfg(None);
         let cases: &[(&str, &str, Option<Vec<u8>>)] = &[
-            // path: missing / empty / absolute / traversal / slash noise
-            ("GET", "/api/cloud/files", None),
-            ("GET", "/api/cloud/files?path=", None),
-            ("GET", "/api/cloud/files?path=%20%20", None),
+            // path: absolute / traversal / slash noise
             ("GET", "/api/cloud/files?path=/etc", None),
             ("GET", "/api/cloud/files?path=..", None),
             ("GET", "/api/cloud/files?path=docs/../x", None),
@@ -2585,6 +2955,149 @@ mod tests {
                 err.starts_with("invalid cloud") || err == "upload body is empty",
                 "{method} {uri} → unexpected error {err:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_files_bridge_lists_root_on_blank_path() {
+        // The picker browses the dav root: a blank `path` must flow
+        // through validation to the config check (503 with cloud = None
+        // — NOT the 400 the strict pre-picker validator produced), for
+        // the listing AND the create routes (mkdir / upload at root).
+        let cfg = cloud_cfg(None);
+        for (method, uri, body) in [
+            ("GET", "/api/cloud/files", None),
+            ("GET", "/api/cloud/files?path=", None),
+            ("GET", "/api/cloud/files?path=%20%20", None),
+            ("POST", "/api/cloud/files?path=&name=sub", None),
+            (
+                "PUT",
+                "/api/cloud/files?path=&name=a.pdf",
+                Some(b"x".to_vec()),
+            ),
+        ] {
+            let resp = cloud_res(cfg.clone(), method, uri, body, true).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{method} {uri}"
+            );
+            let b = body_json(resp).await;
+            assert_eq!(b["error"], "cloud storage not configured", "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_share_route_gates_and_validates() {
+        // Anonymous → 401 (firewall), malformed/blank path → 400 before
+        // any network, missing cloud config → 503 (share minting needs
+        // the OCS endpoint). This route feeds the picker's SELECT.
+        let cfg = cloud_cfg(None);
+        let resp =
+            cloud_res(cfg.clone(), "POST", "/api/cloud/share?path=docs/a.pdf", None, false).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let resp = cloud_res(cfg.clone(), "POST", "/api/cloud/share?path=/etc", None, true).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let b = body_json(resp).await;
+        assert!(b["error"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("invalid cloud"));
+        // A share needs a concrete file — blank (root) is not shareable.
+        let resp = cloud_res(cfg.clone(), "POST", "/api/cloud/share", None, true).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let resp = cloud_res(cfg, "POST", "/api/cloud/share?path=docs/a.pdf", None, true).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn files_page_is_session_gated() {
+        // The picker page drives the cloud bridge — it sits inside the
+        // protected router like every other interactive surface.
+        let cfg = cloud_cfg(None);
+        let resp = cloud_res(cfg, "GET", "/files", None, false).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn files_page_ssr_renders_chrome_and_notice_without_cloud() {
+        // Signed-in, cloud unconfigured: 200 + meaningful page (header,
+        // breadcrumb, tools, footer) + a visible notice — never a bare
+        // error page. picker=1 must be reflected in the page state.
+        let cfg = cloud_cfg(None);
+        let resp = cloud_res(cfg, "GET", "/files?picker=1", None, true).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_str(resp).await;
+        assert!(body.contains(r#"<h1>Cloud-Dateien</h1>"#));
+        assert!(body.contains(r#"id="cloud-page" data-picker="1""#));
+        assert!(body.contains("nicht konfiguriert"));
+        assert!(body.contains(r#"id="cf-grid""#));
+        assert!(body.contains(r#"id="cf-upload""#));
+        assert!(body.contains(r#"id="cf-mkdir""#));
+        assert!(body.contains(r#"id="cf-done""#));
+        assert!(body.contains("Abbrechen"));
+    }
+
+    #[test]
+    fn files_page_ssr_escapes_names_and_renders_rows() {
+        // Pure render check with real entries: dirs link into /files
+        // (picker flag preserved), files carry download + select +
+        // delete, and cloud-controlled names never reach the HTML raw.
+        let entries = vec![
+            cloud::CloudEntry {
+                name: "Verträge <2026>".into(),
+                path: "/remote.php/dav/files/u/Verträge <2026>".into(),
+                is_dir: true,
+                size: None,
+                mtime: None,
+            },
+            cloud::CloudEntry {
+                name: "Angebot & Co.pdf".into(),
+                path: "/remote.php/dav/files/u/Angebot & Co.pdf".into(),
+                is_dir: false,
+                size: Some(1500),
+                mtime: None,
+            },
+        ];
+        let html = render_cloud_files("Docs", &entries, true, None);
+        // XSS: raw markup must never appear
+        assert!(!html.contains("<2026>"));
+        assert!(html.contains("Verträge &lt;2026&gt;"));
+        assert!(html.contains("Angebot &amp; Co.pdf"));
+        // dir row: deep link with encoded path + picker flag (& escaped
+        // in the attribute, as html_escape demands)
+        assert!(html.contains("href=\"/files?path=Docs%2FVertr%C3%A4ge+%3C2026%3E&amp;picker=1\""));
+        // file row: download bridge link, select + delete with the
+        // escaped relative path as data attribute
+        assert!(html.contains("href=\"/api/cloud/file?path=Docs%2FAngebot+%26+Co.pdf\""));
+        assert!(html.contains(r#"<button class="cf-select" type="button""#));
+        assert!(html.contains(r#"data-path="Docs/Angebot &amp; Co.pdf""#));
+        assert_eq!(html.matches(r#"class="cf-del""#).count(), 2);
+        // sizes render human-readable, breadcrumb shows Docs as current
+        assert!(html.contains("1.5 KB"));
+        assert!(html.contains(r#"<span class="cf-here">Docs</span>"#));
+        // picker mode preserved in the trail's root link
+        assert!(html.contains("href=\"/files?picker=1\""));
+        // empty directory → a friendly no-JS row, not an empty box
+        let empty = render_cloud_files("Leer", &[], false, None);
+        assert!(empty.contains("Dieser Ordner ist leer."));
+    }
+
+    #[test]
+    fn intercom_card_carries_cloud_picker_button_and_css() {
+        let html = build_landing_page(&cfg_with("", None, ""));
+        assert!(html.contains(
+            r#"<button class="ic-cloud" type="button" title="Datei aus der Cloud auswählen">☁️ aus der Cloud</button>"#
+        ));
+        // styling ships with the page (format! collapses doubled braces)
+        assert!(html.contains(".ic-cloud {"));
+        // the button sits inside the Notizen card's action row, next to
+        // the URL input + file label + send button
+        let start = html.find(r#"<div class="ic-box">"#).expect("ic-box");
+        let end = html[start..].find(r#"</div>"#).map(|i| start + i).expect("ic-box end");
+        let box_html = &html[start..end];
+        for marker in ["ic-url", "ic-cloud", "ic-file-label", "ic-send"] {
+            assert!(box_html.contains(marker), "missing {marker} in ic-box");
         }
     }
 
