@@ -48,9 +48,11 @@
 #   * `calrs event-type create` has NO location/visibility flags in
 #     v1.6.0: the schema defaults new types to location_type='link'
 #     (empty location_value) and visibility='public', and auto-creates
-#     Mon-Fri 09:00-17:00 availability. The VC link therefore rides in
-#     --description; set the location value via the dashboard if a
-#     dedicated link field is wanted.
+#     Mon-Fri 09:00-17:00 availability. IMPORTANT (verified live): the
+#     VC URL in --description is NEVER rendered to guests — the booking
+#     confirmation shows a clickable join link only when
+#     event_types.location_value is set (seed it via the dashboard or a
+#     direct UPDATE).
 #   * Booking pages live at /u/<username>/<slug>; the username is the
 #     lowercased email local part with '.'->'-' (src/auth.rs
 #     generate_username).

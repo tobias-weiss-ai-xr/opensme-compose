@@ -36,6 +36,7 @@ struct AppConfig {
     chat_url: String,
     notes_url: String,
     surveys_url: String,
+    calendar_url: String,
     portal_domain: String,
     opensme_domain: String,
     announcements: Arc<Vec<Announcement>>,
@@ -788,6 +789,16 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
             name: "Surveys".into(),
             description: "Online surveys — LimeSurvey".into(),
             url: config.surveys_url.clone(),
+        });
+    }
+
+    // Calendar (calrs booking) — only if explicitly configured (not empty)
+    if !config.calendar_url.is_empty() {
+        services.push(Service {
+            id: "calendar".into(),
+            name: "Calendar".into(),
+            description: "Video consultations — book a slot".into(),
+            url: config.calendar_url.clone(),
         });
     }
 
@@ -2282,6 +2293,7 @@ fn load_config() -> Arc<AppConfig> {
         chat_url: load_env("CHAT_URL", ""),
         notes_url: load_env("NOTES_URL", ""),
         surveys_url: load_env("SURVEYS_URL", ""),
+        calendar_url: load_env("CALENDAR_URL", ""),
         announcements,
         ai,
         // One shared client: connection pooling, 30s default timeout.
@@ -2374,6 +2386,7 @@ mod tests {
             chat_url: String::new(),
             notes_url: String::new(),
             surveys_url: String::new(),
+            calendar_url: String::new(),
             portal_domain: "portal.example".into(),
             opensme_domain: "example".into(),
             announcements: Arc::new(parse_announcements(announcements)),
@@ -2525,10 +2538,11 @@ mod tests {
             chat_url: "https://chat.example".into(),
             notes_url: "https://notes.example".into(),
             surveys_url: "https://grist.example".into(),
+            calendar_url: "https://calendar.example".into(),
             ..cfg_with("", None, "")
         };
         let services = get_services(&c);
-        assert_eq!(services.len(), 11, "all eleven catalog cards configured");
+        assert_eq!(services.len(), 12, "all twelve catalog cards configured");
 
         let ids: Vec<&str> = services.iter().map(|s| s.id.as_str()).collect();
         assert!(

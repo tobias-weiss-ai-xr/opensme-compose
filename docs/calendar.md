@@ -27,6 +27,18 @@ Also wired into the suite: a portal tile (contracts/tiles.yml → `CALENDAR_URL`
 reach the booking dashboard from the portal, and the `calrs-data` / `radicale-config` /
 `radicale-data` volumes are part of `scripts/backup.sh --volumes`.
 
+> **Join-link requirement (2026-11-07 bug-hunt):** guests see a clickable
+> "Location" link on the booking confirmation ONLY when the event type's
+> `location_value` is set. calrs v1.6.0's CLI cannot set it (the VC URL rode in
+> `--description`, which is never rendered to guests) — set it in the dashboard
+> or seed `event_types.location_value` directly. Without it, a booked guest has
+> no way to join the video call.
+>
+> **Cancellation + CalDAV (ops):** `calrs booking cancel` frees the slot but does
+> NOT delete the already-pushed .ics from Radicale (only the web dashboard cancel
+> does). After CLI cancels, remove stale events with a CalDAV DELETE on
+> `/booking/<uid>@calrs.ics`.
+
 > **CalDAV write-back dependency (2026-11-07 deploy):** calrs only pushes bookings into
 > the dedicated Radicale calendar when an enabled `smtp_config` row exists — the push
 > runs inside the SMTP-configured branch of the booking handler (even if SMTP delivery
