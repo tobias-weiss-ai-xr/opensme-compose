@@ -14,6 +14,7 @@ use std::time::Duration;
 use tokio::signal;
 use tracing::{info, warn};
 
+mod cloud;
 mod feeds;
 mod intercom;
 mod logout;
@@ -1237,7 +1238,7 @@ async fn handle_intercom_file(
 
 // ── Polls (Umfragen) — optional feature behind POLLS_ENABLED=1 ────────
 
-fn polls_store_from_env() -> Option<Arc<polls::PollStore>> {
+fn polls_store_from_env(http: &reqwest::Client) -> Option<Arc<polls::PollStore>> {
     let enabled = std::env::var("POLLS_ENABLED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
@@ -1255,7 +1256,9 @@ fn polls_store_from_env() -> Option<Arc<polls::PollStore>> {
     if let Err(e) = std::fs::create_dir_all(&attachments) {
         tracing::warn!(%e, dir = %attachments.display(), "cannot create polls attachments dir — local uploads will fail");
     }
-    let cloud = polls::CloudUploadConfig::from_env();
+    // Cloud uploads ride the same wired client as the rest of the portal
+    // (timeout, no redirects, egress proxy with internal-host bypass).
+    let cloud = cloud::CloudFiles::from_env().map(|c| c.with_client(http.clone()));
     tracing::info!(cloud = cloud.is_some(), "polls feature enabled");
     Some(Arc::new(polls::PollStore::open(
         Some(path),
@@ -1383,15 +1386,7 @@ async fn handle_polls_upload(
         match &store.cloud {
             Some(cloud) => {
                 let key = intercom::random_token();
-                match polls::upload_to_cloud(
-                    cloud,
-                    &config.intercom_client,
-                    &key,
-                    &filename,
-                    &bytes,
-                )
-                .await
-                {
+                match polls::upload_to_cloud(cloud, &key, &filename, &bytes).await {
                     Ok(a) => Some(a),
                     Err(e) => return bad(&e).into_response(),
                 }
@@ -1632,6 +1627,32 @@ fn load_config() -> Arc<AppConfig> {
 
     let announcements = Arc::new(parse_announcements(&load_env("PORTAL_ANNOUNCEMENTS", "")));
 
+    let intercom_client = {
+        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+        // The metadata HEAD must stay on the allowlisted host: without
+        // this, a 302 off the allowed cloud would make reqwest follow
+        // redirects and snapshot metadata from an arbitrary host
+        // (allowlist bypass). No attachment flow needs redirects.
+        builder = builder.redirect(reqwest::redirect::Policy::none());
+        // Egress-restricted hosts reach the cloud (attachment metadata
+        // HEAD, poll uploads) only through the egress proxy — same
+        // wiring as the feed client.
+        if let Some(mut proxy) = feeds::proxy_from_env() {
+            // Internal targets (docker-net names like opensme-opencloud)
+            // must bypass the egress proxy: it cannot resolve bridge
+            // names and would fail every internal http request.
+            if let Some(np) = std::env::var("PORTAL_NO_PROXY")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            {
+                proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&np));
+            }
+            builder = builder.proxy(proxy);
+        }
+        builder.build().unwrap_or_default()
+    };
+
     Arc::new(AppConfig {
         portal_domain: load_env("PORTAL_DOMAIN", "portal.opensme.graphwiz.ai"),
         opensme_domain: load_env("OPENSME_DOMAIN", "opensme.graphwiz.ai"),
@@ -1661,33 +1682,9 @@ fn load_config() -> Arc<AppConfig> {
             "opensme.graphwiz.ai",
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
-        polls: polls_store_from_env(),
+        polls: polls_store_from_env(&intercom_client),
         session: session::SessionConfig::from_env(),
-        intercom_client: {
-            let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
-            // The metadata HEAD must stay on the allowlisted host: without
-            // this, a 302 off the allowed cloud would make reqwest follow
-            // redirects and snapshot metadata from an arbitrary host
-            // (allowlist bypass). No attachment flow needs redirects.
-            builder = builder.redirect(reqwest::redirect::Policy::none());
-            // Egress-restricted hosts reach the cloud (attachment metadata
-            // HEAD, poll uploads) only through the egress proxy — same
-            // wiring as the feed client.
-            if let Some(mut proxy) = feeds::proxy_from_env() {
-                // Internal targets (docker-net names like opensme-opencloud)
-                // must bypass the egress proxy: it cannot resolve bridge
-                // names and would fail every internal http request.
-                if let Some(np) = std::env::var("PORTAL_NO_PROXY")
-                    .ok()
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty())
-                {
-                    proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&np));
-                }
-                builder = builder.proxy(proxy);
-            }
-            builder.build().unwrap_or_default()
-        },
+        intercom_client,
         feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(&load_env(
             "PORTAL_FEEDS",
             "",
