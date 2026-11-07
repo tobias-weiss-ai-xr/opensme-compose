@@ -27,6 +27,13 @@ Also wired into the suite: a portal tile (contracts/tiles.yml → `CALENDAR_URL`
 reach the booking dashboard from the portal, and the `calrs-data` / `radicale-config` /
 `radicale-data` volumes are part of `scripts/backup.sh --volumes`.
 
+> **Live edge note (2026-11-07 deploy):** on the fleet traefik (`traefik_extra_routers`
+> in `openedusuite.org.yaml`) the docker router labels are shadowed by a file router
+> `calendar-sec` (priority 10000, `security-headers`, LE via the entrypoint's
+> `mytlschallenge` resolver). The in-repo `certresolver=letsencrypt` label targets the
+> repo-canonical compose traefik; on the fleet it only logs a harmless
+> "nonexistent resolver" line. Same pattern as notes/store/surveys.
+
 ## URL & demo flow
 
 | Page | URL | Who |

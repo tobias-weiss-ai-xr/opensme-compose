@@ -154,8 +154,10 @@ set +a
 # ── compose chain (COMPOSE_FILE override supported; overlay appended) ──────
 COMPOSE_FILE="${COMPOSE_FILE_OVERRIDE:-${COMPOSE_FILE_FROM_ENV:-${COMPOSE_FILE:-docker-compose.yml:services/calendar.yml}}}"
 COMPOSE_FILE="${COMPOSE_FILE%$'\r'}"
+# match the overlay as a path segment: relative (services/calendar.yml) or
+# absolute (/…/services/calendar.yml)
 case ":${COMPOSE_FILE}:" in
-  *:services/calendar.yml:*) ;;
+  *:services/calendar.yml:*|*:*/services/calendar.yml:*) ;;
   *) COMPOSE_FILE="${COMPOSE_FILE}:services/calendar.yml" ;;
 esac
 export COMPOSE_FILE
@@ -280,11 +282,20 @@ fi
 
 # ── Step 1/8: Radicale htpasswd (helper container, /config/users) ──────────
 radicale_volume() {
-  local vol
+  local vol project
   vol="$(dc config --format json 2>/dev/null \
     | jq -r '.volumes["radicale-config"].name // empty' 2>/dev/null || true)"
   if [[ -z "$vol" ]]; then
-    vol="${COMPOSE_PROJECT_NAME:-opensme-compose}_radicale-config"
+    # named volume name not exposed — derive from the compose project name
+    # (Docker's projection for an unnamed `radicale-config:` volume):
+    # 1) explicit COMPOSE_PROJECT_NAME, 2) the project from compose config,
+    # 3) cwd basename as a last resort.
+    project="${COMPOSE_PROJECT_NAME:-}"
+    if [[ -z "$project" ]]; then
+      project="$(dc config --format json 2>/dev/null \
+        | jq -r '.name // empty' 2>/dev/null || true)"
+    fi
+    vol="${project:-opensme-compose}_radicale-config"
     # stderr: this function's stdout is captured — a warn there would
     # pollute the volume name with ANSI codes and newlines
     warn "could not resolve the radicale-config volume via compose config — using '${vol}'" >&2
@@ -306,7 +317,11 @@ else
     -v "${RADICALE_VOLUME}":/config -e HTPASSWD_USER="${RADICALE_USER}" \
     httpd:2.4-alpine sh -c 'umask 022; touch /config/users;
       if [ -s /config/users ] && [ -n "$(tail -c 1 /config/users)" ]; then printf "\n" >> /config/users; fi;
-      htpasswd -ibB "$HTPASSWD_USER" >> /config/users'
+      # htpasswd signature: <flags> PASSWORDFILE USERNAME. -B bcrypt, -i
+      # reads the password from stdin (never argv) — the file is written
+      # IN PLACE, no redirect. Do NOT pass -b (argv) together with -i
+      # (stdin): the pair contradicts and htpasswd dumps usage.
+      htpasswd -B -i /config/users "$HTPASSWD_USER"'
   if docker run --rm -v "${RADICALE_VOLUME}":/config httpd:2.4-alpine \
       sh -c 'cat /config/users 2>/dev/null || true' | grep -q "^${RADICALE_USER}:"; then
     ok "Radicale user '${RADICALE_USER}' seeded"
