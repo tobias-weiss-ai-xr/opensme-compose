@@ -21,12 +21,12 @@
 //! persisted JSON; the public API never exposes subjects — list/vote
 //! answers carry only a boolean `voted` flag for the asking user).
 
+use crate::cloud;
+use crate::intercom::{self, Attachment};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-
-use crate::intercom::{self, Attachment};
 
 pub const MAX_QUESTION: usize = 300;
 pub const MIN_OPTIONS: usize = 2;
@@ -92,79 +92,9 @@ impl Poll {
     }
 }
 
-/// OpenCloud upload credentials (WebDAV PUT + OCS public share).
-#[derive(Clone, Debug)]
-pub struct CloudUploadConfig {
-    /// e.g. https://cloud.opensme.graphwiz.ai/remote.php/dav/files/uploader
-    pub dav_base: String,
-    /// OCS shares endpoint; derived from dav_base when unset.
-    pub share_url: String,
-    pub user: String,
-    pub pass: String,
-}
-
-impl CloudUploadConfig {
-    pub fn from_env() -> Option<Self> {
-        let dav_base = non_empty("CLOUD_WEBDAV_URL")?;
-        let user = non_empty("CLOUD_WEBDAV_USER")?;
-        let pass = non_empty("CLOUD_WEBDAV_PASS")?;
-        let base = dav_base_host_base(&dav_base);
-        let share_url = std::env::var("CLOUD_SHARE_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| format!("{base}/ocs/v2.php/apps/files_sharing/api/v1/shares"));
-        Some(Self {
-            dav_base: dav_base.trim_end_matches('/').to_string(),
-            share_url,
-            user,
-            pass,
-        })
-    }
-}
-
-fn non_empty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-/// WebDAV base host part: scheme://authority (strip everything after the
-/// authority, so the OCS endpoint derives from the same host).
-fn dav_base_host_base(dav_base: &str) -> String {
-    let trimmed = dav_base.trim_end_matches('/');
-    if let Some(rest) = trimmed.strip_prefix("https://") {
-        let authority = rest.split('/').next().unwrap_or(rest);
-        format!("https://{authority}")
-    } else if let Some(rest) = trimmed.strip_prefix("http://") {
-        let authority = rest.split('/').next().unwrap_or(rest);
-        format!("http://{authority}")
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// WebDAV file URL for an uploaded poll attachment.
-pub fn dav_file_url(dav_base: &str, dir: &str, token: &str, name: &str) -> String {
-    format!(
-        "{}/{}_{}",
-        format!("{}/{}", dav_base.trim_end_matches('/'), dir).trim_end_matches('/'),
-        token,
-        name
-    )
-}
-
-/// Extract the public share URL from an OCS share-create response
-/// (format=json → {"ocs":{"meta":{...},"data":{"url":...}}}.
-pub fn parse_share_url(body: &[u8]) -> Result<String, String> {
-    let v: serde_json::Value =
-        serde_json::from_slice(body).map_err(|e| format!("share response not json: {e}"))?;
-    let url = v["ocs"]["data"]["url"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "share response carries no url".to_string())?;
-    Ok(url.to_string())
-}
+/// Legacy alias: the cloud client used to live here as
+/// `CloudUploadConfig` — it converged into `cloud::CloudFiles`.
+pub type CloudUploadConfig = cloud::CloudFiles;
 
 pub fn validate_poll(question: &str, options: &[String]) -> Result<(String, Vec<String>), String> {
     let question = question.trim();
@@ -382,11 +312,12 @@ impl PollStore {
 }
 
 /// Upload a poll attachment to the cloud: WebDAV PUT under
-/// Umfragen/<key>/, then a public read-only share via the OCS API.
+/// Umfragen/<poll_key>/, then a public read-only share via the OCS API
+/// (both via the generalized `cloud::CloudFiles` client — same request
+/// shape, headers and share parsing as the original inline flow).
 /// Returns the attachment snapshot carrying the SHARE url.
 pub async fn upload_to_cloud(
     cfg: &CloudUploadConfig,
-    client: &reqwest::Client,
     poll_key: &str,
     filename: &str,
     bytes: &[u8],
@@ -398,74 +329,25 @@ pub async fn upload_to_cloud(
     if bytes.len() as u64 > intercom::MAX_UPLOAD {
         return Err(format!("attachment exceeds {} bytes", intercom::MAX_UPLOAD));
     }
-    let base = cfg.dav_base.trim_end_matches('/');
     let token = intercom::random_token();
-    let rel = format!("Umfragen/{poll_key}/{token}_{name}");
-    let file_url = dav_file_url(
-        &cfg.dav_base,
-        &format!("Umfragen/{poll_key}"),
-        &token,
-        &name,
-    );
+    let dir = format!("Umfragen/{poll_key}");
+    let rel = format!("{dir}/{token}_{name}");
 
     // Ensure collections exist (RFC4918: 405 = already there).
-    let mk = reqwest::Method::from_bytes(b"MKCOL").expect("valid method");
-    for dir_url in [format!("{base}/Umfragen"), dir_url_of(base, poll_key)] {
-        let _ = client
-            .request(mk.clone(), &dir_url)
-            .basic_auth(&cfg.user, Some(&cfg.pass))
-            .send()
-            .await;
-    }
+    let _ = cfg.mkdir("Umfragen").await;
+    let _ = cfg.mkdir(&dir).await;
 
-    let put = client
-        .put(&file_url)
-        .basic_auth(&cfg.user, Some(&cfg.pass))
-        .body(bytes.to_vec())
-        .send()
-        .await;
-    let put = put.map_err(|e| format!("cloud upload unreachable: {e}"))?;
-    if !put.status().is_success() {
-        return Err(format!(
-            "cloud upload failed: HTTP {}",
-            put.status().as_u16()
-        ));
-    }
-
-    let form = [
-        ("path", format!("/{rel}")),
-        ("shareType", "3".to_string()),   // public link
-        ("permissions", "1".to_string()), // read only
-    ];
-    let share = client
-        .post(&cfg.share_url)
-        .header("OCS-APIRequest", "true")
-        .basic_auth(&cfg.user, Some(&cfg.pass))
-        .form(&form)
-        .send()
-        .await;
-    let share = share.map_err(|e| format!("share creation unreachable: {e}"))?;
-    if !share.status().is_success() {
-        return Err(format!(
-            "share creation failed: HTTP {}",
-            share.status().as_u16()
-        ));
-    }
-    let body = share
-        .bytes()
+    let content_type = intercom::mime_for(&name);
+    cfg.put(&rel, bytes, &content_type)
         .await
-        .map_err(|e| format!("share response unreadable: {e}"))?;
-    let url = parse_share_url(&body)?;
+        .map_err(|e| format!("cloud upload failed: {e}"))?;
+    let url = cfg.create_share(&rel).await?;
     Ok(Attachment {
         url,
         size: Some(bytes.len() as u64),
-        content_type: intercom::mime_for(&name),
+        content_type,
         name,
     })
-}
-
-fn dir_url_of(base: &str, poll_key: &str) -> String {
-    format!("{}/Umfragen/{}", base.trim_end_matches('/'), poll_key)
 }
 
 #[cfg(test)]
@@ -745,51 +627,30 @@ mod tests {
     }
 
     // ── cloud upload config + url building ────────────────────────────
+    // (env/parsing/URL helpers moved to cloud.rs — tested there.)
 
-    #[test]
-    fn dav_base_host_base_strips_paths() {
-        assert_eq!(
-            dav_base_host_base("https://cloud.opensme.graphwiz.ai/remote.php/dav/files/uploader/"),
-            "https://cloud.opensme.graphwiz.ai"
-        );
-        assert_eq!(
-            dav_base_host_base("http://cloud.local:8099/remote.php/dav/files/u"),
-            "http://cloud.local:8099"
-        );
-    }
-
-    #[test]
-    fn dav_file_url_builds_paths() {
-        let url = dav_file_url(
-            "https://cloud.opensme.graphwiz.ai/remote.php/dav/files/uploader",
-            "Umfragen/abc123",
-            "tok",
-            "antrag.pdf",
+    #[tokio::test]
+    async fn upload_to_cloud_guards_reject_before_any_network() {
+        let cfg = cloud::CloudFiles::from_parts(
+            "http://127.0.0.1:9/remote.php/dav/files/bot".into(),
+            "bot".into(),
+            "p".into(),
+            reqwest::Client::new(),
         );
         assert_eq!(
-            url,
-            "https://cloud.opensme.graphwiz.ai/remote.php/dav/files/uploader/Umfragen/abc123/tok_antrag.pdf"
+            upload_to_cloud(&cfg, "k", "x.txt", b"").await.unwrap_err(),
+            "attachment is empty"
         );
-    }
-
-    #[test]
-    fn parse_share_url_extracts_ocs_data_url() {
-        let body = br#"{"ocs":{"meta":{"status":"ok"},"data":{"url":"https://cloud.opensme.graphwiz.ai/s/kJeYFw7BdAoLnHd"}}}"#;
-        assert_eq!(
-            parse_share_url(body).unwrap(),
-            "https://cloud.opensme.graphwiz.ai/s/kJeYFw7BdAoLnHd"
-        );
-        assert!(parse_share_url(br#"{"ocs":{"data":{}}}"#).is_err());
-        assert!(parse_share_url(b"<xml/>").is_err());
-    }
-
-    #[test]
-    fn cloud_config_requires_all_three_vars() {
-        // env vars leak between tests (process-global); only assert the
-        // genuinely-safe direction: with vars unset-and-empty it is None.
-        std::env::remove_var("CLOUD_WEBDAV_URL");
-        std::env::remove_var("CLOUD_WEBDAV_USER");
-        std::env::remove_var("CLOUD_WEBDAV_PASS");
-        assert!(CloudUploadConfig::from_env().is_none());
+        let big = vec![0u8; (intercom::MAX_UPLOAD + 1) as usize];
+        assert!(upload_to_cloud(&cfg, "k", "x.txt", &big)
+            .await
+            .unwrap_err()
+            .contains("attachment exceeds"));
+        // traversal in the poll key must fail in URL building — the
+        // request is never even constructed, let alone sent
+        let err = upload_to_cloud(&cfg, "../../etc", "x.txt", b"hi")
+            .await
+            .unwrap_err();
+        assert!(err.contains("invalid cloud path"), "got: {err}");
     }
 }
