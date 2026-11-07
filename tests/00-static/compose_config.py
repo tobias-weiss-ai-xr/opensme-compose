@@ -103,6 +103,20 @@ MATRIX_ENV: dict[str, dict[str, str]] = {
     },
 }
 
+# Env seeded for EVERY matrix combo. docker compose config interpolates ALL
+# services (including profile-gated ones) and fails hard on `:?` required
+# vars it cannot resolve, so the fail-fast LIVEKIT_*/VC_PUBLIC_IP guards on
+# the profile-gated vc services would otherwise kill every combo (base, soho,
+# small, medium…), even when the `vc` profile is never activated. The vars are
+# declared empty in .env.example like all deployment secrets; these shape-only
+# dummies prove the gate validates shape, not credentials (same contract as
+# MATRIX_ENV entries above).
+GLOBAL_MATRIX_ENV: dict[str, str] = {
+    "LIVEKIT_API_KEY": "dummy-for-config-validation-only",
+    "LIVEKIT_API_SECRET": "dummy-for-config-validation-only",
+    "VC_PUBLIC_IP": "203.0.113.7",
+}
+
 
 def docker_compose_available() -> bool:
     return shutil.which("docker") is not None
@@ -213,7 +227,9 @@ def main():
             result.skip(f"[{label}] missing files {missing} (not in this "
                         "install profile)")
             continue
-        ok, output = run_config(files, profiles, MATRIX_ENV.get(label))
+        ok, output = run_config(
+            files, profiles,
+            {**GLOBAL_MATRIX_ENV, **(MATRIX_ENV.get(label) or {})})
         if ok:
             # Z-BRACE backstop: even a parse-clean config can leak a stray '}'
             # into a rendered env value; fail loudly if any do.

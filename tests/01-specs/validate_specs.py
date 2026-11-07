@@ -22,6 +22,7 @@ from conftest import (
     ComposeLoader, SpecLoader, Result, ROOT,
     extract_host_ports, has_healthcheck, has_traefik_labels,
     get_image, has_resource_limits, get_networks, get_volumes,
+    effective_networks,
 )
 
 
@@ -85,10 +86,10 @@ def check_healthcheck(result, spec_name, spec, svc_data):
         result.ok(f"{spec_name}: no healthcheck (as expected)")
 
 
-def check_networks(result, spec_name, spec, svc_data):
+def check_networks(result, spec_name, spec, svc_data, all_services):
     """Check that the service is on the expected networks."""
     expected_networks = set(spec.get("networks") or [])
-    actual_networks = set(get_networks(svc_data))
+    actual_networks = set(effective_networks(spec_name, svc_data, all_services))
 
     if not expected_networks:
         return  # spec doesn't require specific networks
@@ -187,7 +188,7 @@ def main():
         check_image(result, svc_name, spec, svc_data)
         check_host_ports(result, svc_name, spec, svc_data)
         check_healthcheck(result, svc_name, spec, svc_data)
-        check_networks(result, svc_name, spec, svc_data)
+        check_networks(result, svc_name, spec, svc_data, loader.services)
         check_resource_limits(result, svc_name, spec, svc_data)
         check_traefik_labels(result, svc_name, spec, svc_data)
         check_volumes(result, svc_name, spec, svc_data)

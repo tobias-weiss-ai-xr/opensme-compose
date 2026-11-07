@@ -56,6 +56,18 @@ surfaces:
     picked_file_routes:
       - /api/intercom/files
       - /api/files
+    # Declared capability: cloud file picker ("aus der Cloud" browse).
+    # GET /api/cloud/files lists (Depth:1 WebDAV), POST mkdirs, PUT
+    # uploads a raw body INTO the cloud, /api/cloud/share mints a link
+    # and /files serves the picker page — the same accepted raw-body
+    # upload exception as picked_file_routes. The portal never
+    # DOWNLOADS or proxies stored content back (list returns metadata
+    # only; share returns a URL; there is no content-serving route).
+    cloud_picker_routes:
+      - /api/cloud/files
+      - /api/cloud/file
+      - /api/cloud/share
+      - /files
     rule: >
       Intercom and poll attachments must match the configured cloud
       host (https://<cloud>/s/… shape). The portal validates hostnames

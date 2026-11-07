@@ -48,7 +48,7 @@ reach the booking dashboard from the portal, and the `calrs-data` / `radicale-co
 > runs inside the SMTP-configured branch of the booking handler (even if SMTP delivery
 > itself fails, the push still fires; seeded here via the dashboard settings or DB row,
 > `host=stalwart`, `port=25`, `from=demo@opensme.local`). Without it bookings stay only
-> in calrs's SQLite and Radicale holds no `.ics`. Admin password: the pty feeder in
+> in calrs's SQLite and Radicale holds no `.ics`. Admin password — the pty feeder in
 > `calendar-setup.sh` can mis-deliver the `calrs user create` password (rpassword
 > reads the controlling tty) — if `demo@opensme.local` login fails, reset the Argon2
 > hash in `calrs.db` (`users.password_hash`) with a matching argon2id PHC string.

@@ -30,7 +30,7 @@ from conftest import Result, ROOT
 # ('password: { ... }' — a literal secret never starts with a spaced brace,
 # while a '{SSHA512}...' hash without the space stays flagged) so variable
 # *references* and generators are not mistaken for literal secrets.
-_REF = r"(?!CHANGEME|\$[{(A-Za-z_]|%s|\{\s|(?:config|os|env)\.)"
+_REF = r"(?!CHANGEME|\$[{(A-Za-z_]|%s|\{\s|(?:config|os|env)\.|\w+\()"
 SECRET_PATTERNS = [
     (rf'password\s*[=:]\s*["\']?{_REF}[^"\'\s$]+', "hardcoded password"),
     (rf'api[_-]?key\s*[=:]\s*["\']?{_REF}[^"\'\s$]{{16,}}', "hardcoded API key"),
@@ -169,6 +169,14 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                 # Check for internal network ranges / hostnames (never ship)
                 for pattern, name in INTERNAL_PATTERNS:
                     if re.search(pattern, line):
+                        # Compose-net static addressing (`networks: … ipv4_address:`
+                        # — opencloud pins 172.19.0.17 so the edge file-provider
+                        # CSP route cloud.home→IP survives recreates, 660804a) is
+                        # container-internal topology, not host infra: the value
+                        # can only ever be a private container IP inside an
+                        # opensme-net overlay, so it carries no leak risk.
+                        if "ipv4_address:" in line:
+                            continue
                         findings.append((i, name, line.rstrip()))
                         break
     except (OSError, UnicodeDecodeError):

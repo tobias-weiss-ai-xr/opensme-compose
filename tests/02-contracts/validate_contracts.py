@@ -37,6 +37,7 @@ from conftest import (  # noqa: E402 (compose tags registered first)
     ComposeLoader, ContractLoader, EnvLoader, Result, ROOT,
     extract_host_ports, has_healthcheck, has_resource_limits,
     get_networks, is_host_network, extract_env_vars_from_compose,
+    effective_networks,
 )
 
 
@@ -145,7 +146,7 @@ def check_on_network(result, rule, loader):
         if svc is None:
             result.skip(f"{svc_name}: not in compose files")
             continue
-        nets = get_networks(svc["data"])
+        nets = effective_networks(svc_name, svc["data"], loader.services)
         if network in nets:
             result.ok(f"{svc_name}: on {network}")
         else:

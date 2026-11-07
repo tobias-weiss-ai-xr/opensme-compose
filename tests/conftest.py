@@ -451,6 +451,28 @@ def get_networks(svc_data: dict) -> list[str]:
     return []
 
 
+def effective_networks(svc_name: str, svc_data: dict,
+                       all_services: dict[str, dict]) -> list[str]:
+    """Networks a service actually joins.
+
+    Resolves the shared-netns pod pattern (OpenVZ numiptent footprint, commit
+    2133ca4): a pod sidecar declares ``network_mode: service:<owner>`` and no
+    ``networks:`` key of its own — it joins the pod owner's networks. Without
+    this resolution every spec/contract network check false-fails the
+    invoiceninja/paperless/notes sidecars (get_networks returns [] for them).
+    """
+    nets = get_networks(svc_data)
+    if nets:
+        return nets
+    nm = svc_data.get("network_mode") or ""
+    if nm.startswith("service:"):
+        owner = nm.split(":", 1)[1]
+        owner_data = (all_services.get(owner) or {}).get("data")
+        if owner_data:
+            return effective_networks(owner, owner_data, all_services)
+    return []
+
+
 def get_volumes(svc_data: dict) -> list[str]:
     """Get list of volume mappings for a service."""
     vols = svc_data.get("volumes") or []
