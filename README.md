@@ -140,7 +140,7 @@ on public hosts add the edge file-router from `edge/invoices-standin.yml`.
 | **Office** | [Collabora](https://www.collaboraoffice.com/) — real-time document editing in the browser |
 | **Mail** | [Stalwart](https://stalw.art/) — modern Rust SMTP/IMAP server |
 | **Groupware** | [SOGo](https://www.sogo.nu/) — webmail, calendar, contacts |
-| **Public calendar** | [calrs](https://github.com/olivierlambert/calrs) — self-hosted booking pages for video-consultation slots, backed by a **dedicated** Radicale CalDAV store; public page is free/busy-only (optional, `--profile calendar`) |
+| **Public calendar** | [calrs](https://github.com/olivierlambert/calrs) — self-hosted booking pages for video-consultation slots, backed by a **dedicated** Radicale CalDAV store; public page is free/busy-only |
 | **Object storage** | [SeaweedFS](https://github.com/seaweedfs/seaweedfs) — S3-compatible storage for production OpenCloud (optional) |
 | **Invoicing** | [Invoice Ninja](https://invoiceninja.com/) — billing & invoicing, OIDC SSO via Zitadel (optional) |
 | **Documents** | [Paperless-ngx](https://docs.paperless-ngx.com/) — document management with OCR (optional) |
@@ -704,7 +704,7 @@ docker compose \
 
 ```
 openSME-compose/
-├── docker-compose.yml          # Core: Traefik, PostgreSQL, Redis, Memcached, Portal
+├── docker-compose.yml          # Core: Traefik, PostgreSQL, Redis, Memcached, Portal, Public Calendar (calrs + Radicale)
 ├── .env.example                # All configuration variables
 ├── Makefile                    # Test pyramid + tier-based deployment
 ├── traefik/
@@ -734,7 +734,7 @@ openSME-compose/
 │   ├── store.yml               # Overlay: RaisFast e-commerce (--profile store)
 │   ├── ai.yml                  # Overlay: llama.cpp AI backend (--profile ai)
 │   ├── limesurvey.yml          # Overlay: LimeSurvey surveys (--profile surveys)
-│   ├── calendar.yml            # Overlay: Public booking calendar — calrs + dedicated Radicale CalDAV (--profile calendar)
+│   ├── calendar.yml            # [deprecated shim] adopted into docker-compose.yml — empty compat file (1 of 1)
 │   ├── synapse-setup.sh        # Synapse homeserver.yaml generator (POSIX-sh)
 │   └── cryptpad-config/        # CryptPad configuration
 ├── monitoring/
@@ -1318,13 +1318,16 @@ All configuration via `.env`. See [`.env.example`](.env.example) for the full li
 > the template by hand. For existing installs, re-run it or rotate the values manually
 > (`openssl rand -base64 24`).
 
-#### Public Calendar (`--profile calendar`)
+#### Public Calendar
 
-Opt-in booking calendar (`services/calendar.yml`): calrs (public booking
-page + dashboard, edge-routed at `CALENDAR_DOMAIN`) backed by a dedicated
-internal-only Radicale CalDAV store. **The public booking page exposes
-only free/busy slots — never event titles, attendees or staff calendars;
-bookings live only in the dedicated Radicale calendar.** Booking page:
+Adopted into the core stack (2026-11-07): the public booking calendar
+(`calendar` + `calendar-radicale` services in `docker-compose.yml`) is
+always included — no overlay, no `--profile calendar`. calrs provides
+the public booking page + dashboard, edge-routed at `CALENDAR_DOMAIN`,
+backed by a dedicated internal-only Radicale CalDAV store. **The public
+booking page exposes only free/busy slots — never event titles,
+attendees or staff calendars; bookings live only in the dedicated
+Radicale calendar.** Booking page:
 `https://<CALENDAR_DOMAIN>/u/<admin-user>/vc`. See
 [`docs/calendar.md`](docs/calendar.md) for the full deploy + privacy
 contract. Env keys (placeholders only — set in `.env`):

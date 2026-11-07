@@ -1,6 +1,8 @@
 # Public Calendar (calrs booking + dedicated Radicale CalDAV)
 
-Status: shipped (overlay `services/calendar.yml`, profile `calendar`).
+Status: adopted into the core stack (`docker-compose.yml` services
+`calendar` + `calendar-radicale`, default-included — was an opt-in overlay
+`services/calendar.yml`/profile `calendar`).
 
 This is the **public booking calendar** for openSME: a self-hosted
 Cal.com-like booking page that lets external guests pick a free slot and
@@ -20,7 +22,9 @@ book a video-consultation session. It is built from two compose services:
 > **only** public bookings and is the single CalDAV source calrs is pointed
 > at. See the [privacy contract](#privacy-contract) below.
 
-Operator deep-dive for the compose overlay: [`services/calendar.yml`](../services/calendar.yml).
+Operator deep-dive: the service definitions live in
+[`docker-compose.yml`](../docker-compose.yml) (`calendar` + `calendar-radicale`);
+[`services/calendar.yml`](../services/calendar.yml) is a deprecated empty shim.
 Image pin note + build recipe: [`images/calrs/README.md`](../images/calrs/README.md).
 Provisioning script: [`scripts/calendar-setup.sh`](../scripts/calendar-setup.sh).
 Also wired into the suite: a portal tile (contracts/tiles.yml → `CALENDAR_URL`) so staff
@@ -142,17 +146,18 @@ is **opt-in** via the `calendar` profile.
    | `CALRS_OIDC_CLIENT_ID` | *(empty)* | OIDC client id from `zitadel-client.sh --app calendar` |
    | `CALRS_OIDC_CLIENT_SECRET` | *(empty)* | OIDC client secret |
 
-4. **Add the overlay and the profile**, then bring the two services up:
+4. **Bring the two services up** (they are part of the main compose —
+   no overlay file, no profile needed):
 
    ```bash
    cd /opt/opensme-compose/compose
-   # add services/calendar.yml to your active COMPOSE_FILE chain, e.g.:
-   export COMPOSE_FILE="docker-compose.yml:idm/zitadel.yml:services/calendar.yml"
-   export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES:}calendar"
    docker compose up -d calendar calendar-radicale
    ```
 
-   (You can also start it with `docker compose --profile calendar up -d`.)
+   > **Legacy note (adoption 2026-11-07):** chains that still reference
+   > `services/calendar.yml` via `COMPOSE_FILE` or pass `--profile calendar`
+   > continue to work — that file is now an empty compatibility shim that
+   > merges nothing. You can drop both from your deploy config.
 
 5. **Provision** — run the idempotent setup script, which seeds the
    Radicale htpasswd, creates the calrs admin, points calrs at its

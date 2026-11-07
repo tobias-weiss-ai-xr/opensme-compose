@@ -365,8 +365,8 @@ case "$APP_KIND" in
     # calrs (public booking calendar) upstream OIDC routing, verified
     # against the pinned v1.6.0 source (src/auth.rs auth_router):
     # /auth/oidc/login starts the flow, /auth/oidc/callback receives
-    # the code — services/calendar.yml sets CALRS_OIDC_REDIRECT_URI to
-    # the same path. The issuer is CALRS_OIDC_ISSUER=https://auth.<domain>
+    # the code — the core compose (docker-compose.yml) sets
+    # CALRS_OIDC_REDIRECT_URI to the same path. The issuer is CALRS_OIDC_ISSUER=https://auth.<domain>
     # (operator-set in .env); calrs stores the client via the dashboard
     # auth_config and its openidconnect-rs RP authenticates
     # confidential + PKCE, so the default BASIC auth method is right.

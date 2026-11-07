@@ -89,15 +89,15 @@ COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f profiles/soho.yml
 # make up produced a headless stack, "no port open". Hosts running their own
 # system-Traefik can still opt out with COMPOSE_PROFILES="" on the CLI.
 COMPOSE_PROFILES := --profile standalone
-TIER_SERVICES := core (6 containers: Traefik, PG, Redis, Memcached, Portal, Zitadel)
+TIER_SERVICES := core (8 containers: Traefik, PG, Redis, Memcached, Portal, Zitadel + Public Calendar calrs/Radicale)
 else ifeq ($(PROFILE),small)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f services/paperless.yml -f profiles/small.yml
 COMPOSE_PROFILES := --profile standalone --profile paperless
-TIER_SERVICES := core + office + paperless (12 containers)
+TIER_SERVICES := core + office + paperless + calendar (14 containers)
 else ifeq ($(PROFILE),medium)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f mail/stalwart.yml -f mail/sogo.yml -f services/paperless.yml -f profiles/medium.yml
 COMPOSE_PROFILES := --profile standalone --profile paperless
-TIER_SERVICES := core + office + mail + paperless (14 containers)
+TIER_SERVICES := core + office + mail + paperless + calendar (16 containers)
 else ifeq ($(PROFILE),custom)
 COMPOSE_FILES := $(COMPOSE_FILE)
 COMPOSE_PROFILES :=

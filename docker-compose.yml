@@ -510,6 +510,127 @@ services:
           cpus: "0.1"
           memory: 64M
 
+  # ═══════════════════════════════════════════════════════════════
+  # Public Calendar (adopted into the core stack: calrs booking +
+  # dedicated Radicale CalDAV) — was opt-in overlay services/calendar.yml,
+  # adopted 2026-11-07 as a first-class part of openSME-compose.
+  # calrs: self-hosted booking calendar (CalDAV-backed availability,
+  # booking pages, video-consultation slots) — edge-routed at
+  # calendar.<domain>. calendar-radicale: its dedicated CalDAV store,
+  # INTERNAL-ONLY (no Traefik labels) — calrs reaches it over
+  # opensme-net at http://calendar-radicale:5232/; never exposed at the
+  # edge. Bootstrap: scripts/calendar-setup.sh seeds the Radicale
+  # htpasswd (RADICALE_USER/RADICALE_PASSWORD) and brings the stack up.
+  # Register the calrs admin in the web UI — the FIRST registered user
+  # becomes admin (CALRS_ADMIN_EMAIL / CALRS_ADMIN_PASSWORD). The calrs
+  # image is ALWAYS built from the pinned upstream tag at deploy time
+  # (images/calrs/README.md).
+  # ═══════════════════════════════════════════════════════════════
+  calendar:
+    <<: *service-defaults
+    # local build from the pinned upstream v1.6.0 tag (no registry
+    # image exists; build from the upstream checkout, images/calrs is
+    # the pinned Dockerfile reference + curl delta)
+    image: calrs:${CALRS_IMAGE_TAG:-1.6.0}
+    build:
+      context: ./images/calrs
+    container_name: opensme-calendar
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # real calrs env (upstream README) — absolute base for booking
+      # links rendered in pages/emails; must match the public host
+      CALRS_BASE_URL: https://${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}
+      # single-file SQLite home (WAL mode, zero external deps)
+      CALRS_DATA_DIR: /var/lib/calrs
+      # OIDC SSO block — documented passthrough, kept OFF unless set
+      # (blank = local-auth only). calrs 1.6.0 stores its OIDC client
+      # via the admin panel (auth_config); these envs exist so a
+      # patched/bumped calrs can pick them up without a compose edit.
+      CALRS_OIDC_ISSUER: ${CALRS_OIDC_ISSUER:-}
+      CALRS_OIDC_CLIENT_ID: ${CALRS_OIDC_CLIENT_ID:-}
+      CALRS_OIDC_CLIENT_SECRET: ${CALRS_OIDC_CLIENT_SECRET:-}
+      CALRS_OIDC_REDIRECT_URI: https://${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}/auth/oidc/callback
+    depends_on:
+      calendar-radicale:
+        condition: service_healthy
+    volumes:
+      - calrs-data:/var/lib/calrs
+    networks:
+      - opensme-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.calendar.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.calendar.tls=true"
+      - "traefik.http.routers.calendar.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.calendar.entrypoints=websecure"
+      - "traefik.http.services.calendar.loadbalancer.server.port=3000"
+    healthcheck:
+      # curl is baked into the vendored image (images/calrs delta);
+      # calrs has no /health route — any HTTP status proves the process
+      # answers (no -f on purpose)
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "--max-time", "5", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+  calendar-radicale:
+    <<: *service-defaults
+    image: tomsquest/docker-radicale:${RADICALE_IMAGE_TAG:-3.9.0.0}
+    container_name: opensme-calendar-radicale
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # tomsquest image config mechanism: every RADICALE_CONFIG_<SECTION>_<KEY>
+      # var is merged into /config/config by the image entrypoint at start.
+      # Internal-only CalDAV store for calrs (booking login, htpasswd auth).
+      RADICALE_CONFIG_AUTH_TYPE: htpasswd
+      # /config/users is seeded by scripts/calendar-setup.sh from
+      # RADICALE_USER/RADICALE_PASSWORD (the booking CalDAV login)
+      RADICALE_CONFIG_AUTH_HTPASSWD_FILENAME: /config/users
+      # switch to plain if scripts/calendar-setup.sh had no htpasswd(1)
+      RADICALE_CONFIG_AUTH_HTPASSWD_ENCRYPTION: ${RADICALE_AUTH_HTPASSWD_ENCRYPTION:-bcrypt}
+      # collection root inside the radicale-data volume; per-user
+      # auto-creation on first authenticated DAV request is Radicale 3
+      # default behavior
+      RADICALE_CONFIG_STORAGE_FILESYSTEM_FOLDER: /data/collections
+    volumes:
+      # image default config is copied into the empty named volume on
+      # first mount; the env block above rewrites it at every start
+      - radicale-config:/config
+      - radicale-data:/data
+    networks:
+      - opensme-net
+    labels:
+      # NO Traefik labels on purpose: internal-only store, reached by
+      # calrs over opensme-net at http://calendar-radicale:5232/
+      - "com.centurylinklabs.watchtower.enable=false"
+    healthcheck:
+      # the image ships curl; no --fail — with htpasswd auth the root
+      # path answers 401 and ANY HTTP status proves the server is up
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "--max-time", "5", "http://127.0.0.1:5232/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
 networks:
   opensme-net:
     name: opensme-net
@@ -520,3 +641,6 @@ volumes:
   postgres-data:
   redis-data:
   portal-data:
+  calrs-data:
+  radicale-config:
+  radicale-data:

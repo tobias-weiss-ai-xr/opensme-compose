@@ -3,7 +3,8 @@
 # calendar-setup.sh — IDEMPOTENT bootstrap of the calendar stack
 # (calrs public booking + its dedicated Radicale CalDAV store)
 #
-# Brings up services/calendar.yml and seeds every piece of state the
+# Brings up the adopted calendar services (calendar + calendar-radicale
+# in the main docker-compose.yml) and seeds every piece of state the
 # compose overlay cannot express declaratively:
 #
 #   1. Radicale htpasswd  — the booking CalDAV login (RADICALE_USER /
@@ -57,9 +58,12 @@
 #     lowercased email local part with '.'->'-' (src/auth.rs
 #     generate_username).
 #
-# Required compose chain (COMPOSE_FILE env / --compose-file override is
-# honored; services/calendar.yml is appended when missing):
-#   docker-compose.yml:services/calendar.yml
+# Adopted into the core stack (2026-11-07): the calendar services
+# (calendar + calendar-radicale) live in the main docker-compose.yml
+# and are always included — no overlay, no --profile needed. This
+# script targets the main compose (COMPOSE_FILE env / --compose-file
+# override is honored; default docker-compose.yml). A legacy chain that
+# still lists services/calendar.yml parses fine (it's an empty shim).
 #
 # Secrets: RADICALE_PASSWORD / CALRS_ADMIN_PASSWORD come from the env
 # file / environment, are piped on stdin and are NEVER echoed, logged
@@ -69,7 +73,7 @@
 # Usage:
 #   scripts/calendar-setup.sh                                  # .env in repo root
 #   scripts/calendar-setup.sh --env-file /path/to/env          # alternate env file
-#   scripts/calendar-setup.sh --compose-file "docker-compose.yml:services/calendar.yml"
+#   scripts/calendar-setup.sh --compose-file "docker-compose.yml"
 #   scripts/calendar-setup.sh --full                           # force a full re-sync
 #   scripts/calendar-setup.sh --help
 #
@@ -96,15 +100,15 @@ usage() {
 Usage: scripts/calendar-setup.sh [options]
 
 Idempotent bootstrap of the calendar stack (calrs + calendar-radicale
-from services/calendar.yml): seeds the Radicale htpasswd user, creates
+from the core stack): seeds the Radicale htpasswd user, creates
 the calrs admin, connects the CalDAV source, runs a full sync, creates
 the public 'Video Consultation' event type and prints the booking URL.
 
 Options:
   --env-file PATH      env file to load (default: .env in the repo root)
   --compose-file LIST  colon-separated compose chain (default: $COMPOSE_FILE
-                       or docker-compose.yml:services/calendar.yml;
-                       services/calendar.yml is appended when missing)
+                       or docker-compose.yml — the calendar services live in
+                       the main compose since 2026-11-07 adoption)
   --full               force `calrs sync --full` even when unchanged
   --help, -h           show this help
 
@@ -153,18 +157,12 @@ set -a
 source "$ENV_FILE"
 set +a
 
-# ── compose chain (COMPOSE_FILE override supported; overlay appended) ──────
-COMPOSE_FILE="${COMPOSE_FILE_OVERRIDE:-${COMPOSE_FILE_FROM_ENV:-${COMPOSE_FILE:-docker-compose.yml:services/calendar.yml}}}"
+# ── compose chain (COMPOSE_FILE override supported) ──────────────────────
+COMPOSE_FILE="${COMPOSE_FILE_OVERRIDE:-${COMPOSE_FILE_FROM_ENV:-docker-compose.yml}}"
 COMPOSE_FILE="${COMPOSE_FILE%$'\r'}"
-# match the overlay as a path segment: relative (services/calendar.yml) or
-# absolute (/…/services/calendar.yml)
-case ":${COMPOSE_FILE}:" in
-  *:services/calendar.yml:*|*:*/services/calendar.yml:*) ;;
-  *) COMPOSE_FILE="${COMPOSE_FILE}:services/calendar.yml" ;;
-esac
 export COMPOSE_FILE
 
-COMPOSE_ARGS=(--profile calendar --env-file "$ENV_FILE")
+COMPOSE_ARGS=(--env-file "$ENV_FILE")
 IFS=':' read -r -a COMPOSE_FILES <<< "$COMPOSE_FILE"
 for f in "${COMPOSE_FILES[@]}"; do
   if [[ -n "$f" ]]; then
