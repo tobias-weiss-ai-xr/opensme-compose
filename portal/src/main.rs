@@ -37,6 +37,7 @@ struct AppConfig {
     notes_url: String,
     surveys_url: String,
     calendar_url: String,
+    vc_url: String,
     portal_domain: String,
     opensme_domain: String,
     announcements: Arc<Vec<Announcement>>,
@@ -799,6 +800,16 @@ fn get_services(config: &AppConfig) -> Vec<Service> {
             name: "Calendar".into(),
             description: "Video consultations — book a slot".into(),
             url: config.calendar_url.clone(),
+        });
+    }
+
+    // VC (LiveKit meetings) — only if explicitly configured (not empty)
+    if !config.vc_url.is_empty() {
+        services.push(Service {
+            id: "vc".into(),
+            name: "Meet".into(),
+            description: "Video meetings — self-hosted".into(),
+            url: config.vc_url.clone(),
         });
     }
 
@@ -2294,6 +2305,7 @@ fn load_config() -> Arc<AppConfig> {
         notes_url: load_env("NOTES_URL", ""),
         surveys_url: load_env("SURVEYS_URL", ""),
         calendar_url: load_env("CALENDAR_URL", ""),
+        vc_url: load_env("VC_URL", ""),
         announcements,
         ai,
         // One shared client: connection pooling, 30s default timeout.
@@ -2387,6 +2399,7 @@ mod tests {
             notes_url: String::new(),
             surveys_url: String::new(),
             calendar_url: String::new(),
+            vc_url: String::new(),
             portal_domain: "portal.example".into(),
             opensme_domain: "example".into(),
             announcements: Arc::new(parse_announcements(announcements)),
@@ -2539,10 +2552,11 @@ mod tests {
             notes_url: "https://notes.example".into(),
             surveys_url: "https://grist.example".into(),
             calendar_url: "https://calendar.example".into(),
+            vc_url: "https://vc.example".into(),
             ..cfg_with("", None, "")
         };
         let services = get_services(&c);
-        assert_eq!(services.len(), 12, "all twelve catalog cards configured");
+        assert_eq!(services.len(), 13, "all thirteen catalog cards configured");
 
         let ids: Vec<&str> = services.iter().map(|s| s.id.as_str()).collect();
         assert!(

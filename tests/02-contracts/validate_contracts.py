@@ -152,11 +152,22 @@ def check_on_network(result, rule, loader):
             result.fail(f"{svc_name}: not on {network} (found: {nets})")
 
 
+# Services allowed to run on the host network. vc-livekit is LiveKit's
+# recommended docker mode and REQUIRED on OpenVZ: UDP into bridge/veth
+# containers is dead there (no DNAT in the CT kernel), so bridge mode
+# cannot carry WebRTC media. The SFU binds 7880/7881/7882 in the host
+# netns; the fleet edge routes signaling via a static file service.
+HOST_NETWORK_OK = {"vc-livekit"}
+
+
 def check_no_host_network(result, rule, loader):
-    """Check that no service uses network_mode: host."""
+    """Check that no service uses network_mode: host (except HOST_NETWORK_OK)."""
     for svc_name, svc in loader.services.items():
         if is_host_network(svc["data"]):
-            result.fail(f"{svc_name}: uses network_mode: host")
+            if svc_name in HOST_NETWORK_OK:
+                result.ok(f"{svc_name}: host network ok (sanctioned, see HOST_NETWORK_OK)")
+            else:
+                result.fail(f"{svc_name}: uses network_mode: host")
         else:
             result.ok(f"{svc_name}: bridge network")
 

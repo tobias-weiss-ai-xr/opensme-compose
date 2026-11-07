@@ -81,11 +81,19 @@ def check_no_privileged(result, loader):
             result.ok(f"{svc_name}: not privileged")
 
 
+# vc-livekit is sanctioned on the host network (see HOST_NETWORK_OK in
+# tests/02-contracts/validate_contracts.py — OpenVZ UDP-into-bridge quirk).
+HOST_NETWORK_OK = {"vc-livekit"}
+
+
 def check_no_host_network(result, loader):
-    """No service should use network_mode: host."""
+    """No service should use network_mode: host (except HOST_NETWORK_OK)."""
     for svc_name, svc in loader.services.items():
         if is_host_network(svc["data"]):
-            result.fail(f"{svc_name}: uses network_mode: host")
+            if svc_name in HOST_NETWORK_OK:
+                result.ok(f"{svc_name}: host network ok (sanctioned, see HOST_NETWORK_OK)")
+            else:
+                result.fail(f"{svc_name}: uses network_mode: host")
         else:
             result.ok(f"{svc_name}: bridge network")
 

@@ -373,6 +373,7 @@ services:
       NOTES_URL: ${NOTES_URL:-}
       SURVEYS_URL: ${SURVEYS_URL:-}
       CALENDAR_URL: ${CALENDAR_URL:-}
+      VC_URL: ${VC_URL:-}
       PORTAL_ANNOUNCEMENTS: ${PORTAL_ANNOUNCEMENTS:-}
       HTTPS_PROXY: ${PORTAL_HTTPS_PROXY:-}
       PORTAL_NO_PROXY: ${PORTAL_NO_PROXY:-}
@@ -473,6 +474,7 @@ services:
       NOTES_URL: ${NOTES_URL:-}
       SURVEYS_URL: ${SURVEYS_URL:-}
       CALENDAR_URL: ${CALENDAR_URL:-}
+      VC_URL: ${VC_URL:-}
       PORTAL_ANNOUNCEMENTS: ${PORTAL_ANNOUNCEMENTS:-}
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
       AI_API_URL: ${AI_API_URL:-}
@@ -631,6 +633,126 @@ services:
         reservations:
           cpus: "0.1"
           memory: 128M
+
+  # ── VC (LiveKit) ────────────────────────────────────────────────────
+  # Self-hosted video meetings: the SFU below + the minimal token-mint/
+  # room UI (vc-room). Public surface: $VC_DOMAIN (room UI + /rtc and
+  # /twirp signaling via the fleet edge). Media uses the single-port
+  # UDP mux (rtc.udp_port — port_range_* intentionally unset) and the
+  # ICE/TCP fallback so only TWO host ports are ever opened. The
+  # container cannot do STUN (no runtime egress): NODE_IP advertises
+  # the public IP deterministically instead of use_external_ip.
+  # HOST NETWORKING (LiveKit's recommended docker mode): this host is
+  # OpenVZ — UDP into bridge/veth containers is dead (same kernel quirk
+  # as host→container TCP flakiness) and the nat table has no DNAT
+  # support, so bridge mode cannot carry WebRTC media. On the host
+  # netns the SFU binds 7880/7881/7882 directly; publish them in the
+  # host firewall (ufw allow 7881/tcp, 7882/udp). Signaling rides the
+  # edge via a static traefik file service → http://127.0.0.1:7880.
+  vc-livekit:
+    <<: *service-defaults
+    image: livekit/livekit-server:${LIVEKIT_IMAGE_TAG:-v1.13.11}
+    container_name: opensme-vc-livekit
+    restart: unless-stopped
+    profiles: ["vc"]
+    # host netns: 7880 (signaling, loopback-only via edge), 7881/tcp
+    # (ICE fallback), 7882/udp (media mux) — no docker port publishing
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # signaling/API — behind the TLS-terminating edge (no LB needed,
+      # single node); /rtc + /twirp are proxied, everything else isn't
+      LIVEKIT_CONFIG: |
+        port: 7880
+        log_level: info
+        rtc:
+          tcp_port: ${VC_TCP_PORT:-7881}
+          udp_port: ${VC_UDP_PORT:-7882}
+          use_external_ip: false
+        keys:
+          ${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
+      # no container egress -> STUN is unreachable; pin the advertised
+      # IP instead (CLI flag --node-ip has the NODE_IP env form). With
+      # host networking the public IP is visible on the interface, but
+      # pinning keeps the advertised address deterministic.
+      NODE_IP: ${VC_PUBLIC_IP:?set VC_PUBLIC_IP}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+      # NO traefik docker labels on purpose: host-networked containers
+      # are routed from the fleet edge via a static file service
+      # (dynamic/routers.yml -> http://127.0.0.1:7880), same file-router
+      # pattern as the calendar/vc edge. Repo-local traefik users: point
+      # your edge at 127.0.0.1:${VC_TCP_PORT... port 7880} similarly.
+    healthcheck:
+      # image ships busybox/wget; the signaling port answers a plain
+      # `GET /` with 200 "OK" — no auth, no special route needed
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  vc-room:
+    <<: *service-defaults
+    # local build — our minimal token-mint + room UI (no registry image)
+    image: vc-room:${VC_ROOM_IMAGE_TAG:-1.0.0}
+    build:
+      context: ./images/vc-room
+    container_name: opensme-vc-room
+    restart: unless-stopped
+    profiles: ["vc"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # flask needs no root; python-slim ships setuid binaries which the
+    # static suite flags against cap_drop: ALL — run unprivileged instead
+    user: "1000:1000"
+    depends_on:
+      vc-livekit:
+        condition: service_started
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # browser-facing signaling base (public, TLS at the edge) — NO
+      # /rtc path: livekit-client appends /rtc itself
+      LIVEKIT_URL: wss://${VC_DOMAIN:-vc.opensme.graphwiz.ai}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}
+      VC_TITLE: ${VC_TITLE:-openSME Meet}
+    networks:
+      - opensme-net
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "traefik.enable=true"
+      - "traefik.http.services.vc-room.loadbalancer.server.port=8090"
+      - "traefik.http.routers.vc-room.rule=Host(`${VC_DOMAIN:-vc.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.vc-room.entrypoints=websecure"
+      - "traefik.http.routers.vc-room.tls=true"
+      - "traefik.http.routers.vc-room.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.vc-room.priority=10000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8090/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
 
 networks:
   opensme-net:

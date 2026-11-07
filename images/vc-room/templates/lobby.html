@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ title }}</title>
+  <style>
+    :root { --bg:#f5f6f8; --card:#fff; --text:#1c2430; --dim:#5a6472;
+            --accent:#2f6fed; --accent-hover:#2559c4; --border:#dfe3ea; --radius:14px; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#12161c; --card:#1a2028; --text:#e8ecf2; --dim:#98a2b3;
+              --accent:#5b8cff; --accent-hover:#7aa2ff; --border:#2a323e; }
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text);
+           min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 36px 32px; width: 100%;
+            max-width: 420px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    p.sub { color: var(--dim); font-size: 14px; margin-bottom: 22px; }
+    label { display: block; font-size: 13px; font-weight: 600;
+            color: var(--dim); margin: 14px 0 6px; }
+    input { width: 100%; padding: 11px 13px; font-size: 15px;
+            border: 1px solid var(--border); border-radius: 10px;
+            background: var(--bg); color: var(--text); outline: none; }
+    input:focus { border-color: var(--accent); }
+    button { width: 100%; margin-top: 20px; padding: 12px; font-size: 15px;
+             font-weight: 600; color: #fff; background: var(--accent);
+             border: none; border-radius: 999px; cursor: pointer; }
+    button:hover { background: var(--accent-hover); }
+    .brand { text-align: center; margin-top: 18px; color: var(--dim); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{ title }}</h1>
+    <p class="sub">Start or join a video room. Share the room link with your guests.</p>
+    <form action="/join" method="get" onsubmit="return go(event)">
+      <label for="room">Room name</label>
+      <input id="room" name="room" required maxlength="64"
+             pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" autocomplete="off"
+             placeholder="e.g. weekly-standup">
+      <label for="name">Your name</label>
+      <input id="name" name="name" maxlength="40" autocomplete="off"
+             placeholder="How others will see you">
+      <button type="submit">Enter room</button>
+    </form>
+    <div class="brand">openSME · self-hosted video (LiveKit)</div>
+  </div>
+  <script>
+    function go(ev) {
+      ev.preventDefault();
+      const room = document.getElementById('room').value.trim();
+      const name = encodeURIComponent(document.getElementById('name').value.trim());
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room)) return false;
+      window.location.href = '/room/' + encodeURIComponent(room) + '?name=' + name;
+      return false;
+    }
+  </script>
+</body>
+</html>

@@ -134,8 +134,18 @@ catalog:
     service: calendar
     router: calendar
 
+  - id: vc
+    tile: Meet
+    url_env: VC_URL
+    domain_env: VC_DOMAIN
+    host_prefix: vc
+    service: vc-room
+    router: vc-room
+
 excluded:
   # Infrastructure surfaces — no end-user journey starts here.
+  - id: vc-livekit   # media plane behind the vc tile — signaling is
+                     # path-routed (/rtc, /twirp) on the same vc host
   - id: portal       # the catalog itself
   - id: portal-web   # the catalog itself (Next.js frontend in front of `portal`)
   - id: traefik      # edge router (dashboard)
