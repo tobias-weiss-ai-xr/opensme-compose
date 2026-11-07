@@ -23,6 +23,9 @@
 #              → SOGO_OIDC_CLIENT_ID/SECRET
 #   operaton   bpm.<domain>/login/oauth2/code/operaton (Operaton webapps,
 #              native spring-security OAuth2) → OPERATON_OIDC_CLIENT_ID/SECRET
+#   calendar   calendar.<domain>/auth/oidc/callback (calrs booking; the
+#              upstream OIDC routes are /auth/oidc/login + callback)
+#              → CALRS_OIDC_CLIENT_ID/SECRET
 #
 # SECRET-DRIVEN: Zitadel's Management API takes no client_id / client_secret
 # input — it mints both and returns them (verified against the v4.19 proto;
@@ -101,9 +104,9 @@ Modes:
 Options:
   --app NAME         which client to ensure/remove: opencloud (default),
                      portal, notes, synapse, ticketing, sogo, paperless,
-                     operaton or invoiceninja — selects the redirect URIs and
-                     the .env keys the Zitadel-issued credentials are
-                     persisted under
+                     operaton, invoiceninja or calendar — selects the
+                     redirect URIs and the .env keys the Zitadel-issued
+                     credentials are persisted under
   --dry-run          print the plan and the resolved configuration, change nothing
   --idp-url URL      override the IdP base URL (default: $IDP_URL from .env,
                      else https://${ZITADEL_DOMAIN})
@@ -132,7 +135,7 @@ while [[ $# -gt 0 ]]; do
     --remove)   MODE=remove; shift ;;
     --idp-url)  IDP_URL_OVERRIDE="${2:-}"; shift 2 ;;
     --app)
-      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja)"; exit 1; }
+      [[ -n "${2:-}" ]] || { err "--app requires a value (opencloud|portal|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja|calendar)"; exit 1; }
       APP_KIND="$2"; shift 2 ;;
     --help|-h)  usage; exit 0 ;;
     *)          err "Unknown option: $1 (see --help)"; exit 1 ;;
@@ -352,8 +355,27 @@ case "$APP_KIND" in
     base_paths=("/auth/oidc")
     USE_POST_AUTH=1
     ;;
+  calendar)
+    APP_PROJECT="opensme"
+    APP_NAME="opensme-calendar"
+    CLIENT_ID_KEY="CALRS_OIDC_CLIENT_ID"
+    CLIENT_SECRET_KEY="CALRS_OIDC_CLIENT_SECRET"
+    SECRET_ALIAS_KEY=""
+    TOKEN_TYPE="${ZITADEL_APP_TOKEN_TYPE:-OIDC_TOKEN_TYPE_JWT}"
+    # calrs (public booking calendar) upstream OIDC routing, verified
+    # against the pinned v1.6.0 source (src/auth.rs auth_router):
+    # /auth/oidc/login starts the flow, /auth/oidc/callback receives
+    # the code — services/calendar.yml sets CALRS_OIDC_REDIRECT_URI to
+    # the same path. The issuer is CALRS_OIDC_ISSUER=https://auth.<domain>
+    # (operator-set in .env); calrs stores the client via the dashboard
+    # auth_config and its openidconnect-rs RP authenticates
+    # confidential + PKCE, so the default BASIC auth method is right.
+    app_domain="$(env_get CALENDAR_DOMAIN "calendar.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")"
+    CLIENT_ID_LABEL="$(env_get CALRS_OIDC_CLIENT_ID opensme-calendar)"
+    base_paths=("/auth/oidc/callback")
+    ;;
   *)
-    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja)"
+    err "Unknown --app '$APP_KIND' (opencloud|notes|synapse|ticketing|sogo|paperless|operaton|invoiceninja|calendar)"
     exit 1
     ;;
 esac
