@@ -91,10 +91,14 @@ def main():
         failures.append("intercom.rs no longer honors INTERCOM_ATTACHMENT_HOSTS")
     # No undeclared file-content routes: portal routes are navigation/API
     # only. Declared exceptions live in contracts/interop.yml
-    # (share_links.picked_file_routes — the picked-file local store).
+    # (share_links.picked_file_routes — the picked-file local store;
+    # share_links.cloud_picker_routes — browse/upload/mkdir/share-link
+    # for the "aus der Cloud" picker; uploads are the accepted
+    # raw-body exception, downloads never pass through the portal).
     main_src = (ROOT / "portal" / "src" / "main.rs").read_text()
     routes = re.findall(r'\.route\(\s*"([^"]+)"', main_src, re.DOTALL)
     declared = [r.rstrip("/") for r in shares.get("picked_file_routes", [])]
+    declared += [r.rstrip("/") for r in shares.get("cloud_picker_routes", [])]
 
     def is_declared(route: str) -> bool:
         return any(route == d or route.startswith(d + "/") for d in declared)
