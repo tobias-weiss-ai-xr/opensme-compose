@@ -870,7 +870,7 @@ openSME-compose/
 
 ## Development
 
-The Portal is a Rust application using [Axum](https://axum.rs/). It provides the landing page, ⌘K fast-switch, optional service cards, AI assistant, RSS feeds, and a built-in intercom for short internal notes with cloud-attachment metadata (in-memory store, capped at 50 messages).
+The Portal is a Rust application using [Axum](https://axum.rs/). It provides the landing page, ⌘K fast-switch, optional service cards, AI assistant, RSS feeds, and a built-in intercom for short internal notes with cloud-attachment metadata (in-memory store, capped at 50 messages). Each note carries a severity `kind` — `note` (the default, plain list entry) or `info`/`warn`, which render as INFO/WARN banners in both the SSR view and the JS client. The client shows an unread badge ("N neu") on the Notizen tab, tracked purely per browser via `localStorage` (last-read message id — no server-side read-state). Any signed-in member can moderate: `DELETE /api/intercom/{id}` removes a note (204 on success, 404 for unknown ids).
 
 ```bash
 cd portal
@@ -886,8 +886,15 @@ Environment variables for local development:
 | `OPENCLOUD_URL` | `https://cloud.opensme.graphwiz.ai` | OpenCloud link |
 | `MAIL_URL` | *(empty — card hidden)* | Webmail link |
 | `PORTAL_HTTPS_PROXY` | *(empty — direct egress)* | HTTP CONNECT proxy for the portal's outbound feed fetches — only for egress-restricted hosts (e.g. OpenVZ without working MASQUERADE): point at a local proxy reachable from the docker bridges |
-| `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400) |
+| `INTERCOM_ATTACHMENT_HOSTS` | `cloud.<OPENSME_DOMAIN>`, `webmail.<OPENSME_DOMAIN>`, host of `OPENCLOUD_URL`, host of `SOGO6_DOMAIN` | Comma-separated allowlist of hosts for intercom attachment URLs (attachment URLs outside this list are rejected with 400). When unset, **all** derived defaults above are accepted — including the SOGo6 WebDAV cloud storage hosts (`webmail.<OPENSME_DOMAIN>` plus whatever `SOGO6_DOMAIN` points at), so notes can link files like `https://webmail.<OPENSME_DOMAIN>/SOGo/dav/…`. When set, the env value replaces the derived defaults entirely |
+| `SOGO6_DOMAIN` | *(empty — no extra host)* | SOGo6 webmail origin (e.g. `https://webmail.home.opensme.graphwiz.ai`, scheme optional) — its host joins the intercom attachment-allowlist defaults above so SOGo6 WebDAV cloud-storage links stay shareable; no other effect on the portal |
 | `INTERCOM_ALLOW_HTTP` | `false` | Dev mode: allow http:// attachment URLs — NEVER enable in production (SSRF risk) |
+
+Intercom API (all routes session-gated): `GET /api/intercom` lists messages,
+`POST /api/intercom` creates one from JSON `{text, kind?, attachment_url?}` —
+`kind` is optional and must be `note` (default when omitted), `info` or `warn`
+(anything else → 400), and `DELETE /api/intercom/{id}` deletes a message
+(204 on success, 404 for unknown ids).
 
 Domain, service-card, announcement and AI variables are documented once, in
 [Configuration](#configuration) — that table is the single source of truth.
