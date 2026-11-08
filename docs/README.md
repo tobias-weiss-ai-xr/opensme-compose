@@ -37,7 +37,7 @@ the deep dives.
 
 | Document | What it covers |
 |---|---|
-| [ARC42.md](ARC42.md) | Architecture in arc42 form: goals, constraints, context, building blocks, runtime, deployment, cross-cutting concepts, decisions |
+| [ARC42.md](ARC42.md) | Full arc42 architecture: goals, constraints, context, building blocks, runtime, deployment, cross-cutting concepts, decisions, quality goals, risks, glossary |
 | [AGENTIC-AI.md](AGENTIC-AI.md) | How agentic capabilities are governed: saga → epic → user story → OpenSpec capability → contract → test |
 | [audits/](audits/) | Audits of the agentic components (e.g. `dev-agent-watch.md`) |
 | [superpowers/](superpowers/) | Design notes produced while working with the pi workflows |

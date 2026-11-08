@@ -1753,7 +1753,7 @@ Start at the [documentation index](docs/README.md). The deep dives:
 | Document | Audience | What it covers |
 |---|---|---|
 | [docs/README.md](docs/README.md) | everyone | Index of all documentation, by task |
-| [Architecture (arc42)](docs/ARC42.md) | architects | Building blocks, runtime view, cross-cutting concepts |
+| [Architecture (arc42)](docs/ARC42.md) | architects | Full arc42: goals, constraints, context, building blocks, runtime, deployment, cross-cutting concepts, decisions, quality, risks, glossary |
 | [Performance &amp; efficiency](docs/PERFORMANCE.md) | operators | Per-tier tuning, reservations-first budgets, benchmark protocol |
 | [Perf baselines](docs/perf/baselines.md) | operators | Measured resource numbers per tier |
 | [E2E journeys](docs/E2E-JOURNEYS.md) | contributors | Epics + user stories, and the e2e tests that prove them |

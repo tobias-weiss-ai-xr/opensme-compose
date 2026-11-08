@@ -640,6 +640,36 @@ Skips are saga preconditions, not failures: an overlay that is not
 deployed skips its saga step visibly. A rendered tile whose edge does
 not answer is always a failure — "no tile to nowhere".
 
+## Stories — `stories.py`: the story-level epic sweep (single runner)
+
+`stories.py` is the story-level sweep: one standalone runner (same
+`Result` / skip-softly conventions as the journey scripts) that walks the
+portal, IdP and member apps as an anonymous visitor and as a signed-in
+member, pinning the behavioral contracts that make the product feel
+finished — not just "returns 200". 175 checks on the live stack
+(166 pass / 0 fail / 6 skip; skips are overlays that are not deployed).
+
+| Epic | Surface | What is pinned |
+|------|---------|----------------|
+| P1–P14 | Portal (anon + signed) | landing, health, 401-wall on protected APIs, login → 303 authorize (confidential client, plain code flow, state, **no PKCE**), bogus-state CSRF 400, callback, session introspection, **cookie flags HttpOnly+SameSite+Secure**, announcements/feeds shape, service catalog |
+| V, C, K | VC, calendar, cross-cutting | lobby→room→LiveKit signaling auth, booking→join-link interop, hardening sweep |
+| L1–L13 | Portal member area | anonymous gate, intercom validation matrix, cloud-share path validation, polls create/vote/list, revote 409, attachment host-pin, `?since=` delta, **upload round trips + traversal guards (L12/L13)** |
+| M | Exposure | `/metrics` anonymous but leak-free (route labels neutralized), management planes closed, PAT-gated served==registered contract |
+| N/W/D/O/X/A/G/I/Y | Member apps | Impress SPA, Operaton 4-hop chain, LimeSurvey `/admin` canonicalization, OpenCloud SPA + OCS gate, SOGo `/SOGo` redirect, Paperless affordance, Element `.well-known/matrix`, Zitadel discovery/JWKS/unknown-client 400 (I6), AI route gating |
+| E, S, Z | Edge / hygiene | security headers, no-defaults hygiene, edge contract |
+| **J1–J4** | **Signed-in SSO round trips** | **headless real code exchange per app (authorize capture → Zitadel v2 Session API login → callback with minted code): J1 Invoice Ninja (linked member → 200; unlinked → explicit invite-first 400), J2 Paperless (allauth confirm → dashboard + `/api/documents/` 200 for the OIDC user — default-group perms), J3 Operaton (signed webapp 200), J4 Synapse (loginToken handoff page)** |
+| T1–T2 | Mail (stalwart) | web UI served anonymously, app-tier hardening |
+
+Hosts resolve **env-var first, then the `<svc>.<portal_host>` convention with
+a reachability probe** — stale shell exports (`OPENSME_DOMAIN`, `*_URL`)
+can never misroute a journey. Run it exactly like the other journeys:
+
+```bash
+# full story sweep against the live stack (needs the PAT env, see
+# tests/README.md):
+python3 tests/05-e2e/stories.py
+```
+
 ## Agentic journeys — agent actions are decisions (AS1–AS6)
 
 > *Der Agent darf nichts alleine: jeder Schreibzugriff ist ein Draft mit
