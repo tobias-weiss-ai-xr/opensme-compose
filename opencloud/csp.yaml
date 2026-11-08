@@ -1,0 +1,55 @@
+# OpenCloud Content-Security-Policy — rendered by opencloud-entrypoint.sh
+# into /etc/opencloud/csp.yaml and consumed via PROXY_CSP_CONFIG_FILE_LOCATION.
+#
+# This is OpenCloud's upstream default csp.yaml with one deliberate delta:
+# the IdP origin (__IDP_ORIGIN__) is added to child-src / connect-src /
+# frame-src. OpenCloud web's oidc-client performs SILENT TOKEN RENEWAL via a
+# hidden iframe to the IdP; the upstream default only allows diagram.net to
+# be framed, so the IdP iframe is blocked by OpenCloud's own CSP and the app
+# sits on the loading screen forever ("silent token renewal failed ... IFrame
+# timed out"). The IdP must be frameable for that mechanism to work.
+#
+# __IDP_ORIGIN__ is substituted at container start from $OC_OIDC_ISSUER by
+# the entrypoint (the issuer is the bare origin, e.g. https://auth.example).
+# Keep the directives in sync with the fleet edge override
+# (docker-traefik/dynamic/cloud-csp.yml) — the edge Header REPLACES this
+# header when both are present.
+directives:
+  child-src:
+  - "'self'"
+  - '__IDP_ORIGIN__/'
+  connect-src:
+  - "'self'"
+  - 'blob:'
+  - '__IDP_ORIGIN__/'
+  - 'https://raw.githubusercontent.com/opencloud-eu/awesome-apps/'
+  - 'https://update.opencloud.eu/'
+  default-src:
+  - "'none'"
+  font-src:
+  - "'self'"
+  frame-ancestors:
+  - "'self'"
+  frame-src:
+  - "'self'"
+  - 'blob:'
+  - '__IDP_ORIGIN__/'
+  - 'https://embed.diagrams.net/'
+  img-src:
+  - "'self'"
+  - 'data:'
+  - 'blob:'
+  - 'https://raw.githubusercontent.com/opencloud-eu/awesome-apps/'
+  manifest-src:
+  - "'self'"
+  media-src:
+  - "'self'"
+  object-src:
+  - "'self'"
+  - 'blob:'
+  script-src:
+  - "'self'"
+  - "'unsafe-inline'"
+  style-src:
+  - "'self'"
+  - "'unsafe-inline'"

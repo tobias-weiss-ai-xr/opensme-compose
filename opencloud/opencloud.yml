@@ -62,6 +62,12 @@ services:
       - opencloud-lib:/var/lib/opencloud
       - opencloud-data:/var/lib/opencloud/data
       - ./opencloud/opencloud-entrypoint.sh:/entrypoint.sh:ro
+      # CSP template -> rendered into /etc/opencloud/csp.yaml by the
+      # entrypoint (PROXY_CSP_CONFIG_FILE_LOCATION below). Adds the IdP
+      # origin to frame-src so oidc silent-token renewal (an iframe to the
+      # IdP) is not blocked by OpenCloud's own CSP — without it the app
+      # sits on the loading screen forever.
+      - ./opencloud/csp.yaml:/etc/opencloud/csp.tpl.yaml:ro
     environment:
       OC_INSECURE: ${OC_INSECURE:-true}
       # ^ true is correct for Docker Compose — inter-service traffic
@@ -79,6 +85,11 @@ services:
       OC_IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
       OC_OIDC_ISSUER: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
       OC_OIDC_CLIENT_ID: ${OC_OIDC_CLIENT_ID:-opencloud}
+      # OpenCloud web's oidc-client performs silent-token renewal via an
+      # iframe to the IdP, which OpenCloud's DEFAULT CSP forbids (frame-src
+      # only allows diagram.net). The entrypoint renders csp.yaml with the
+      # IdP origin added to frame-src; this env makes OpenCloud use it.
+      PROXY_CSP_CONFIG_FILE_LOCATION: /etc/opencloud/csp.yaml
       # The persistent OIDC client is registered by scripts/zitadel-client.sh
       # (idempotent, first demo boot) as a PUBLIC PKCE app (auth method NONE) —
       # no client secret exists, so the script deliberately persists an EMPTY
@@ -154,7 +165,8 @@ services:
       retries: 5
       start_period: 30s
     # Static IP: /root/git/docker-traefik/dynamic/cloud-csp.yml pins
-    # cloud.home to 172.19.0.17 (CSP override via traefik file provider) — a
+    # cloud.home to 172.19.0.17 (CSP override via traefik file provider
+    # — keep its frame-src in sync with opencloud/csp.yaml) — a
     # dynamic renumber on recreate would 502 the whole cloud UI at the edge.
     networks:
       opensme-net:
