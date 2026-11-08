@@ -7,10 +7,17 @@
 #      "pending" forever (the image's CMD only starts gunicorn)
 #   2. an external CalDAV calendar subscription on the testuser's sogo6
 #      account pointing at the calrs booking store exposed at the edge:
-#        https://<CALENDAR_DOMAIN>/dav/booking/   (Radicale behind calrs,
+#        https://<CALENDAR_DOMAIN>/dav/booking/main/   (Radicale behind calrs,
 #        Traefik stripprefix /dav, Radicale's own htpasswd auth on top)
 #      Credentials: RADICALE_USER / RADICALE_PASSWORD (the booking store
 #      login — the store holds ONLY public bookings, never staff calendars).
+#
+#      NOTE the collection layout: /booking/ in Radicale is the principal
+#      calendar-home-set (a BARE collection); actual calendars live as
+#      children (scripts/calendar-setup.sh MKCALENDARs /booking/main/).
+#      The subscription must target the calendar COLLECTION href
+#      /dav/booking/main/, not the home — REPORT on the home returns an
+#      empty multistatus and the mirror sees nothing.
 #
 # Why the edge URL: sogo6's IcsFetcher is https-only and rejects private
 # IPs (SSRF guard), so the internal http://calendar-radicale:5232/ name is
@@ -19,11 +26,11 @@
 # 172.19.0.250 in docker-compose.yml for internal clients that accept IP
 # literals).
 #
-# Known limitation: sogo6's sync engine GETs the subscription URL first and
-# Radicale answers GET on a collection with 403, so the automatic ICS mirror
-# reports "Failed To Fetch ICS Calendar Feed" until sogo6 grows a REPORT-
-# based fetch. The CalDAV connection itself is verified here via PROPFIND
-# (207) through the exact URL + credentials the subscription stores.
+# Known limitation: none — sogo6 (since 1e60879) fetches CalDAV calendars
+# via REPORT calendar-query on the collection URL (Radicale answers GET on a
+# collection with 403), so the mirror sync completes against /dav/booking/main/.
+# The CalDAV connection is verified here via PROPFIND (207) through the exact
+# URL + credentials the subscription stores.
 #
 # Env (all have live defaults from /opt/opensme-compose/.env on the VPS):
 #   WEBMAIL_URL / SOGO6_URL   default https://webmail.home.opensme.graphwiz.ai
@@ -36,7 +43,7 @@ set -euo pipefail
 VPS="${VPS:-root@195.90.216.140}"
 WM="${WEBMAIL_URL:-${SOGO6_URL:-https://webmail.home.opensme.graphwiz.ai}}"
 CAL="${CALENDAR_URL:-https://calendar.home.opensme.graphwiz.ai}"
-CALDAV_URL="${CALDAV_URL:-$CAL/dav/booking/}"
+CALDAV_URL="${CALDAV_URL:-$CAL/dav/booking/main/}"
 TESTUSER_MAIL="${TESTUSER_MAIL:-testuser@opensme.local}"
 TESTUSER_PW="${E2E_TESTUSER_PASSWORD:-eval2026}"
 
@@ -76,45 +83,83 @@ ru = urllib.parse.parse_qs(urllib.parse.urlparse(authz).query)["redirect_uri"][0
 r = s.get(ru + "?" + urllib.parse.urlencode(qs, doseq=True), timeout=T, allow_redirects=True)
 h = {"Authorization": "Bearer " + r.url.split("#token=")[-1]}
 CALDAV_URL = "$CALDAV_URL"
-# NOTE: /external-calendars lists only source_type=ics; /calendars lists
-# all — match the caldav subscription there
-r = s.get(f"{WM}/api/user/v1/calendars", headers=h, timeout=T)
-cals = (r.json().get("data") or {}).get("calendars", [])
-mine = [c for c in cals if c.get("source_type") == "caldav"
-        and (c.get("sync_config") or {}).get("url") == CALDAV_URL]
+RAD_USER = "$RAD_USER"
+RAD_PW = "$RAD_PW"
+
+# The API serializers NEVER echo sync_config (credentials are create-only),
+# so URL/creds can only be repaired at the DB row. Read the source of truth
+# directly (this script runs ON the VPS; sogo6 stores it in Postgres).
+import subprocess
+
+def psql(sql: str) -> str:
+    out = subprocess.run(
+        ["docker", "exec", "opensme-sogo6-postgres", "psql", "-U", "sogo", "-d", "sogo",
+         "-tAc", sql],
+        capture_output=True, text=True, timeout=60)
+    if out.returncode != 0:
+        print("PSQL ERROR:", (out.stderr or "").strip()[:300]); sys.exit(1)
+    return out.stdout.strip()
+
+rows = psql(
+    "SELECT key, sync_config::text FROM sogo6_calendar_calendars "
+    f"WHERE user_uid='$TESTUSER_MAIL' AND source_type='caldav' ORDER BY created_at")
+
 key = None
-r = s.get(f"{WM}/api/user/v1/calendars", headers=h, timeout=T)
-allcal = [c for c in ((r.json().get("data") or {}).get("calendars", []))
-          if c.get("source_type") == "caldav"]
-if mine:
-    key = mine[0]["key"]; print("→ subscription already present:", key)
-elif allcal:
-    # stale URL (e.g. pre-edge IP literal) — repoint the first, delete dupes
-    key = allcal[0]["key"]
-    r = s.put(f"{WM}/api/user/v1/external-calendars/{key}", headers=h, timeout=T,
-              json={"sync_config": {"url": CALDAV_URL}})
-    print("→ subscription repointed to edge URL:", key, "(PUT", r.status_code, ")")
-    for dup in allcal[1:]:
-        s.delete(f"{WM}/api/user/v1/external-calendars/{dup['key']}", headers=h, timeout=T)
-        print("→ duplicate subscription removed:", dup["key"])
-else:
-    body = {"name": "calrs (Public Calendar)", "url": CALDAV_URL,
-            "source_type": "caldav", "color": "#7C3AED",
-            "username": "$RAD_USER", "password": "$RAD_PW",
-            "sync_interval_minutes": 30}
-    # create persists before the proxy surfaces a post-create fetch error
-    # (502) — re-list to learn the key; 422 means validation rejected the
-    # body, which is a real failure
-    r2 = s.get(f"{WM}/api/user/v1/calendars", headers=h, timeout=T)
-    mine = [c for c in ((r2.json().get("data") or {}).get("calendars", []))
-            if c.get("source_type") == "caldav"
-            and (c.get("sync_config") or {}).get("url") == CALDAV_URL]
-    if mine:
-        key = mine[0]["key"]; print("→ subscription created:", key)
+if rows:
+    first = rows.splitlines()[0]
+    key, cfg_json = first.split("|", 1)
+    cfg = json.loads(cfg_json)
+    need = False
+    if cfg.get("url") != CALDAV_URL:
+        print(f"→ subscription url {cfg.get('url')!r} != {CALDAV_URL!r}")
+        need = True
+    if cfg.get("username") != RAD_USER or cfg.get("password") != RAD_PW:
+        print("→ subscription credentials stale/absent (API update drops them)")
+        need = True
+    if need:
+        # preserve the sync-status bookkeeping fields; only fix url+creds+interval
+        new_cfg = {k: v for k, v in cfg.items()
+                   if k not in ("url", "username", "password", "sync_interval_minutes")}
+        new_cfg.update({"url": CALDAV_URL, "username": RAD_USER, "password": RAD_PW,
+                        "sync_interval_minutes": cfg.get("sync_interval_minutes", 30)})
+        js = json.dumps(new_cfg)
+        psql(
+            "UPDATE sogo6_calendar_calendars SET sync_config = '" + js.replace("'", "''") +
+            "'::jsonb, updated_at = now() " +
+            f"WHERE key='{key}'")
+        print("→ subscription DB row repaired (url + creds):", key)
     else:
-        print("CREATE FAILED:", r.status_code, r.text[:200]); sys.exit(1)
+        print("→ subscription already present and correct:", key)
+else:
+    # No caldav subscription yet — create it via the API (creds are
+    # create-only; carry them here).
+    rr = s.post(f"{WM}/api/user/v1/external-calendars", headers=h, timeout=T, json={
+        "name": "calrs (Public Calendar)", "url": CALDAV_URL,
+        "source_type": "caldav", "color": "#7C3AED",
+        "username": RAD_USER, "password": RAD_PW,
+        "sync_interval_minutes": 30})
+    key = ((rr.json().get("data") or {}).get("key")
+           or ((rr.json().get("data") or {}).get("id") or ""))
+    if key:
+        print("→ subscription created:", key, "(POST", rr.status_code, ")")
+    else:
+        print("CREATE FAILED:", rr.status_code, rr.text[:200]); sys.exit(1)
+
+# dedupe: any caldav row beyond the first with this url gets removed
+allcal = psql(
+    "SELECT key, sync_config->>'url' FROM sogo6_calendar_calendars "
+    f"WHERE user_uid='$TESTUSER_MAIL' AND source_type='caldav' ORDER BY created_at")
+lines = [ln for ln in allcal.splitlines() if ln]
+for ln in lines[1:]:
+    dup_key, dup_url = ln.split("|", 1)
+    if key and dup_key != key and dup_url == CALDAV_URL:
+        s.delete(f"{WM}/api/user/v1/external-calendars/{dup_key}", headers=h, timeout=T)
+        print("→ duplicate subscription removed:", dup_key)
+
+if not key:
+    print("NO KEY — aborting"); sys.exit(1)
 s.post(f"{WM}/api/user/v1/external-calendars/{key}/sync", headers=h, timeout=T)
-print("→ sync triggered (job runs in the agent worker)")
+print("→ sync triggered against", CALDAV_URL)
 PYEOF
 scp -q "$TMPPY" "$VPS":/tmp/sogo_caldav_provision.py
 rm -f "$TMPPY"

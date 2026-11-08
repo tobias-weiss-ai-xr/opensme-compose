@@ -107,8 +107,10 @@ Epics / user stories (IDs appear in failure output):
     X2  locale landing /en served
     X3  app-tier hardening on the SPA
     X4  testuser's CalDAV subscription to the calrs booking store
-        (external calendar, source_type=caldav → calendar.<host>/dav/);
-        edge answers PROPFIND 207 with booking auth, 401 anonymous
+        (external calendar, source_type=caldav → calendar.<host>/dav/booking/main/);
+        edge answers PROPFIND 207 with booking auth, 401 anonymous, the
+        collection carries a VCALENDAR resourcetype (regression gate for the
+        empty-store bug) and a live mirror sync completes
 
   Epic A — Archive (paperless-ngx)
     A1  anon / → 302 /accounts/login/
@@ -1364,6 +1366,24 @@ def main() -> bool:
                 else:
                     result.fail(f"X4: PROPFIND auth={ra.status_code} "
                                 f"anon={rn.status_code}, want 207/401")
+                # regression gate for the empty-booking-store bug: the
+                # calendar collection must exist as a real VCALENDAR
+                # (<C:calendar> in the resourcetype). A bare principal dir
+                # (/booking/) returns 207 too but has no calendar tag, and
+                # calrs v1.6.0 (pre-0002 patch) discovered ZERO calendars
+                # from Radicale's spaced `<C:calendar />` resourcetype.
+                main = cal_url.rstrip("/") + "/dav/booking/main"
+                rc = requests.request("PROPFIND", main + "/", timeout=T,
+                                      auth=(rad_user, rad_pw), verify=verify,
+                                      headers={"Depth": "0"})
+                if rc.status_code == 207 and "<C:calendar" in rc.text:
+                    result.ok("X4: booking collection /dav/booking/main/ is "
+                              "a VCALENDAR collection (PROPFIND 207 + tag)")
+                else:
+                    result.fail(f"X4: PROPFIND {main}/ → {rc.status_code}, "
+                                f"calendar resourcetype missing — booking "
+                                f"store not initialized (run "
+                                f"scripts/calendar-setup.sh)")
                 # the subscription on testuser's sogo6 account
                 s = requests.Session()
                 s.verify = verify
@@ -1384,16 +1404,34 @@ def main() -> bool:
                     rr = s.get(wm_url + "/api/user/v1/calendars", headers=h, timeout=T)
                     ext = [c for c in ((rr.json().get("data") or {}).get("calendars", []))
                            if c.get("source_type") == "caldav"]
-                    # the list serializer omits sync_config — read the
-                    # detail endpoint for the stored URL
                     # the API serializers omit sync_config (credentials are
-                    # never echoed) — the durable proof of the wiring is the
-                    # DB row; assert the subscription exists by name+type and
-                    # that its key is stable across runs
-                    sub_url = (ext[0].get("sync_config") or {}).get("url", "") if ext else ""
-                    if ext and "calrs" in (ext[0].get("name") or "").lower():
+                    # never echoed) — the durable proof of the wiring is a
+                    # live mirror sync against the booking collection:
+                    # completed means sogo6 could fetch /dav/booking/main/
+                    # with the stored credentials (the pre-fix empty store
+                    # with no calendar collection mirrored nothing).
+                    sub = ext[0] if ext else None
+                    if sub and "calrs" in (sub.get("name") or "").lower():
+                        key = sub.get("key") or ""
                         result.ok(f"X4: testuser sogo6 carries the calrs CalDAV "
-                                  f"subscription ({ext[0]['name']!r} → {dav[:48]}…)")
+                                  f"subscription ({sub['name']!r} → /dav/booking/main/)")
+                        if key:
+                            trig = s.post(wm_url + "/api/user/v1/external-calendars/"
+                                          + key + "/sync", headers=h, timeout=T)
+                            if trig.status_code == 202:
+                                time.sleep(12)
+                                st = s.get(wm_url + "/api/user/v1/external-calendars/"
+                                           + key + "/sync", headers=h, timeout=T)
+                                stjson = st.json().get("data") or {}
+                                if stjson.get("sync_status") == "completed":
+                                    result.ok("X4: sogo6 mirror sync of the calrs "
+                                              "booking collection → completed")
+                                else:
+                                    result.fail("X4: sogo6 mirror sync → "
+                                                f"{stjson.get('sync_status')} "
+                                                f"({stjson.get('sync_error')})")
+                            else:
+                                result.warn(f"X4: sync trigger → {trig.status_code}")
                     else:
                         result.fail(f"X4: no calrs caldav subscription on testuser "
                                     f"(have {[c.get('name') for c in ext]})")

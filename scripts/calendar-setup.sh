@@ -23,13 +23,17 @@
 #      radicale over opensme-net (http://calendar-radicale:5232/,
 #      container DNS name = compose service name); skipped when the
 #      URL is already connected.
-#   6. `calrs sync`       — `--full` on first source add (and with
+#   6. Radicale collection — MKCALENDAR /booking/main/ as a VCALENDAR
+#      collection (via the edge, idempotent): calrs write-back and the
+#      sogo6 mirror target this href; a fresh store has only the bare
+#      principal dir and discovers 0 calendars otherwise.
+#   7. `calrs sync`       — `--full` on first source add (and with
 #      --full), incremental otherwise. This step is the real
 #      credential check for the seeded htpasswd user.
-#   7. Public event type  — `calrs event-type create` for the public
+#   8. Public event type  — `calrs event-type create` for the public
 #      "Video Consultation" booking page (slug `vc`, 30 min, VC link
 #      from CALRS_VC_URL); skipped when the slug exists.
-#   8. Prints the public booking URL + a one-line privacy reminder.
+#   9. Prints the public booking URL + a one-line privacy reminder.
 #
 # calrs v1.6.0 CLI surface — VERIFIED against the pinned upstream tag
 # (github.com/olivierlambert/calrs v1.6.0, src/commands/*.rs); do NOT
@@ -280,7 +284,7 @@ if [[ -z "${CALRS_VC_URL:-}" ]]; then
   warn "CALRS_VC_URL is empty — the event type will be created without a video-call link"
 fi
 
-# ── Step 1/8: Radicale htpasswd (helper container, /config/users) ──────────
+# ── Step 1/9: Radicale htpasswd (helper container, /config/users) ──────────
 radicale_volume() {
   local vol project
   vol="$(dc config --format json 2>/dev/null \
@@ -304,7 +308,7 @@ radicale_volume() {
 }
 RADICALE_VOLUME="$(radicale_volume)"
 
-info "Step 1/8 — Radicale htpasswd user '${RADICALE_USER}' (volume: ${RADICALE_VOLUME})"
+info "Step 1/9 — Radicale htpasswd user '${RADICALE_USER}' (volume: ${RADICALE_VOLUME})"
 USERS_CHANGED=false
 existing_users="$(docker run --rm -v "${RADICALE_VOLUME}":/config httpd:2.4-alpine \
   sh -c 'cat /config/users 2>/dev/null || true' 2>/dev/null || true)"
@@ -332,17 +336,17 @@ else
   fi
 fi
 
-# ── Step 2/8: restart calendar-radicale only when the users file changed ───
+# ── Step 2/9: restart calendar-radicale only when the users file changed ───
 if [[ "$USERS_CHANGED" == true ]]; then
-  info "Step 2/8 — restarting calendar-radicale to pick up the new htpasswd"
+  info "Step 2/9 — restarting calendar-radicale to pick up the new htpasswd"
   dc restart calendar-radicale 2>/dev/null \
     || info "calendar-radicale not running yet — it reads /config/users at first start"
 else
-  info "Step 2/8 — htpasswd unchanged, calendar-radicale keeps running"
+  info "Step 2/9 — htpasswd unchanged, calendar-radicale keeps running"
 fi
 
-# ── Step 3/8: bring the calendar services up ────────────────────────────────
-info "Step 3/8 — docker compose up -d --wait calendar (chain: ${COMPOSE_FILE})"
+# ── Step 3/9: bring the calendar services up ────────────────────────────────
+info "Step 3/9 — docker compose up -d --wait calendar (chain: ${COMPOSE_FILE})"
 if ! docker image inspect "calrs:${CALRS_IMAGE_TAG}" >/dev/null 2>&1; then
   err "image calrs:${CALRS_IMAGE_TAG} not found — compose would try to BUILD images/calrs,"
   err "which is a pinned reference, not a self-building subtree. Build the image from the"
@@ -352,8 +356,8 @@ if ! docker image inspect "calrs:${CALRS_IMAGE_TAG}" >/dev/null 2>&1; then
 fi
 dc up -d --wait calendar
 
-# ── Step 4/8: calrs admin user ──────────────────────────────────────────────
-info "Step 4/8 — calrs admin user (${CALRS_ADMIN_EMAIL})"
+# ── Step 4/9: calrs admin user ──────────────────────────────────────────────
+info "Step 4/9 — calrs admin user (${CALRS_ADMIN_EMAIL})"
 if calrs_list user list 2>/dev/null | grep -Fq "$CALRS_ADMIN_EMAIL"; then
   ok "calrs user '${CALRS_ADMIN_EMAIL}' already exists — skipping create"
 else
@@ -378,9 +382,9 @@ else
   fi
 fi
 
-# ── Step 5/8: CalDAV source -> radicale ─────────────────────────────────────
+# ── Step 5/9: CalDAV source -> radicale ─────────────────────────────────────
 CALDAV_URL="http://calendar-radicale:5232/"
-info "Step 5/8 — CalDAV source '${CALDAV_URL}' (Public Calendar)"
+info "Step 5/9 — CalDAV source '${CALDAV_URL}' (Public Calendar)"
 SOURCE_ADDED=false
 if calrs_list source list 2>/dev/null | grep -Fq "$CALDAV_URL"; then
   ok "CalDAV source '${CALDAV_URL}' already connected — skipping add"
@@ -403,8 +407,43 @@ else
   fi
 fi
 
-# ── Step 6/8: sync (full on first source add) ───────────────────────────────
-info "Step 6/8 — calrs sync"
+# ── Step 6/9: ensure Radicale calendar collection + write target ───────────
+# calrs write-back needs an actual VCALENDAR collection under the booking
+# principal's calendar-home-set (/booking/). A FRESH Radicale store has only
+# the bare principal dir (tagless) -> PROPFIND lists 0 calendars, calrs
+# discovers nothing and write-back has nowhere to land (the historical
+# "empty booking store" bug). MKCALENDAR the collection exactly where the
+# patched calrs + sogo6 subscription expect it: /booking/main/.
+info "Step 6/9 — Radicale calendar collection '${RADICALE_USER}/main/'";
+BOOKING_EDGE="https://${CALENDAR_DOMAIN}/dav/booking/main/"
+probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+  -u "${RADICALE_USER}:${RADICALE_PASSWORD}" -X PROPFIND "$BOOKING_EDGE" \
+  -H 'Depth: 0' -H 'Content-Type: application/xml' \
+  -d '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:resourcetype/></d:prop></d:propfind>' \
+  2>/dev/null || echo 000)"
+if [[ "$probe" == "207" ]] && curl -sS --max-time 15 -u "${RADICALE_USER}:${RADICALE_PASSWORD}" \
+    -X PROPFIND "$BOOKING_EDGE" -H 'Depth: 0' \
+    -H 'Content-Type: application/xml' \
+    -d '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:resourcetype/></d:prop></d:propfind>' \
+    2>/dev/null | grep -q '<c:calendar/>' ; then
+  ok "calendar collection '${RADICALE_USER}/main/' already present (tag VCALENDAR)"
+else
+  info "creating calendar collection '${RADICALE_USER}/main/' (MKCALENDAR)"
+  mk_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+    -u "${RADICALE_USER}:${RADICALE_PASSWORD}" -X MKCALENDAR "$BOOKING_EDGE" \
+    -H 'Content-Type: application/xml' \
+    -d '<?xml version="1.0"?><c:mkcalendar xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:"><d:set><d:prop><d:displayname>Public Booking</d:displayname><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set></d:prop></d:set></c:mkcalendar>' \
+    2>/dev/null || echo 000)"
+  if [[ "$mk_status" == "201" && "$probe" == "207" ]]; then
+    ok "calendar collection '${RADICALE_USER}/main/' created (MKCALENDAR 201)"
+  else
+    warn "MKCALENDAR returned HTTP ${mk_status:-000} — the collection may already exist as a"
+    warn "bare dir (created by a pre-adoption config): proceeding; sync will confirm"
+  fi
+fi
+
+# ── Step 7/9: sync (full on first source add) ───────────────────────────────
+info "Step 7/9 — calrs sync"
 if [[ "$SOURCE_ADDED" == true || "$FORCE_FULL" == true ]]; then
   if ! docker compose "${COMPOSE_ARGS[@]}" exec -T calendar calrs sync --full; then
     err "full sync failed — usually a Radicale auth problem: verify RADICALE_USER/"
@@ -419,8 +458,8 @@ else
   fi
 fi
 
-# ── Step 7/8: public 'Video Consultation' event type ────────────────────────
-info "Step 7/8 — public 'Video Consultation' event type (slug vc)"
+# ── Step 8/9: public 'Video Consultation' event type ────────────────────────
+info "Step 8/9 — public 'Video Consultation' event type (slug vc)"
 # v1.6.0 has no location/visibility flags: new types default to
 # visibility='public' + location_type='link' (empty location_value) and
 # Mon-Fri 09:00-17:00 availability — the VC link rides in the description.
@@ -438,7 +477,7 @@ else
   fi
 fi
 
-# ── Step 8/8: booking URL ───────────────────────────────────────────────────
+# ── Step 9/9: booking URL ───────────────────────────────────────────────────
 # /u/<username>/<slug>; username = lowercased email local part, '.'->'-',
 # everything but [a-z0-9-] dropped (calrs src/auth.rs generate_username)
 booking_user="$(printf '%s' "$CALRS_ADMIN_EMAIL" | cut -d@ -f1 \

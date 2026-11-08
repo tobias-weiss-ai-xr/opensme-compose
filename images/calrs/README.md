@@ -25,6 +25,26 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      of the ID token entirely; when the ID token has no email, calrs now
      fetches `/oauth/v2/userinfo` with the access token.
    - `OAuth2TokenResponse` import for `access_token()`.
+3. `patches/0002-caldav-radicale-resourcetype.patch` — CalDAV calendar
+   discovery against Radicale (required: the calrs CalDAV source points at
+   our dedicated `calendar-radicale` store; apply AFTER 0001):
+   - Radicale renders the calendar resourcetype as `<C:calendar />` — WITH a
+     space before the self-closing slash. calrs v1.6.0's `parse_calendar_list`
+     matched the brittle substring `contains("calendar/>")`, so PROPFIND
+     depth:1 against Radicale parsed `calendar_count=0`: calrs discovered NO
+     calendars, synced nothing, and write-back had no target collection
+     (store stayed empty).
+   - Backported from upstream PR #135 (commit 27a0e37, released in calrs
+     v1.14.0+): replaces the substring check with `has_calendar_resourcetype()`
+     which matches a `calendar` resourcetype under any (or no) prefix,
+     self-closing or open, with or without the space, while rejecting
+     lookalikes (`calendar-color`, `calendar-data`,
+     `supported-calendar-component-set`, `addressbook`) and the principal
+     collection.
+   - Also updates `scripts/calendar-setup.sh`: after connecting the source it
+     MKCALENDARs (creates) `/booking/main/` as a VCALENDAR collection in
+     Radicale if absent and points `write_calendar_href` there, so the
+     provisioning chain is self-recovering.
 
 ## WARNING: this subtree does NOT self-build
 
@@ -38,6 +58,7 @@ DOCUMENTED, PINNED reference, not a buildable recipe in this repo.
 git clone https://github.com/olivierlambert/calrs.git
 git -C calrs checkout v1.6.0
 git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
+git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
 cd calrs && docker buildx build --network host -t calrs:1.6.0 .
 ```
 

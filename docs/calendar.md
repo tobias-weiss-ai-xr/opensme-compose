@@ -159,8 +159,18 @@ is **opt-in** via the `calendar` profile.
    ```bash
    git clone https://github.com/olivierlambert/calrs.git
    git -C calrs checkout v1.6.0
+   git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
+   git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
    cd calrs && docker buildx build --network host -t calrs:1.6.0 .
    ```
+
+   Patch **0002** is **required** for the Radicale store: Radicale renders
+   the calendar resourcetype as `<C:calendar />` (space before the
+   self-closing slash) and stock calrs v1.6.0's substring match misses it —
+   calrs then discovers zero calendars, syncs nothing and write-back has no
+   target collection (the historical "empty booking store" symptom). The
+   patch is the backport of upstream PR #135 (commit 27a0e37, released in
+   calrs v1.14.0+).
 
    The tag (`calrs:1.6.0`) must match `CALRS_IMAGE_TAG` in `.env`.
 
