@@ -556,6 +556,11 @@ services:
       CALRS_OIDC_CLIENT_ID: ${CALRS_OIDC_CLIENT_ID:-}
       CALRS_OIDC_CLIENT_SECRET: ${CALRS_OIDC_CLIENT_SECRET:-}
       CALRS_OIDC_REDIRECT_URI: https://${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}/auth/oidc/callback
+      # Self-hosted video (LiveKit) origin for the event-type form's
+      # "Use self-hosted video" helper (patch 0003): fills the location
+      # field with {VC}/room/{uid} — a per-booking room link, so nobody
+      # copies/pastes a URL. Fallbacks: env VC_URL.
+      CALRS_VC_URL: ${CALRS_VC_URL:-}
     # calrs OIDC discovery/token exchange must reach the IdP without
     # leaving the host (container egress is blocked in constrained
     # deployments): map the IdP name to the host-gateway so traffic

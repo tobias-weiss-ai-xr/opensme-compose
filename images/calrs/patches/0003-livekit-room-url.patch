@@ -169,7 +169,7 @@ index d3b6585..21691a2 100644
  
      #[tokio::test]
 diff --git a/templates/event_type_form.html b/templates/event_type_form.html
-index 6e1ed80..a0c2316 100644
+index 6e1ed80..5e59be9 100644
 --- a/templates/event_type_form.html
 +++ b/templates/event_type_form.html
 @@ -88,6 +88,14 @@
@@ -199,7 +199,7 @@ index 6e1ed80..a0c2316 100644
 +    var vcPick = document.getElementById('vc_pick');
 +    var vcHint = document.getElementById('vc_hint');
 +    var locInput = document.getElementById('location_value');
-+    var vcBase = '{{ vc_url|default('', true) }}'.replace(/\/+$/, '');
++    var vcBase = '{{ vc_url|default('', true)|safe }}'.replace(/\/+$/, '');
 +    if (vcPick && vcBase) {
 +      vcPick.addEventListener('click', function() {
 +        var roomUrl = vcBase + '/room/{uid}';
