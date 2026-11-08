@@ -54,6 +54,12 @@ services:
       # NOT by env — the stock image ignores any "PAPERLESS_APPS"-style hint.
       PAPERLESS_SOCIAL_AUTO_SIGNUP: "true"
       PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS: "true"
+      # SSO-created users land in this group automatically (paperless ≥2.5
+      # adapter). The group itself + permission set + backfill of pre-
+      # existing users are provisioned idempotently by
+      # scripts/provision-paperless-perms.sh — without it fresh SSO users
+      # have zero permissions and every API call 403s.
+      PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS: "oidc-users"
       PAPERLESS_LOGOUT_REDIRECT_URL: ${PAPERLESS_OIDC_LOGOUT_URL:-}
       PAPERLESS_SOCIALACCOUNT_PROVIDERS: "{\"openid_connect\":{\"OAUTH_PKCE_ENABLED\":true,\"APPS\":[{\"provider_id\":\"zitadel\",\"name\":\"openSME SSO\",\"client_id\":\"${PAPERLESS_OIDC_CLIENT_ID:-}\",\"secret\":\"${PAPERLESS_OIDC_CLIENT_SECRET:-}\",\"settings\":{\"server_url\":\"https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration\",\"fetch_userinfo\":true}}],\"SCOPE\":[\"openid\",\"profile\",\"email\"]}}"
       PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?PAPERLESS_SECRET_KEY must be set in .env}

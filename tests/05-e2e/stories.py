@@ -130,13 +130,35 @@ Epics / user stories (IDs appear in failure output):
     Y1  /api/ai/chat route absent while AI is unconfigured (404);
         warn-not-fail when an AI backend is configured
 
+  Epic J — Signed-in SSO journeys (headless, real code exchange)
+    J1  invoiceninja: testuser OIDC round trip → linked account (200;
+        unlinked identities get the explicit invite-first 400)
+    J2  paperless: allauth confirm → authorize → login → dashboard;
+        OIDC user can read /api/documents/ (default-group perms)
+    J3  operaton: webapp → oauth2 → IdP → signed welcome page
+    J4  synapse: SSO redirect → login → "Continue to your account"
+        loginToken handoff page
+
+  Epic T — Mail (stalwart)
+    T1  web UI served anonymously
+    T2  app-tier hardening on the web UI
+
   Portal deepening:
+    P12  session cookie hardening (HttpOnly, SameSite, Secure on https)
+    P13  announcements readable anonymously (list contract)
+    P14  feeds columns shape (server-side RSS aggregation)
+
     P9   /api/session anonymous introspection ({"authenticated": false})
     P10  /api/auth/login → 303 IdP authorize carrying the portal
          client_id + PKCE(S256) + state
     P11  /api/auth/callback refuses a bogus state (400 CSRF gate)
 
   Member-app deepening:
+    L12  intercom upload round trip (raw-body endpoint → served file,
+         traversal-guard 404s on hostile token/name)
+    L13  polls upload round trip (query-metadata raw-body → served
+         file, hostile name guard)
+
     L9   intercom validation matrix (empty text → 400, >2000 bytes →
          400, unknown kind → 400, unknown delete → 404, missing text
          → clean 400 after the serde-default fix)
@@ -188,13 +210,72 @@ from conftest import ROOT, Result
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run import (
     T,
+    api_login,
     install_dns_fallback,
     is_localish,
     load_env_file,
     portal_login,
+    probe,
+    resolve_user_id,
 )
 
 CATALOG = ROOT / "contracts" / "tiles.yml"
+
+
+def capture_authorize(sess, url, post=None):
+    """Walk an app's redirect chain, return the /oauth/v2/authorize URL.
+
+    `post` is (data, action) for form-initiated flows (django-allauth).
+    """
+    if post is not None:
+        data, action = post
+        r = sess.post(action or url, data=data, timeout=T, allow_redirects=False)
+    else:
+        r = sess.get(url, timeout=T, allow_redirects=False)
+    loc = r.headers.get("location", "")
+    for _ in range(8):
+        if not loc.startswith("http"):
+            return ""
+        if "/oauth/v2/authorize" in loc:
+            return loc
+        loc = sess.get(loc, timeout=T, allow_redirects=False).headers.get(
+            "location", loc)
+    return ""
+
+
+def oidc_login(sess, idp_base, authz_url, user_uid, pw, lc_pat):
+    """Complete the two-step Zitadel login and return the callback response.
+
+    Drives run.api_login (v2 Session API + finalize) against the app's
+    authorize URL, then GETs the app's redirect_uri with the minted code.
+    """
+    qs, _ = api_login(sess, idp_base, lc_pat, user_uid, authz_url, user_uid, pw)
+    ru = urllib.parse.parse_qs(urllib.parse.urlparse(authz_url).query).get(
+        "redirect_uri", [""])[0]
+    return sess.get(ru + "?" + urllib.parse.urlencode(qs, doseq=True),
+                    timeout=T, allow_redirects=True)
+
+
+def resolve_routable(sess, candidates):
+    """First candidate that actually routes (probe /), else None."""
+    for cand in candidates:
+        if cand and probe(sess, cand.rstrip("/") + "/"):
+            return cand
+    return None
+
+
+_LC_PAT_CACHE: dict = {}
+
+
+def _lc_pat(sess):
+    """Resolve the login-client PAT (env first, seeded container fallback)."""
+    pat = os.environ.get("E2E_ZITADEL_LOGINCLIENT_PAT")
+    if pat:
+        return pat
+    if "v" not in _LC_PAT_CACHE:
+        from run import fetch_seeded
+        _LC_PAT_CACHE["v"] = fetch_seeded("/machinekey/login-client.pat")
+    return _LC_PAT_CACHE["v"]
 
 
 def mint_livekit_token(api_key: str, api_secret: str, room: str, identity: str,
@@ -391,6 +472,62 @@ def main() -> bool:
         result.ok("P11: callback refuses bogus state (CSRF gate)")
     else:
         result.fail(f"P11: bogus callback accepted ({r.status_code})")
+
+    # session cookie hardening: capture the raw Set-Cookie the portal
+    # hands out during a REAL login (hooks fire on every response)
+    captured: dict = {}
+
+    def _sc_hook(resp, **_kw):
+        sc = resp.headers.get("set-cookie", "")
+        if "OPENSMEPORTALSESSION" in sc:
+            captured["sc"] = sc
+        return resp
+
+    ps = requests.Session()
+    ps.verify = verify
+    ps.hooks["response"] = [_sc_hook]
+    if not portal_login(ps, portal_base, idp_base):
+        result.warn("P12: portal_login failed — cookie flags unverified")
+    else:
+        sc = captured.get("sc", "")
+        flags = {
+            "HttpOnly": "httponly" in sc.lower(),
+            "SameSite": "samesite" in sc.lower(),
+            "Secure": "secure" in sc.lower(),
+        }
+        if flags["HttpOnly"] and flags["SameSite"] and (flags["Secure"] or localish):
+            result.ok(f"P12: session cookie flags HttpOnly+SameSite"
+                      f"{'+Secure' if flags['Secure'] else ''}")
+        else:
+            result.fail(f"P12: session cookie flags missing: {flags}")
+        r = ps.get(portal_base + "/api/session", timeout=T)
+        sess_body = r.json() or {}
+        if r.status_code == 200 and sess_body.get("authenticated") is True:
+            result.ok("P12: signed /api/session introspection "
+                      f"(name={sess_body.get('name')!r})")
+        else:
+            result.warn(f"P12: signed session introspection → {r.status_code}")
+    ps.hooks["response"] = []
+
+    r = anon.get(portal_base + "/api/announcements", timeout=T)
+    body = r.json() if r.headers.get("content-type", "").startswith(
+        "application/json") else {}
+    if r.status_code == 200 and isinstance(body.get("announcements"), list):
+        result.ok("P13: announcements readable anonymously (list contract)")
+    else:
+        result.fail(f"P13: announcements → {r.status_code} {r.text[:50]!r}")
+    r = anon.get(portal_base + "/api/feeds", timeout=T)
+    try:
+        cols = (r.json() or {}).get("columns") or []
+        entry_keys = sorted((cols[0].get("entries") or [{}])[0]) if cols else []
+    except ValueError:
+        cols, entry_keys = [], []
+    if r.status_code == 200 and isinstance(cols, list) \
+            and (not cols or {"source", "title"} <= set(entry_keys)):
+        result.ok(f"P14: feeds columns shape ({len(cols)} columns)")
+    else:
+        result.fail(f"P14: feeds → {r.status_code} "
+                    f"{entry_keys or 'no columns'}")
 
     # ── signed-in journeys ────────────────────────────────────────────
     signed = requests.Session()
@@ -822,6 +959,76 @@ def main() -> bool:
         else:
             result.fail(f"L11: polls foreign attachment → {r.status_code}, "
                         "want 400 'host not allowed'")
+
+        r = member.post(portal_base + "/api/polls",
+                        json={"question": "q", "options": ["a", "b"],
+                              "attachment_url": "https://evil.example.com/f"},
+                        timeout=T)
+        if r.status_code == 400 and "host not allowed" in r.text:
+            result.ok("L11: polls attachment host-pin (foreign host → 400)")
+        else:
+            result.fail(f"L11: polls foreign attachment → {r.status_code}, "
+                        "want 400 'host not allowed'")
+
+        # intercom upload round trip: raw-body endpoint, metadata in query
+        r = member.post(portal_base + "/api/intercom/upload"
+                        "?text=upload-probe&kind=note&filename=e2e-note.txt",
+                        data=b"e2e attachment bytes", timeout=T)
+        aurl = ((r.json().get("message") or {}).get("attachment") or {}).get("url") \
+            if r.status_code == 201 else ""
+        full = aurl if aurl.startswith("http") else portal_base + aurl
+        served = member.get(full, timeout=T) if aurl else None
+        if r.status_code == 201 and served is not None and served.status_code == 200 \
+                and served.content == b"e2e attachment bytes":
+            result.ok(f"L12: intercom upload round trip ({aurl[:44]}…)")
+            member.delete(portal_base
+                          + f"/api/intercom/{(r.json().get('message') or {}).get('id')}",
+                          timeout=T)
+        else:
+            result.fail(f"L12: intercom upload → {r.status_code}, served "
+                        f"{getattr(served, 'status_code', '-')}")
+        # hostile file paths must not traverse (guards: hex token +
+        # sanitize-unchanged name)
+        hostile_files = [
+            "/api/intercom/files/zzzz/a.txt",
+            "/api/intercom/files/0123456789abcdef/../../etc/passwd",
+            "/api/intercom/files/0123456789abcdef/..%2f..%2fetc%2fpasswd",
+        ]
+        bad = [u for u in hostile_files
+               if member.get(portal_base + u, timeout=T).status_code != 404]
+        if not bad:
+            result.ok("L12: intercom file guards reject hostile token/name")
+        else:
+            result.fail(f"L12: file traversal leak on {bad}")
+
+        # polls upload round trip (query-metadata raw-body endpoint)
+        opts = urllib.parse.quote(json.dumps(["a", "b"]))
+        r = member.post(portal_base + "/api/polls/upload"
+                        f"?question=e2e-upload&options={opts}&filename=e2e.csv",
+                        data=b"a,b\n1,2", timeout=T)
+        poll = (r.json() or {}).get("poll") or {}
+        aurl = (poll.get("attachment") or {}).get("url") \
+            if r.status_code == 201 else ""
+        # with a cloud config the attachment lives behind an ABSOLUTE
+        # OpenCloud share URL; without one it's the local /api/files/… path
+        full = aurl if aurl.startswith("http") else portal_base + aurl
+        served = member.get(full, timeout=T) if aurl else None
+        if r.status_code == 201 and served is not None and served.status_code == 200:
+            result.ok(f"L13: polls upload round trip ({aurl[:44]}…)")
+            r = member.post(portal_base + f"/api/polls/{poll.get('id')}/vote",
+                            json={"option": 0}, timeout=T)
+            ok_vote = r.status_code == 200
+        else:
+            ok_vote = False
+            result.fail(f"L13: polls upload → {r.status_code}, served "
+                        f"{getattr(served, 'status_code', '-')}")
+        if ok_vote:
+            r = member.get(portal_base + "/api/files/zzzz/not-here.csv",
+                           timeout=T)
+            if r.status_code == 404:
+                result.ok("L13: polls file guard rejects hostile name (404)")
+            else:
+                result.fail(f"L13: polls file guard → {r.status_code}, want 404")
     else:
         result.skip("L2–L7 signed-in member journeys: no session "
                     "(set ZITADEL_ADMIN_PASSWORD + E2E_ZITADEL_LOGINCLIENT_PAT / "
@@ -854,8 +1061,13 @@ def main() -> bool:
     r = anon.get(portal_base + "/metrics", timeout=T)
     if r.status_code == 200 and ("# HELP" in r.text or "# TYPE" in r.text
                                  or "http_requests" in r.text):
+        # scan with route TEMPLATE labels neutralized: metric routes like
+        # /api/files/:token/:name legitimately contain marker words —
+        # what must never leak are VALUES (passwords, raw session ids)
+        leak_scan = re.sub(r'(route|path)="[^"]*"', '\1="X"',
+                           r.text.lower())
         leak_markers = [m for m in ("password", "secret", "token", "set-cookie",
-                                    "session=") if m in r.text.lower()]
+                                    "session=") if m in leak_scan]
         if leak_markers:
             result.fail(f"M2: /metrics leaks sensitive markers: {leak_markers}")
         else:
@@ -1227,6 +1439,147 @@ def main() -> bool:
         result.ok("I5: login UI served anonymously")
     else:
         result.fail(f"I5: login UI → {r.status_code}, want 200")
+
+    # ══ Epic J — Signed-in SSO journeys (headless) ════════════════════
+    result.header("Epic J — Signed-in SSO journeys (headless)")
+    if not cfg("E2E_ZITADEL_LOGINCLIENT_PAT") and not is_localish(domain):
+        result.warn("J: no login-client PAT — journeys limited to seeded fallback")
+    lc = _lc_pat(anon)
+    t_pw = cfg("E2E_TESTUSER_PASSWORD", "eval2026")  # documented demo cred
+    t_uid = None
+    try:
+        t_uid = resolve_user_id(anon, idp_base,
+                                cfg("E2E_ZITADEL_PAT") or lc, "testuser")
+    except Exception:
+        t_uid = None
+    if not t_uid:
+        result.skip("J: testuser not resolvable (demo stack only)")
+    else:
+        # J1 invoiceninja — the member's linked-account round trip
+        # (env URL first, then the live <svc>.<portal_host> convention —
+        # stale OPENSME_DOMAIN-style exports must not misroute us)
+        inv = resolve_routable(anon, [cfg("INVOICE_URL"),
+                                      f"{schema}invoices.{portal_host}"
+                                      if portal_host else ""])
+        s1 = requests.Session()
+        s1.verify = verify
+        authz = capture_authorize(s1, inv + "/auth/oidc") if inv else ""
+        if authz:
+            r = oidc_login(s1, idp_base, authz, t_uid, t_pw, lc)
+            if r.status_code == 200 and "linked to this OIDC identity" not in r.text:
+                result.ok(f"J1: invoiceninja OIDC round trip (member, "
+                          f"{str(r.url).split('//')[1][:38]}…)")
+            else:
+                result.fail(f"J1: invoiceninja OIDC → {r.status_code} "
+                            + ("identity not linked — invite the member first"
+                               if "linked to this OIDC identity" in r.text
+                               else str(r.url)[:60]))
+        else:
+            result.skip("J1: invoiceninja not routed")
+
+        # J2 paperless — allauth confirm form → authorize → signed API
+        pp = resolve_routable(anon, [cfg("PAPERLESS_URL"),
+                                     f"{schema}paperless.{portal_host}"
+                                     if portal_host else ""])
+        s2 = requests.Session()
+        s2.verify = verify
+        authz = ""
+        try:
+            r0 = s2.get(pp + "/accounts/oidc/zitadel/login/", timeout=T)
+            tok = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"',
+                            r0.text)
+            if tok and r0.status_code == 200:
+                authz = capture_authorize(
+                    s2, pp + "/accounts/oidc/zitadel/login/",
+                    post=({"csrfmiddlewaretoken": tok.group(1)},
+                          pp + "/accounts/oidc/zitadel/login/"))
+        except requests.RequestException:
+            authz = ""
+        if authz:
+            r = oidc_login(s2, idp_base, authz, t_uid, t_pw, lc)
+            api_ok = False
+            try:
+                api_ok = s2.get(pp + "/api/documents/", timeout=T).status_code == 200
+            except requests.RequestException:
+                pass
+            if r.status_code == 200 and api_ok:
+                result.ok("J2: paperless OIDC → dashboard; documents API "
+                          "readable for the OIDC user (default-group perms)")
+            else:
+                result.fail(f"J2: paperless → {r.status_code}, docs API "
+                            f"{'200' if api_ok else 'DENIED (perms missing?)'}")
+        else:
+            result.skip("J2: paperless not routed")
+
+        # J3 operaton — the full webapp chain, signed
+        bpm = resolve_routable(anon, [cfg("BPM_URL"),
+                                      f"{schema}bpm.{portal_host}"
+                                      if portal_host else ""])
+        s3 = requests.Session()
+        s3.verify = verify
+        authz = capture_authorize(s3, bpm + "/") if bpm else ""
+        if authz:
+            r = oidc_login(s3, idp_base, authz, t_uid, t_pw, lc)
+            r = s3.get(bpm + "/operaton/app/", timeout=T)
+            if r.status_code == 200:
+                result.ok("J3: operaton SSO → signed webapp (200)")
+            else:
+                result.fail(f"J3: operaton signed webapp → {r.status_code}")
+        else:
+            result.skip("J3: BPM not routed")
+
+        # J4 synapse — SSO redirect → login → loginToken handoff page
+        mx = resolve_routable(anon, [cfg("MATRIX_URL"),
+                                     f"{schema}matrix.{portal_host}"
+                                     if portal_host else ""])
+        chat = resolve_routable(anon, [cfg("CHAT_URL"),
+                                       f"{schema}chat.{portal_host}"
+                                       if portal_host else ""])
+        s4 = requests.Session()
+        s4.verify = verify
+        authz = capture_authorize(
+            s4, mx + "/_matrix/client/r0/login/sso/redirect"
+                 f"?redirectUrl={urllib.parse.quote(chat + '/')}"
+        ) if mx and chat else ""
+        if authz:
+            r = oidc_login(s4, idp_base, authz, t_uid, t_pw, lc)
+            if r.status_code == 200 and "Continue to your account" in r.text:
+                result.ok("J4: synapse SSO → loginToken handoff page")
+            else:
+                result.fail(f"J4: synapse SSO callback → {r.status_code}, "
+                            "handoff page missing")
+        else:
+            result.skip("J4: matrix not routed")
+
+    # ══ Epic T — Mail (stalwart) ══════════════════════════════════════
+    result.header("Epic T — Mail (stalwart)")
+    mail_url = resolve_routable(anon, [cfg("MAIL_URL"),
+                                       f"{schema}mail.{portal_host}"
+                                       if portal_host else ""])
+    if not mail_url:
+        result.skip("T: mail not routable")
+    else:
+        ok, _ = reachable(anon, mail_url + "/")
+        if not ok:
+            result.skip(f"T: stalwart not deployed ({mail_url})")
+        else:
+            r = anon.get(mail_url + "/", timeout=T)
+            if r.status_code == 200:
+                result.ok("T1: stalwart web UI served anonymously")
+            else:
+                result.fail(f"T1: mail / → {r.status_code}, want 200")
+            hardened(anon.get(mail_url + "/", timeout=T), result, "T2 mail",
+                     xfo_required=False)
+
+    # I6 — authorize endpoint hardening: unknown client → 4xx (no 5xx)
+    r = anon.get(idp_base + "/oauth/v2/authorize"
+                 "?response_type=code&client_id=e2e-unknown-client"
+                 "&redirect_uri=https://e2e.invalid/cb&scope=openid",
+                 timeout=T, allow_redirects=False)
+    if 400 <= r.status_code < 500:
+        result.ok(f"I6: authorize refuses unknown client ({r.status_code})")
+    else:
+        result.fail(f"I6: unknown client → {r.status_code}, want 4xx")
 
     # ══ Epic Y — AI gating (portal) ═══════════════════════════════════
     result.header("Epic Y — AI gating (portal)")
