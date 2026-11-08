@@ -404,6 +404,25 @@ This is the boot-strapping promise as a test: setup steps and seeding
 are idempotent, volumes hold state, and a re-run converges instead of
 diverging.
 
+### X4/X5 — Calendar CalDAV subscription + booking round trip (stories.py)
+
+These stories live in `stories.py` (not the boot-strapping X1–X4 above)
+and verify the calrs → Radicale → sogo6 mirror chain:
+
+| # | What it pins |
+|---|---------------|
+| X4 | testuser's CalDAV subscription to the calrs booking store (external calendar, `source_type=caldav` → `calendar.<host>/dav/booking/main/`); edge answers PROPFIND 207 with booking auth, 401 anonymous; the booking collection is a real VCALENDAR (`<C:calendar>` resourcetype); sogo6 mirror sync completes |
+| X5 | full public-booking → CalDAV write-back → sogo6 mirror round trip, self-cleaning: a guest books on the public page, the VEVENT lands in Radicale `/dav/booking/main/`, sogo6 mirror syncs it, dashboard-cancel DELETEs it from Radicale, and a re-sync drops it from the mirror. Uses a unique far-future slot + unique guest email per run; cancels in a `finally` block so no residue is left behind |
+
+X4 is the regression gate for the historical empty-booking-store bug (the
+calendar collection must exist as a real VCALENDAR, not a bare principal).
+X5 is the regression gate for the write-back chain: the public booking
+page → Radicale → sogo6 mirror must be a live, bidirectional round trip.
+Both require `CALENDAR_URL`, `RADICALE_USER`/`PASSWORD`, `E2E_ZITADEL_PAT`,
+`E2E_ZITADEL_LOGINCLIENT_PAT`, and `CALRS_ADMIN_EMAIL`/`PASSWORD` env vars
+(the dashboard cancel needs admin login — guest cancel tokens go by email
+which is broken on this stack with `UnknownIssuer`).
+
 ## Epic Y — Disaster recovery: a backup that has survived its drill
 
 > *Als Betreiber will ich aus einem echten Total-Verlust (Volumen weg,
@@ -646,13 +665,13 @@ not answer is always a failure — "no tile to nowhere".
 `Result` / skip-softly conventions as the journey scripts) that walks the
 portal, IdP and member apps as an anonymous visitor and as a signed-in
 member, pinning the behavioral contracts that make the product feel
-finished — not just "returns 200". 175 checks on the live stack
-(166 pass / 0 fail / 6 skip; skips are overlays that are not deployed).
+finished — not just "returns 200". 161 checks on the live stack
+(146 pass / 0 fail / 11 skip; skips are overlays that are not deployed).
 
 | Epic | Surface | What is pinned |
 |------|---------|----------------|
 | P1–P14 | Portal (anon + signed) | landing, health, 401-wall on protected APIs, login → 303 authorize (confidential client, plain code flow, state, **no PKCE**), bogus-state CSRF 400, callback, session introspection, **cookie flags HttpOnly+SameSite+Secure**, announcements/feeds shape, service catalog |
-| V, C, K | VC, calendar, cross-cutting | lobby→room→LiveKit signaling auth, booking→join-link interop, hardening sweep |
+| V, C, K | VC, calendar, cross-cutting | lobby→room→LiveKit signaling auth, booking→join-link interop, hardening sweep, **calendar CalDAV edge + sogo6 mirror (X4/X5)** |
 | L1–L13 | Portal member area | anonymous gate, intercom validation matrix, cloud-share path validation, polls create/vote/list, revote 409, attachment host-pin, `?since=` delta, **upload round trips + traversal guards (L12/L13)** |
 | M | Exposure | `/metrics` anonymous but leak-free (route labels neutralized), management planes closed, PAT-gated served==registered contract |
 | N/W/D/O/X/A/G/I/Y | Member apps | Impress SPA, Operaton 4-hop chain, LimeSurvey `/admin` canonicalization, OpenCloud SPA + OCS gate, SOGo `/SOGo` redirect, Paperless affordance, Element `.well-known/matrix`, Zitadel discovery/JWKS/unknown-client 400 (I6), AI route gating |

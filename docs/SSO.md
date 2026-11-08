@@ -365,7 +365,18 @@ erreichte den IdP nicht. Der Flow ist jetzt end-to-end grün
    der Hotpatch in den gebauten Chunks eingespielt
    (`_0ub05ha._.js`, `[root-of-the-server]__1up58lg._.js`); ein Image-Rebuild
    aus dem gefixten Repo ersetzt den Hotpatch dauerhaft.
-5. **Verifikation** — `/api/user/v1/auth/mode?username=…` liefert `kind:"sso"`
+5. **UI-Proxy `content-length`-Mismatch (2026-11-08)** — derselbe Next-Proxy
+   serialisierte Request-Bodies neu (`request.json()` → `JSON.stringify()`),
+   was die Byte-Länge änderte, leitete aber die ursprüngliche `Content-Length`
+   weiter → Backend sah einen kürzeren Body als deklariert → ECONNRESET → 502
+   „fetch failed“. GET funktionierte (kein Body); PUT/POST/PATCH scheiterten
+   alle. Fix (SOGo6-UI `113b9c68`): (a) `content-length` aus den
+   weitergeleiteten Headern entfernen, damit `fetch()` sie neu berechnet;
+   (b) `cloneRequestBody()` durch ein einziges `arrayBuffer()`-Pass-through
+   ersetzen, das die Original-Bytes für alle Content-Types erhält. Bau auf
+   der VPS: `docker build --network host -f sogo6-ui/Dockerfile.prod -t
+   sogo6-ui:latest ./sogo6-ui/` (nicht das Dev-Dockerfile).
+6. **Verifikation** — `/api/user/v1/auth/mode?username=…` liefert `kind:"sso"`
    + authorize-URL; kompletter Browser-Flow (email → auto-redirect IdP →
    Login → Callback → `/de/u/0/INBOX`, `/api/sse` 200). **Seit 2026-10-31
    rendert die Postfach-UI vollständig** (IMAP/SMTP/Sieve-Mechs auf `xoauth2`

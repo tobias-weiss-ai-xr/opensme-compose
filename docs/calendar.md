@@ -38,20 +38,48 @@ reach the booking dashboard from the portal, and the `calrs-data` / `radicale-co
 > or seed `event_types.location_value` directly. Without it, a booked guest has
 > no way to join the video call.
 >
-> **Cancellation + CalDAV (ops):** `calrs booking cancel` frees the slot but does
-> NOT delete the already-pushed .ics from Radicale (only the web dashboard cancel
-> does). After CLI cancels, remove stale events with a CalDAV DELETE on
-> `/booking/<uid>@calrs.ics`.
+> **Cancellation + CalDAV (ops):** `calrs booking cancel` (CLI) frees the
+> slot but does NOT delete the already-pushed .ics from Radicale (only the
+> web dashboard cancel does — it fires the CalDAV DELETE write-back). After
+> CLI cancels, remove stale events with a CalDAV DELETE on
+> `/booking/<uid>@calrs.ics`. The web dashboard cancel flow (login →
+> `/dashboard/bookings` → POST `/dashboard/bookings/<id>/cancel`) is the
+> only path that triggers write-back deletion; guest cancel tokens go by
+> email (SMTP `UnknownIssuer` on this stack, so tokens are undeliverable).
 
-> **CalDAV write-back dependency (2026-11-07 deploy):** calrs only pushes bookings into
-> the dedicated Radicale calendar when an enabled `smtp_config` row exists — the push
-> runs inside the SMTP-configured branch of the booking handler (even if SMTP delivery
-> itself fails, the push still fires; seeded here via the dashboard settings or DB row,
-> `host=stalwart`, `port=25`, `from=demo@opensme.local`). Without it bookings stay only
-> in calrs's SQLite and Radicale holds no `.ics`. Admin password — the pty feeder in
-> `calendar-setup.sh` can mis-deliver the `calrs user create` password (rpassword
-> reads the controlling tty) — if `demo@opensme.local` login fails, reset the Argon2
-> hash in `calrs.db` (`users.password_hash`) with a matching argon2id PHC string.
+> **CalDAV write-back (2026-11-08 fix):** calrs pushes bookings into the
+> dedicated Radicale calendar only via the **web booking flow** (the
+> dashboard cancel also writes back the DELETE). CLI `calrs booking create`
+> sets status `confirmed` but skips write-back. Two fixes were needed to
+> make write-back actually land:
+>
+> 1. **`write_calendar_href` must be the calendar collection**
+>    (`/booking/main/`), not the home (`/booking/`). calrs PUTs to
+>    `{write_calendar_href}/{uid}.ics`; pointing at the home silently
+>    dropped every booking. Fixed by repairing the href directly in
+>    `calrs.db` (`calendars.write_calendar_href`) — there is no CLI or
+>    dashboard setter for it.
+>
+> 2. **Radicale resourcetype parser** — Radicale renders the calendar
+>    resourcetype as `<C:calendar />` (space before the self-closing
+>    slash) and stock calrs v1.6.0's substring match misses it, so calrs
+>    discovers zero calendars, syncs nothing, and write-back has no target
+>    collection. Backport patch
+>    `images/calrs/patches/0002-caldav-radicale-resourcetype.patch`
+>    (upstream PR #135, commit 27a0e37, released in v1.14.0+) fixes the
+>    parser to accept both `<C:calendar/>` and `<C:calendar />`.
+>
+> The sogo6 mirror (sogo6-server `1e60879`+) fetches via CalDAV REPORT
+> (not ICS GET) — Radicale answers GET on a collection with 403, so sogo6
+> falls back to REPORT `calendar-query` on the collection URL directly.
+> An empty store mirrors as a valid empty calendar (subscription stays
+> `completed` instead of flip-flopping to error).
+>
+> **Admin password caveat:** the pty feeder in `calendar-setup.sh` can
+> mis-deliver the `calrs user create` password (rpassword reads the
+> controlling tty) — if `demo@opensme.local` login fails, reset the
+> Argon2 hash in `calrs.db` (`users.password_hash`) with a matching
+> argon2id PHC string.
 
 > **Live edge note (2026-11-07 deploy):** on the fleet traefik (`traefik_extra_routers`
 > in `openedusuite.org.yaml`) the docker router labels are shadowed by a file router
@@ -114,8 +142,18 @@ calendar to calrs:
    it external-calendar sync jobs stay `pending` forever;
 2. creates (or repoints) an **external CalDAV subscription** on
    `testuser@opensme.local` via the sogo6 API (OIDC login through Zitadel)
-   pointing at `https://<CALENDAR_DOMAIN>/dav/booking/` with the booking
-   htpasswd credentials (`RADICALE_USER`/`RADICALE_PASSWORD`);
+   pointing at `https://<CALENDAR_DOMAIN>/dav/booking/main/` (the
+   **calendar collection**, not the bare `/booking/` home — REPORT on the
+   home returns an empty multistatus even when child calendars have events)
+   with the booking htpasswd credentials
+   (`RADICALE_USER`/`RADICALE_PASSWORD`). Credentials are **create-only**
+   in the sogo6 external-calendar API: `POST /external-calendars` carries
+   `username`/`password`, but the PUT update schema is URL-only and
+   silently drops them. When creds are stale or absent, the script repairs
+   the `sync_config` jsonb row directly in sogo6's Postgres
+   (`sogo6_calendar_calendars`) rather than calling PUT — API serializers
+   never echo `sync_config`, so a URL-only comparison would always show
+   “stale” and a PUT would silently wipe the credentials.
 3. verifies the endpoint: PROPFIND → **207** with auth, **401** anonymous.
 
 Why the edge URL: sogo6's `IcsFetcher` is **https-only and rejects private
@@ -128,22 +166,24 @@ Radicale's own htpasswd auth still on top. It is pinned to `172.19.0.250` on
 the store holds only public bookings — never point calrs or this route at a
 staff/SOGo calendar.**
 
-Mirror fetch: sogo6's `IcsFetcher` GETs the subscription URL first and a
-plain ICS feed short-circuits there. Radicale answers GET on a collection
-with 403, so sogo6 (since sogo6-server `1e60879`) falls back to a CalDAV
-mirror: REPORT calendar-query (getetag + calendar-data, VEVENT filter) on
-the collection URL directly (Radicale serves REPORT on the collection even
-when GET is 403), with PROPFIND discovery only as a fallback for servers
-that need a distinct calendar href; every returned event is stitched into a
+Mirror fetch: sogo6 (since sogo6-server `1e60879`) uses a CalDAV REPORT
+mirror, not ICS GET. The `IcsFetcher` first tries GET on the subscription
+URL; Radicale answers GET on a collection with 403, so sogo6 falls back to
+REPORT `calendar-query` (getetag + calendar-data, VEVENT filter) on the
+collection URL directly (Radicale serves REPORT on the collection even when
+GET is 403), with PROPFIND discovery only as a fallback for servers that
+need a distinct calendar href; every returned event is stitched into a
 single VCALENDAR (CRLF, `PRODID:-//sogo6//caldav-mirror//EN`). An empty
 store mirrors as a valid empty calendar (the subscription stays `completed`
 instead of flip-flopping to error), and HTTP 405 on REPORT falls back to the
 legacy GET-of-discovered-href. The subscription needs the Radicale
 credentials at create time (`POST /external-calendars` carries
 `username`/`password`; the update schema is URL-only, so recreate rather
-than repoint when creds change). The CalDAV edge (PROPFIND 207 with booking
-auth, 401 anonymous) and the subscription presence are verified by
-`tests/05-e2e/stories.py` **X4**.
+than repoint when creds change — the provision script repairs stale creds
+directly in Postgres as noted above). The CalDAV edge (PROPFIND 207 with
+booking auth, 401 anonymous) and the subscription presence are verified by
+`tests/05-e2e/stories.py` **X4**; the full booking → CalDAV → mirror →
+cancel round trip is verified by **X5**.
 
 ## Deploy on the openSME VPS
 
