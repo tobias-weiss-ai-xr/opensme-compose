@@ -104,6 +104,36 @@ If a deployment ever needs to *show* real staff availability on the
 booking page, that is a new, separate feature — not "just point calrs at
 SOGo" — and must preserve the free/busy-only contract above.
 
+## SOGo6 ↔ calrs: testuser's groupware calendar connected to the booking store
+
+`scripts/provision-sogo-caldav.sh` (idempotent) connects the demo user's SOGo6
+calendar to calrs:
+
+1. starts the sogo6 **agent worker** (`python -m app.agent.run` inside
+   `opensme-sogo6-server`) — the image's CMD only runs gunicorn, so without
+   it external-calendar sync jobs stay `pending` forever;
+2. creates (or repoints) an **external CalDAV subscription** on
+   `testuser@opensme.local` via the sogo6 API (OIDC login through Zitadel)
+   pointing at `https://<CALENDAR_DOMAIN>/dav/booking/` with the booking
+   htpasswd credentials (`RADICALE_USER`/`RADICALE_PASSWORD`);
+3. verifies the endpoint: PROPFIND → **207** with auth, **401** anonymous.
+
+Why the edge URL: sogo6's `IcsFetcher` is **https-only and rejects private
+IPs** (SSRF guard), so the internal `http://calendar-radicale:5232/` name is
+not usable from a subscribing client. `calendar-radicale` is therefore
+exposed read-at-the-edge via a Traefik router `PathPrefix(`/dav`)` +
+stripprefix (priority 10010, so it never shadows the calrs app router), with
+Radicale's own htpasswd auth still on top. It is pinned to `172.19.0.250` on
+`opensme-net` for internal IP-literal clients. **Privacy contract unchanged:
+the store holds only public bookings — never point calrs or this route at a
+staff/SOGo calendar.**
+
+Known limitation: sogo6's sync engine GETs the subscription URL first and
+Radicale answers GET on a collection with 403, so the automatic ICS mirror
+logs `Failed To Fetch ICS Calendar Feed` until sogo6 grows a REPORT-based
+fetch; the CalDAV connection itself (subscription + PROPFIND) is verified by
+`tests/05-e2e/stories.py` **X4**.
+
 ## Deploy on the openSME VPS
 
 The repo on the VPS is `/opt/opensme-compose/compose`. The calendar overlay

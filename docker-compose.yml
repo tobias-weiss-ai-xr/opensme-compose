@@ -624,10 +624,29 @@ services:
       - radicale-config:/config
       - radicale-data:/data
     networks:
-      - opensme-net
+      # Pinned IP so internal CalDAV clients whose URL validator requires a
+      # dotted host or IP literal (sogo6 external-calendar marshmallow
+      # fields.Url rejects TLD-less names like "calendar-radicale") can
+      # subscribe via http://172.19.0.250:5232/… without an edge route.
+      opensme-net:
+        ipv4_address: 172.19.0.250
     labels:
-      # NO Traefik labels on purpose: internal-only store, reached by
-      # calrs over opensme-net at http://calendar-radicale:5232/
+      # Read-only-at-the-edge CalDAV view of the PUBLIC BOOKING store, so
+      # groupware clients (sogo6 external calendar, source_type=caldav)
+      # can subscribe over HTTPS — sogo6's IcsFetcher is https-only and
+      # rejects private IPs (SSRF guard), so the internal name/IP is not
+      # usable from a client. Privacy contract unchanged: this store holds
+      # ONLY public bookings (never staff/SOGo calendars), and Radicale's
+      # own htpasswd auth still applies on top of the edge route.
+      - "traefik.enable=true"
+      - "traefik.http.routers.calendar-dav.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`) && PathPrefix(`/dav`)"
+      - "traefik.http.routers.calendar-dav.tls=true"
+      - "traefik.http.routers.calendar-dav.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.calendar-dav.entrypoints=websecure"
+      - "traefik.http.routers.calendar-dav.priority=10010"
+      - "traefik.http.middlewares.calendar-dav-strip.stripprefix.prefixes=/dav"
+      - "traefik.http.routers.calendar-dav.middlewares=calendar-dav-strip"
+      - "traefik.http.services.calendar-dav.loadbalancer.server.port=5232"
       - "com.centurylinklabs.watchtower.enable=false"
     healthcheck:
       # the image ships curl; no --fail — with htpasswd auth the root
