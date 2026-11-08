@@ -156,6 +156,18 @@ for ln in lines[1:]:
         s.delete(f"{WM}/api/user/v1/external-calendars/{dup_key}", headers=h, timeout=T)
         print("→ duplicate subscription removed:", dup_key)
 
+# cleanup: drop leftover plain-ICS subscriptions under the testuser (e.g. the
+# historical "proxy-test" pointing at example.com/test.ics from proxy-502
+# debugging). The booking store is CalDAV-only; a leftover ICS row would show
+# up as a broken calendar in the sogo6 UI. This keeps the account exactly in
+# the "connected + preconfigured" state: personal (local) + calrs (caldav).
+ics_rows = psql(
+    "SELECT key FROM sogo6_calendar_calendars "
+    f"WHERE user_uid='$TESTUSER_MAIL' AND source_type='ics' ORDER BY created_at")
+for ics_key in [ln for ln in ics_rows.splitlines() if ln]:
+    s.delete(f"{WM}/api/user/v1/external-calendars/{ics_key}", headers=h, timeout=T)
+    print("→ leftover ics subscription removed:", ics_key)
+
 if not key:
     print("NO KEY — aborting"); sys.exit(1)
 s.post(f"{WM}/api/user/v1/external-calendars/{key}/sync", headers=h, timeout=T)
