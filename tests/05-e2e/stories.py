@@ -111,6 +111,11 @@ Epics / user stories (IDs appear in failure output):
         edge answers PROPFIND 207 with booking auth, 401 anonymous, the
         collection carries a VCALENDAR resourcetype (regression gate for the
         empty-store bug) and a live mirror sync completes
+    X5  full public-booking → CalDAV write-back → sogo6 mirror round trip
+        (self-cleaning, unique slot/guest per run): the public book page
+        confirms a booking, its VEVENT lands in the Radicale collection,
+        the sogo6 mirror syncs it, dashboard-cancel DELETEs it from Radicale
+        and a re-sync drops it from the mirror
 
   Epic A — Archive (paperless-ngx)
     A1  anon / → 302 /accounts/login/
@@ -184,7 +189,8 @@ Epics / user stories (IDs appear in failure output):
 Config (env > .env > default): OPENSME_DOMAIN, PORTAL_DOMAIN, VC_URL,
 VC_DOMAIN, CALENDAR_URL, E2E_CALRS_USER, E2E_CALRS_EVENT,
 LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ZITADEL_ADMIN_PASSWORD,
-E2E_ZITADEL_PAT, E2E_ZITADEL_LOGINCLIENT_PAT, PORTAL_OIDC_CLIENT_ID.
+E2E_ZITADEL_PAT, E2E_ZITADEL_LOGINCLIENT_PAT, PORTAL_OIDC_CLIENT_ID,
+CALRS_ADMIN_EMAIL, CALRS_ADMIN_PASSWORD.
 
 Usage:
   python3 tests/05-e2e/stories.py                  # domain from .env
@@ -195,6 +201,7 @@ Exit codes: 0 = pass, 1 = failures (skips never fail).
 
 import argparse
 import base64
+import datetime
 import hashlib
 import hmac
 import json
@@ -1437,6 +1444,237 @@ def main() -> bool:
                                     f"(have {[c.get('name') for c in ext]})")
                 else:
                     result.warn("X4: webmail login-mode discovery failed")
+
+        # X5 — full public-booking → CalDAV write-back → sogo6 mirror round
+        # trip, self-cleaning. Regression gate for the historical empty-store
+        # bug: a booking made on the PUBLIC page must (1) land as a VEVENT in
+        # the Radicale booking collection, (2) be picked up by testuser's
+        # sogo6 mirror, and afterwards (3) cancelling it must DELETE the
+        # event from Radicale and (4) drop it from the mirror. Uses a unique
+        # far-future weekday slot + unique guest email per run and cancels
+        # the booking at the end (dashboard flow, which is the path that
+        # writes back the DELETE), so repeated runs never collide and leave
+        # no residue.
+        if not (cal_url and rad_user and rad_pw and t_uid
+                and cfg("E2E_ZITADEL_LOGINCLIENT_PAT")
+                and cfg("CALRS_ADMIN_EMAIL") and cfg("CALRS_ADMIN_PASSWORD")):
+            result.skip("X5: needs CALENDAR_URL + RADICALE_* + PAT env "
+                        "+ CALRS_ADMIN_EMAIL/PASSWORD (dashboard cancel)")
+        else:
+            x5_ok = True
+            booked = None
+            marker = f"x5.{int(time.time())}@example.org"
+            try:
+                # ── X5.1: book a free future weekday slot via the public page
+                def _report_cal():
+                    q = ('<?xml version="1.0"?>'
+                         '<c:calendar-query xmlns:d="DAV:" '
+                         'xmlns:c="urn:ietf:params:xml:ns:caldav">'
+                         '<d:prop><d:getetag/><c:calendar-data/></d:prop>'
+                         '<c:filter><c:comp-filter name="VCALENDAR">'
+                         '<c:comp-filter name="VEVENT"/></c:comp-filter>'
+                         '</c:filter></c:calendar-query>')
+                    return requests.request(
+                        "REPORT", cal_url.rstrip("/") + "/dav/booking/main/",
+                        timeout=T, auth=(rad_user, rad_pw), verify=verify,
+                        headers={"Depth": "1"}, data=q)
+
+                base = datetime.date.today() + datetime.timedelta(days=60)
+                for _ in range(6):
+                    d = base + datetime.timedelta(days=1)
+                    while d.weekday() >= 5:   # keep Mon–Fri (availability)
+                        d += datetime.timedelta(days=1)
+                    base = d
+                    s5 = requests.Session(); s5.verify = verify
+                    rr = s5.get(f"{cal_url.rstrip('/')}/u/{calrs_user}/"
+                                f"{calrs_event}/book?date={d}&time=09:30",
+                                timeout=T)
+                    cj = "; ".join(c.name + "=" + c.value for c in s5.cookies)
+                    m = re.search(r"calrs_csrf=([^;]+)", cj)
+                    tok = m.group(1) if m else ""
+                    rr = s5.post(f"{cal_url.rstrip('/')}/u/{calrs_user}/"
+                                 f"{calrs_event}/book",
+                                 data={"_csrf": tok, "date": str(d),
+                                       "time": "09:30", "tz": "Europe/Berlin",
+                                       "name": "X5 Roundtrip",
+                                       "email": marker, "notes": "x5 e2e"},
+                                 timeout=T)
+                    low = rr.text.lower()
+                    if "no longer available" not in low and \
+                       "too soon" not in low:
+                        booked = (s5, d, marker, calrs_user, calrs_event)
+                        break
+                if not booked:
+                    result.fail("X5: no free slot after 6 tries — booking "
+                                "page refuses all candidates")
+                    x5_ok = False
+                else:
+                    result.ok(f"X5: public booking confirmed on {booked[1]} "
+                              f"(guest {marker})")
+
+                    # ── X5.2: VEVENT landed in Radicale booking collection
+                    rr = _report_cal()
+                    if rr.status_code == 207 and marker in rr.text:
+                        result.ok("X5: booking VEVENT present in Radicale "
+                                  "/dav/booking/main/ (write-back landed)")
+                    else:
+                        result.fail(f"X5: write-back missing (REPORT "
+                                    f"{rr.status_code}, marker absent) — the "
+                                    f"empty-store regression")
+                        x5_ok = False
+
+                    # ── X5.3: sogo6 mirror picks the event up
+                    s6 = requests.Session(); s6.verify = verify
+                    rr = s6.get(wm_url + "/api/user/v1/auth/mode",
+                                params={"username": "testuser@opensme.local",
+                                        "redirect": wm_url + "/"}, timeout=T)
+                    loc = ((rr.json().get("data") or {}).get("location") or "")
+                    got_events = None
+                    if loc:
+                        qs, _ = api_login(s6, idp_base,
+                                          cfg("E2E_ZITADEL_LOGINCLIENT_PAT"),
+                                          t_uid, loc, t_uid,
+                                          cfg("E2E_TESTUSER_PASSWORD", "eval2026"))
+                        ru6 = urllib.parse.parse_qs(
+                            urllib.parse.urlparse(loc).query)["redirect_uri"][0]
+                        rr = s6.get(ru6 + "?" + urllib.parse.urlencode(qs, doseq=True),
+                                    timeout=T, allow_redirects=True)
+                        h6 = {"Authorization": "Bearer " +
+                              rr.url.split("#token=")[-1]}
+                        rr = s6.get(wm_url + "/api/user/v1/calendars",
+                                    headers=h6, timeout=T)
+                        sub6 = next((c for c in
+                                     ((rr.json().get("data") or {})
+                                      .get("calendars", []))
+                                     if c.get("source_type") == "caldav"), None)
+                        if sub6:
+                            key6 = sub6.get("key") or ""
+                            s6.post(wm_url + "/api/user/v1/external-calendars/"
+                                    + key6 + "/sync", headers=h6, timeout=T)
+                            for _ in range(10):
+                                time.sleep(6)
+                                st = s6.get(wm_url + "/api/user/v1/external-"
+                                            "calendars/" + key6 + "/sync",
+                                            headers=h6, timeout=T)
+                                stj = st.json().get("data") or {}
+                                if stj.get("sync_status") == "completed":
+                                    break
+                            lo = (booked[1] - datetime.timedelta(days=2)).isoformat()
+                            hi = (booked[1] + datetime.timedelta(days=3)).isoformat()
+                            ev = s6.get(wm_url + "/api/user/v1/calendars/"
+                                        + key6 + "/events?start_date_time=" + lo
+                                        + "&end_date_time=" + hi,
+                                        headers=h6, timeout=T)
+                            got_events = (ev, marker)
+                            if marker in ev.text:
+                                result.ok("X5: sogo6 mirror synced the booking "
+                                          "event (visible via events API)")
+                            else:
+                                result.fail("X5: booking event not in the sogo6 "
+                                            "mirror after sync completed")
+                                x5_ok = False
+                        else:
+                            result.fail("X5: no caldav subscription on testuser — "
+                                        "mirror cannot be verified")
+                            x5_ok = False
+                    else:
+                        result.warn("X5: webmail login-mode discovery failed "
+                                    "(mirror check skipped)")
+            finally:
+                # ── X5.4 (cleanup — ALWAYS): dashboard-cancel the booking,
+                # which fires the CalDAV DELETE into Radicale. Do this even
+                # when an assertion above failed, so a broken run leaves no
+                # residue.
+                if booked:
+                    _s5, _d, _marker, _, _ = booked
+                    try:
+                        rr = _s5.get(cal_url.rstrip("/") + "/auth/login",
+                                     timeout=T)
+                        cj = "; ".join(c.name + "=" + c.value
+                                        for c in _s5.cookies)
+                        m = re.search(r"calrs_csrf=([^;]+)", cj)
+                        tok = m.group(1) if m else ""
+                        rr = _s5.post(cal_url.rstrip("/") + "/auth/login",
+                                      data={"_csrf": tok,
+                                            "email": cfg("CALRS_ADMIN_EMAIL"),
+                                            "password": cfg("CALRS_ADMIN_PASSWORD")},
+                                      timeout=T, allow_redirects=True)
+                        dash_ok = "/dashboard" in rr.url
+                        if not dash_ok:
+                            result.warn("X5: dashboard login failed — cleanup "
+                                        "may be incomplete")
+                        rr = _s5.get(cal_url.rstrip("/") + "/dashboard/bookings",
+                                     timeout=T)
+                        rows = rr.text.split('class="booking-row"')
+                        bid = None
+                        for chunk in rows[1:]:
+                            if _marker in chunk:
+                                mm = re.search(r"/dashboard/bookings/"
+                                               r"([0-9a-f-]{36})/cancel", chunk)
+                                if mm:
+                                    bid = mm.group(1)
+                                break
+                        if bid:
+                            cj = "; ".join(c.name + "=" + c.value
+                                            for c in _s5.cookies)
+                            m = re.search(r"calrs_csrf=([^;]+)", cj)
+                            tok = m.group(1) if m else ""
+                            rr = _s5.post(cal_url.rstrip("/") +
+                                          f"/dashboard/bookings/{bid}/cancel",
+                                          data={"_csrf": tok,
+                                                "reason": "x5 self-clean"},
+                                          timeout=T, allow_redirects=True)
+                            # ── X5.4: VEVENT must be DELETEd from Radicale
+                            rr = _report_cal()
+                            if rr.status_code == 207 and marker not in rr.text:
+                                result.ok("X5: cancelling the booking DELETEd "
+                                          "its VEVENT from Radicale (write-back "
+                                          "delete propagates)")
+                            else:
+                                result.fail("X5: Radicale VEVENT survived the "
+                                            f"cancel (REPORT {rr.status_code})")
+                                x5_ok = False
+                            # ── X5.5: mirror must drop it after re-sync
+                            if got_events is not None:
+                                ev0, _mark = got_events
+                                # re-sync (fresh session kept in scope: reuse
+                                # the s6 login side-effects below is messy —
+                                # do a bare re-sync via the same s6 session)
+                                try:
+                                    s6.post(wm_url + "/api/user/v1/external-"
+                                            "calendars/" + key6 + "/sync",
+                                            headers=h6, timeout=T)
+                                    for _ in range(10):
+                                        time.sleep(6)
+                                        st = s6.get(wm_url + "/api/user/v1/"
+                                                    "external-calendars/" + key6
+                                                    + "/sync", headers=h6, timeout=T)
+                                        stj = st.json().get("data") or {}
+                                        if stj.get("sync_status") == "completed":
+                                            break
+                                    lo = (booked[1] - datetime.timedelta(days=2)).isoformat()
+                                    hi = (booked[1] + datetime.timedelta(days=3)).isoformat()
+                                    ev = s6.get(wm_url + "/api/user/v1/calendars/"
+                                                + key6 + "/events?start_date_time="
+                                                + lo + "&end_date_time=" + hi,
+                                                headers=h6, timeout=T)
+                                    if marker not in ev.text:
+                                        result.ok("X5: sogo6 mirror dropped the "
+                                                  "cancelled booking after re-sync")
+                                    else:
+                                        result.fail("X5: cancelled booking still in "
+                                                    "the sogo6 mirror")
+                                        x5_ok = False
+                                except Exception as ex:
+                                    result.warn(f"X5: mirror-drop re-sync skipped "
+                                                f"({ex})")
+                        else:
+                            result.warn("X5: cancelled booking not found on the "
+                                        "dashboard — Radicale/mirror cleanup "
+                                        "unverified")
+                    except Exception as ex:
+                        result.warn(f"X5: cleanup failed ({ex}) — booking may "
+                                   "remain confirmed")
 
     # ══ Epic A — Archive (paperless-ngx) ══════════════════════════════
     result.header("Epic A — Archive (paperless-ngx)")
