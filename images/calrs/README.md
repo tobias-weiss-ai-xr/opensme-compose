@@ -45,6 +45,25 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      MKCALENDARs (creates) `/booking/main/` as a VCALENDAR collection in
      Radicale if absent and points `write_calendar_href` there, so the
      provisioning chain is self-recovering.
+4. `patches/0003-livekit-room-url.patch` — per-booking LiveKit room URLs
+   (required for "pick a meeting URL without copy-paste"; apply AFTER 0002):
+   - Event-type locations may use the template `{uid}` (e.g.
+     `https://vc.example/room/{uid}`). At booking time calrs replaces `{uid}`
+     with the booking's room-safe uid (the uuid part of `<uuid>@calrs`; room
+     names must match `[A-Za-z0-9_-]`, no `@`) wherever a confirmed booking
+     renders its location: the confirmed page, confirmation/reschedule
+     emails, and the ICS `LOCATION:` line written back to CalDAV. So EVERY
+     booking gets its OWN join URL — guests click straight into their room,
+     nobody copies or pastes a URL.
+     - `resolve_location()` helper + wiring in the three confirmed/booking
+       handlers (`handle_booking_for_user`, `handle_group_booking`,
+       `handle_dynamic_group_booking`). Slots/form pages show only the
+       "Video call" label, so `{uid}` never leaks pre-booking.
+   - The event-type form gets a "Use self-hosted video (one room per
+     booking)" button (visible when `CALRS_VC_URL`/`VC_URL` is set) that
+     fills the location field with `{VC}/room/{uid}` — one click, no
+     copy-paste. `vc_url` is injected into all five event-type-form render
+     contexts from `CALRS_VC_URL` (fallback `VC_URL`).
 
 ## WARNING: this subtree does NOT self-build
 
@@ -59,6 +78,7 @@ git clone https://github.com/olivierlambert/calrs.git
 git -C calrs checkout v1.6.0
 git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
 git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
+git -C calrs apply images/calrs/patches/0003-livekit-room-url.patch
 cd calrs && docker buildx build --network host -t calrs:1.6.0 .
 ```
 

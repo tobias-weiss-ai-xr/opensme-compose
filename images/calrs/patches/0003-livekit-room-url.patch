@@ -1,0 +1,214 @@
+diff --git a/src/web/mod.rs b/src/web/mod.rs
+index d3b6585..21691a2 100644
+--- a/src/web/mod.rs
++++ b/src/web/mod.rs
+@@ -3424,6 +3424,7 @@ async fn new_event_type_form(
+             form_visibility => match preset { "private" => "private", "internal" => "internal", _ => "public" },
+             form_location_type => "link",
+             form_location_value => "",
++            vc_url => vc_base_url(),
+             form_avail_schedule => user_avail,
+             form_reminder_minutes => 1440,
+             form_max_additional_guests => 0,
+@@ -3930,6 +3931,7 @@ async fn edit_event_type_form(
+             form_visibility => visibility,
+             form_location_type => loc_type,
+             form_location_value => loc_value.unwrap_or_default(),
++            vc_url => vc_base_url(),
+             form_avail_days => avail_days,
+             form_avail_start => avail_start,
+             form_avail_end => avail_end,
+@@ -4984,6 +4986,7 @@ fn render_event_type_form_error(
+             form_visibility => form.visibility.as_deref().unwrap_or("public"),
+             form_location_type => form.location_type.as_deref().unwrap_or("link"),
+             form_location_value => form.location_value.as_deref().unwrap_or(""),
++            vc_url => vc_base_url(),
+             form_avail_days => form.avail_days.as_deref().unwrap_or("1,2,3,4,5"),
+             form_avail_start => form.avail_start.as_deref().unwrap_or("09:00"),
+             form_avail_end => form.avail_end.as_deref().unwrap_or("17:00"),
+@@ -5648,6 +5651,7 @@ async fn new_group_event_type_form(
+             form_requires_confirmation => false,
+             form_location_type => "link",
+             form_location_value => "",
++            vc_url => vc_base_url(),
+             form_avail_schedule => user_avail,
+             form_default_calendar_view => "month",
+             form_first_slot_only => false,
+@@ -6058,6 +6062,7 @@ async fn edit_group_event_type_form(
+             form_visibility => visibility,
+             form_location_type => loc_type,
+             form_location_value => loc_value.unwrap_or_default(),
++            vc_url => vc_base_url(),
+             form_avail_days => avail_days,
+             form_avail_start => avail_start,
+             form_avail_end => avail_end,
+@@ -6956,6 +6961,39 @@ async fn show_group_book_form(
+     Html(rendered)
+ }
+ 
++/// Render a booking location value with per-booking substitutions.
++///
++/// `{uid}` is replaced with the booking's room-safe uid (the uuid part of
++/// `<uuid>@calrs`, without the `@calrs` suffix — room names must match
++/// `[A-Za-z0-9_-]`). This lets an event type use a templated self-hosted
++/// video (LiveKit) URL like `https://vc.example/room/{uid}` so every booking
++/// gets its OWN room link shown to the guest — no copying/pasting URLs.
++fn resolve_location<L: AsRef<str>>(loc: L, uid: &str) -> String {
++    let s = loc.as_ref();
++    if s.contains("{uid}") {
++        let room = uid.split('@').next().unwrap_or(uid);
++        s.replace("{uid}", room)
++    } else {
++        s.to_string()
++    }
++}
++
++/// Self-hosted video (LiveKit) base origin, from CALRS_VC_URL (fallback
++/// VC_URL). Used by the event-type form's "use self-hosted video" helper to
++/// fill a per-booking room template: `{base}/room/{uid}`.
++static VC_BASE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
++fn vc_base_url() -> Option<String> {
++    VC_BASE
++        .get_or_init(|| {
++            std::env::var("CALRS_VC_URL")
++                .ok()
++                .or_else(|| std::env::var("VC_URL").ok())
++                .filter(|v| !v.trim().is_empty())
++                .map(|v| v.trim_end_matches('/').to_string())
++        })
++        .clone()
++}
++
+ async fn handle_group_booking(
+     State(state): State<Arc<AppState>>,
+     headers: axum::http::HeaderMap,
+@@ -7235,7 +7273,7 @@ async fn handle_group_booking(
+             host_email: host_email.clone(),
+             uid: uid.clone(),
+             notes: form.notes.clone(),
+-            location: location_display,
++            location: location_display.map(|l| resolve_location(l, &uid)),
+             reminder_minutes: reminder_min,
+             additional_attendees: additional_attendees.clone(),
+         };
+@@ -7320,7 +7358,7 @@ async fn handle_group_booking(
+             notes => form.notes,
+             pending => needs_approval,
+             location_type => loc_type,
+-            location_value => loc_value,
++            location_value => loc_value.clone().map(|l| resolve_location(l, &uid)),
+             additional_attendees => additional_attendees,
+             company_link => state.company_link.read().await.clone(),
+         })
+@@ -7966,7 +8004,7 @@ async fn handle_dynamic_group_booking(
+             host_email: owner_email,
+             uid: uid.clone(),
+             notes: form.notes.clone(),
+-            location: location_display,
++            location: location_display.map(|l| resolve_location(l, &uid)),
+             reminder_minutes: reminder_min,
+             additional_attendees: all_additional.clone(),
+         };
+@@ -8046,7 +8084,7 @@ async fn handle_dynamic_group_booking(
+             notes => form.notes,
+             pending => needs_approval,
+             location_type => loc_type,
+-            location_value => loc_value,
++            location_value => loc_value.clone().map(|l| resolve_location(l, &uid)),
+             additional_attendees => all_additional,
+             company_link => state.company_link.read().await.clone(),
+         })
+@@ -8657,7 +8695,7 @@ async fn handle_booking_for_user(
+                 host_email,
+                 uid: uid.clone(),
+                 notes: form.notes.clone(),
+-                location: location_display,
++                location: location_display.map(|l| resolve_location(l, &uid)),
+                 reminder_minutes: reminder_min,
+                 additional_attendees: additional_attendees.clone(),
+             };
+@@ -8742,7 +8780,7 @@ async fn handle_booking_for_user(
+             notes => form.notes,
+             pending => needs_approval,
+             location_type => loc_type,
+-            location_value => loc_value,
++            location_value => loc_value.clone().map(|l| resolve_location(l, &uid)),
+             additional_attendees => additional_attendees,
+             company_link => state.company_link.read().await.clone(),
+         })
+@@ -13779,6 +13817,31 @@ fn render_claim_error(state: &AppState, title: &str, message: &str) -> axum::res
+ mod tests {
+     use super::*;
+ 
++    // --- resolve_location (per-booking LiveKit room URL) ---
++
++    #[test]
++    fn resolve_location_substitutes_uid_into_room_url() {
++        let uid = "0f4f0bed-3f66-4a9c-8c1d-4ec8b2a9d031@calrs";
++        let out = resolve_location("https://vc.example/room/{uid}", uid);
++        // room name = uuid part only ('@' is not allowed in room names)
++        assert_eq!(out, "https://vc.example/room/0f4f0bed-3f66-4a9c-8c1d-4ec8b2a9d031");
++    }
++
++    #[test]
++    fn resolve_location_passthrough_without_template() {
++        assert_eq!(
++            resolve_location("https://vc.example/lobby", "whatever@calrs"),
++            "https://vc.example/lobby"
++        );
++    }
++
++    #[test]
++    fn resolve_location_no_suffix_uid() {
++        let out = resolve_location("https://vc.example/room/{uid}", "plain-room");
++        assert_eq!(out, "https://vc.example/room/plain-room");
++    }
++
++
+     // --- Rate limiter tests ---
+ 
+     #[tokio::test]
+diff --git a/templates/event_type_form.html b/templates/event_type_form.html
+index 6e1ed80..a0c2316 100644
+--- a/templates/event_type_form.html
++++ b/templates/event_type_form.html
+@@ -88,6 +88,14 @@
+     <div class="form-group">
+       <label for="location_value">Details</label>
+       <input type="text" id="location_value" name="location_value" required value="{{ form_location_value }}" placeholder="https://meet.example.com/my-room">
++      {% if vc_url %}
++      <div style="margin-top: 0.4rem; font-size: 0.82rem;">
++        <button type="button" id="vc_pick" style="padding: 0.35rem 0.7rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer;">
++          Use self-hosted video (one room per booking)
++        </button>
++        <span id="vc_hint" style="margin-left: 0.5rem; color: var(--muted, #888);"></span>
++      </div>
++      {% endif %}
+     </div>
+   </div>
+ 
+@@ -1391,6 +1399,24 @@
+         setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+       });
+     };
++
++    // Self-hosted video (LiveKit): fill the location field with a
++    // per-booking room template. {uid} is substituted at booking time with
++    // the booking's room-safe uid, so every booking gets its own join URL:
++    //   https://vc.example/room/{uid}  ->  https://vc.example/room/<uuid>
++    var vcPick = document.getElementById('vc_pick');
++    var vcHint = document.getElementById('vc_hint');
++    var locInput = document.getElementById('location_value');
++    var vcBase = '{{ vc_url|default('', true) }}'.replace(/\/+$/, '');
++    if (vcPick && vcBase) {
++      vcPick.addEventListener('click', function() {
++        var roomUrl = vcBase + '/room/{uid}';
++        locInput.value = roomUrl;
++        locInput.placeholder = roomUrl;
++        if (vcHint) vcHint.textContent = 'A link is generated automatically per booking — no copy-paste.';
++        document.getElementById('location_type').value = 'link';
++      });
++    };
+   })();
+ </script>
+ {% endblock dashboard_content %}
