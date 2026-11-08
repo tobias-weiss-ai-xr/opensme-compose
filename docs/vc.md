@@ -111,3 +111,31 @@ tiles with two videos) via:
   display-capture=(self)` (not the blanket fleet policy)
 * portal `/` → 12 tiles incl. "Meet" → `https://vc.home.opensme.graphwiz.ai`
 * calrs booking link lands on the lobby
+
+## calrs integration — one room per booking (patch 0003)
+
+Event-type locations support the template `{uid}`: at booking time calrs
+replaces it with the booking's room-safe uid (the uuid part of
+`<uuid>@calrs`), so EVERY booking renders its OWN join URL
+`https://$VC_DOMAIN/room/<uuid>` on the confirmation page, in the
+confirmation email, and in the ICS `LOCATION:` written back to CalDAV
+(and mirrored into the sogo6 subscription). Guests click straight into
+their room — no copying/pasting URLs, no typing a room name in the lobby
+(`vc-room` mints the join token per room; `<uuid>` matches its
+`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` room rule).
+
+Set it up in the calrs dashboard → Event Types → Edit: press **"Use
+self-hosted video (one room per booking)"** (visible when `CALRS_VC_URL`
+is set on the `calendar` service) — it fills the location field with
+`{VC}/room/{uid}` in one click. Manual equivalent:
+
+```
+https://vc.home.opensme.graphwiz.ai/room/{uid}
+```
+
+Verified live (2026-11-09): booking shows `Location:
+https://vc.home.opensme.graphwiz.ai/room/<uuid>`; opening it auto-joins
+LiveKit 1.13.11 (console: `connection state changed: connecting ->`
+`connected`, room `<uuid>`, mic/camera/share/leave controls); the same
+URL is in the Radicale write-back (`REPORT .../dav/booking/main/` →
+`LOCATION:https://vc.../room/...`) and in the sogo6 mirror.
