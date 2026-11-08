@@ -128,10 +128,21 @@ Radicale's own htpasswd auth still on top. It is pinned to `172.19.0.250` on
 the store holds only public bookings — never point calrs or this route at a
 staff/SOGo calendar.**
 
-Known limitation: sogo6's sync engine GETs the subscription URL first and
-Radicale answers GET on a collection with 403, so the automatic ICS mirror
-logs `Failed To Fetch ICS Calendar Feed` until sogo6 grows a REPORT-based
-fetch; the CalDAV connection itself (subscription + PROPFIND) is verified by
+Mirror fetch: sogo6's `IcsFetcher` GETs the subscription URL first and a
+plain ICS feed short-circuits there. Radicale answers GET on a collection
+with 403, so sogo6 (since sogo6-server `1e60879`) falls back to a CalDAV
+mirror: REPORT calendar-query (getetag + calendar-data, VEVENT filter) on
+the collection URL directly (Radicale serves REPORT on the collection even
+when GET is 403), with PROPFIND discovery only as a fallback for servers
+that need a distinct calendar href; every returned event is stitched into a
+single VCALENDAR (CRLF, `PRODID:-//sogo6//caldav-mirror//EN`). An empty
+store mirrors as a valid empty calendar (the subscription stays `completed`
+instead of flip-flopping to error), and HTTP 405 on REPORT falls back to the
+legacy GET-of-discovered-href. The subscription needs the Radicale
+credentials at create time (`POST /external-calendars` carries
+`username`/`password`; the update schema is URL-only, so recreate rather
+than repoint when creds change). The CalDAV edge (PROPFIND 207 with booking
+auth, 401 anonymous) and the subscription presence are verified by
 `tests/05-e2e/stories.py` **X4**.
 
 ## Deploy on the openSME VPS
