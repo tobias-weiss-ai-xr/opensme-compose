@@ -74,6 +74,18 @@ services:
       PAPERLESS_FILENAME_FORMAT: "{created_year}/{created_month}/{created_day}/{correspondent}/{title}"
       PAPERLESS_CONVERT_MEMORY_LIMIT: 256
       PAPERLESS_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
+      # ── S3 storage backend for documents ──
+      # Configure S3-compatible storage (SeaweedFS, aliased as minio) for
+      # document storage. Uses the same credentials as other services via
+      # OC_S3_* environment variables. This allows Paperless to store
+      # documents in the shared object storage backend.
+      PAPERLESS_FILES_BACKEND: s3
+      PAPERLESS_AWS_ENDPOINT_URL: http://minio:9000
+      PAPERLESS_AWS_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
+      PAPERLESS_AWS_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set}
+      PAPERLESS_AWS_STORAGE_BUCKET_NAME: paperless
+      PAPERLESS_AWS_REGION: us-east-1
+      PAPERLESS_AWS_USE_PATH_STYLE_ENDPOINT: true
       # Bypass the corporate HTTP proxy for internal Docker traffic (OIDC
       # discovery/token exchange to Zitadel via the host-gateway FQDN,
       # Gotenberg conversions). Docker's injected http_proxy cannot resolve
