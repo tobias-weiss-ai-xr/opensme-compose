@@ -27,6 +27,7 @@ rules:
       - stalwart
       - sogo
       - invoiceninja
+      - invoiceninja-worker
       - paperless-ngx
       - paperless-gotenberg
       - paperless-tika

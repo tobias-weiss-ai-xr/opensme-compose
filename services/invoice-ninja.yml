@@ -78,6 +78,10 @@ services:
       # recreate loses it (and the APP_KEY it auto-generated), so the key must
       # be supplied explicitly and persisted in the host .env.
       APP_KEY: ${INVOICENINJA_APP_KEY:-}
+      # Laravel app settings
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_LOG_LEVEL: error
       # OIDC SSO via Zitadel (config/services.php -> services.oidc; Socialite
       # 'oidc' driver). Callback URI registered at the IdP: ${APP_URL}/auth/oidc
       OIDC_ISSUER: ${INVOICENINJA_OIDC_ISSUER:-https://auth.home.opensme.graphwiz.ai}
@@ -90,7 +94,7 @@ services:
       HTTPS_PROXY: ${INVOICENINJA_HTTPS_PROXY:-}
       HTTP_PROXY: ${INVOICENINJA_HTTP_PROXY:-}
       NO_PROXY: ${INVOICENINJA_NO_PROXY:-}
-      APP_ENV: production
+      # Database: MariaDB (upstream pgsql migrations broken in v5)
       DB_HOST: invoiceninja-db
       DB_PORT: "3306"
       DB_DATABASE: invoiceninja_db
@@ -100,13 +104,32 @@ services:
       # Laravel reads DB_CONNECTION (DB_TYPE is a invoiceninja-doc but
       # dead name — without this it defaults to the mysql driver)
       DB_CONNECTION: mysql
+      # Database connection pooling via MySQL `wait_timeout` tuning
+      # Keep connections alive across requests (matches확 redis session TTL)
+      MYSQL_WAIT_TIMEOUT: "28800"
+      # Email: internal SMTP via Stalwart (no external relay)
       MAIL_MAILER: smtp
       MAIL_HOST: stalwart
       MAIL_PORT: "25"
       MAIL_ENCRYPTION: ""
+      MAIL_FROM_ADDRESS: "invoices@${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+      MAIL_FROM_NAME: "${OPENSME_COMPANY_NAME:-openSME Invoicing}"
+      # Auto-create user accounts on first OIDC login (no confirmation email)
       REQUIRE_CONFIRMATION: "false"
       SET_UNCONFIRMED: "true"
       SELF_UPDATE: "false"
+      # Session driver: redis for shared cache across fpm workers
+      SESSION_DRIVER: redis
+      SESSION_LIFETIME: "1440"  # 24 hours in minutes
+      SESSION_DOMAIN: ".${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+      SESSION_SECURE_COOKIE: "true"
+      # Cache driver: redis for query caching
+      CACHE_DRIVER: redis
+      # Queue: database driver (simple, no external queue service needed)
+      QUEUE_CONNECTION: database
+      # Queue worker concurrency (matches resource limits)
+      QUEUE_WORKER_SLEEP: "3"
+      QUEUE_WORKER_TIMEOUT: "60"
       # ── S3-compatible object storage: SeaweedFS (was MinIO) ──────────
       # Default storage driver: s3. Files (invoices, PDFs, logos, etc.)
       # go to the shared object store instead of the local storage volume.
@@ -151,6 +174,68 @@ services:
         reservations:
           cpus: "0.1"
           memory: 64M
+
+  # Laravel queue worker for Invoice Ninja
+  # Processes queued jobs (PDF generation, email notifications, etc.)
+  # Uses the same built image as the main fpm container
+  invoiceninja-worker:
+    <<: *service-defaults
+    image: invoiceninja-pg:5
+    build: ./services/invoice-ninja
+    container_name: opensme-invoiceninja-worker
+    restart: unless-stopped
+    profiles: ["invoice"]
+    entrypoint: ["/invoiceninja-entrypoint.sh"]
+    command: ["php", "/var/www/app/artisan", "queue:work", "--daemon", "--sleep=3", "--tries=3"]
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DB_HOST: invoiceninja-db
+      DB_PORT: "3306"
+      DB_DATABASE: invoiceninja_db
+      DB_USERNAME: invoiceninja_user
+      DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:?INVOICENINJA_DB_PASSWORD must be set in .env}
+      DB_CONNECTION: mysql
+      QUEUE_CONNECTION: database
+      # Session and cache: use redis like main fpm container
+      SESSION_DRIVER: redis
+      CACHE_DRIVER: redis
+      # Mail settings (same as fpm)
+      MAIL_MAILER: smtp
+      MAIL_HOST: stalwart
+      MAIL_PORT: "25"
+      MAIL_ENCRYPTION: ""
+      MAIL_FROM_ADDRESS: "invoices@${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
+      MAIL_FROM_NAME: "openSME Invoicing"
+      # File storage (same S3 config as fpm)
+      FILESYSTEM_DISK: s3
+      AWS_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
+      AWS_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set in .env}
+      AWS_DEFAULT_REGION: ${OC_S3_REGION:-us-east-1}
+      AWS_BUCKET: ${INVOICENINJA_S3_BUCKET:-invoiceninja}
+      AWS_ENDPOINT: ${OC_S3_ENDPOINT:-http://minio:9000}
+      AWS_URL: ${OC_S3_ENDPOINT:-http://minio:9000}
+      AWS_USE_PATH_STYLE_ENDPOINT: "true"
+    volumes:
+      - invoiceninja-storage:/var/www/app/storage
+    network_mode: service:invoiceninja-web
+    depends_on:
+      invoiceninja:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'queue:work' > /dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
 
   # nginx front for the fpm container; serves the shared public volume and
   # forwards FastCGI to the "invoiceninja" service

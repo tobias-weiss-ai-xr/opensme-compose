@@ -38,6 +38,7 @@
         down-volumes fmt lint-code logs-size perf-check \
         provision-demo-users provision-demo-users-clean provision-demo-users-dry \
         provision-mail-users \
+        provision-invoice-demo provision-invoice-demo-clean provision-invoice-demo-force \
         prune restore restore-from survey-deploy test-run
 
 .DEFAULT_GOAL := help
@@ -439,6 +440,18 @@ provision-mail-users:
 	@bash scripts/provision-demo-users.sh --component zitadel
 	@bash scripts/provision-demo-users.sh --component stalwart
 
+# ---------------------------------------------------------------------------
+# Invoice Ninja Demo Provisioning
+# ---------------------------------------------------------------------------
+provision-invoice-demo:
+	@bash scripts/provision-invoice-demo.sh
+
+provision-invoice-demo-clean:
+	@bash scripts/provision-invoice-demo.sh --clean
+
+provision-invoice-demo-force:
+	@bash scripts/provision-invoice-demo.sh --force
+
 compliance:
 	@python3 scripts/compliance.py
 
@@ -560,6 +573,9 @@ help:
 	@echo "    make provision-demo-users-clean  Delete + re-provision demo users"
 	@echo "    make provision-demo-users-dry    Show demo user config (JSON) without provisioning"
 	@echo "    make provision-mail-users    Provision the 12 demo users (IdP accounts + SOGo mail_users rows)"
+	@echo "    make provision-invoice-demo   Provision GraphWiz AI demo tenant in Invoice Ninja"
+	@echo "    make provision-invoice-demo-clean   Remove demo data from Invoice Ninja"
+	@echo "    make provision-invoice-demo-force  Force re-provision Invoice Ninja demo"
 	@echo "    make compliance              Generate compliance reports (JSON + MD)"
 	@echo ""
 	@echo -e "  $(GREEN)Demo Quickstart$(NC)"

@@ -28,6 +28,26 @@ services:
     resource_limits:
       memory: 512M
 
+  invoiceninja-worker:
+    # Queue worker for background job processing (PDF, emails, etc.)
+    image: invoiceninja-pg:5
+    compose_file: services/invoice-ninja.yml
+    required: false
+    profiles: [invoice]
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    depends_on: [invoiceninja, redis]
+    volumes:
+      - invoiceninja-storage:/var/www/app/storage
+    env:
+      - INVOICENINJA_DB_PASSWORD
+      - INVOICENINJA_APP_KEY
+    # No direct external access - internal only
+    traefik_labels: false
+    resource_limits:
+      memory: 128M
+
   paperless-ngx:
     # Forked image (images/paperless-oidc): stock paperless-ngx 3.3.4 never loads
     # allauth's openid_connect provider app — see commit addbef5. Overridable via
