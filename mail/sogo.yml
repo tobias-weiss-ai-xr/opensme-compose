@@ -67,8 +67,8 @@ services:
       # OIDC discovery through the proxy which can't resolve .opensme.local.
       # To also cover the Docker bridge subnet ranges in proxy environments,
       # set SOGO_NO_PROXY in your .env (gitignored).
-      NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,.opensme.local}
-      no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,.opensme.local}
+      NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,opencloud,traefik,zitadel,.opensme.local}
+      no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,opencloud,traefik,zitadel,.opensme.local}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:
