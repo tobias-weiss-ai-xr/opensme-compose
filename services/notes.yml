@@ -63,6 +63,8 @@ services:
       Y_PROVIDER_API_BASE_URL: http://notes-y-provider:4444
       Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
       AWS_S3_ENDPOINT_URL: "http://minio:9000"
+      NO_PROXY: ${CLOUD_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
+      no_proxy: ${CLOUD_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
       AWS_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
       AWS_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set in .env}
       AWS_STORAGE_BUCKET_NAME: notes-media
