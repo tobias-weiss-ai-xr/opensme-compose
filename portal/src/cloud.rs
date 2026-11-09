@@ -331,9 +331,20 @@ pub fn dav_url(dav_base: &str, rel_path: &str) -> Result<String, String> {
     Ok(url)
 }
 
+/// Build a user-specific WebDAV base path from a username.
+/// OpenCloud serves user files at /remote.php/dav/files/<username>/.
+/// This function constructs the full path segment for a given user.
+pub fn get_user_dav_path(username: &str) -> String {
+    if username.is_empty() {
+        String::new()
+    } else {
+        format!("/remote.php/dav/files/{}", encode_segment(username))
+    }
+}
+
 /// Validate a RELATIVE directory/file path for the portal bridge:
 /// non-empty (after trim), no leading `/` (absolute request URLs under
-/// `remote.php/…` are built by [`dav_url`] — callers never supply
+/// `remote.php/...` are built by [`dav_url`] — callers never supply
 /// absolute text), no empty segments (leading/trailing/double slashes)
 /// and no `..`/`.` segments. Returns the trimmed path. This is the gate
 /// the `/api/cloud` handlers run BEFORE any network call; `dav_url`
@@ -796,6 +807,33 @@ impl CloudFiles {
             user,
             pass,
             http,
+        }
+    }
+
+    /// Get the user-specific DAV path for this CloudFiles instance.
+    /// Returns the path component (without the base URL) for the configured user.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub fn user_dav_path(&self) -> String {
+        get_user_dav_path(&self.user)
+    }
+
+    /// Build a user-specific CloudFiles instance from a username.
+    /// Uses the same base URL and credentials, but constructs the DAV path
+    /// for the specified user.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub fn for_user(&self, username: String) -> Self {
+        // Extract base URL without the user path
+        // CLOUD_WEBDAV_URL might be: http://opensme-opencloud:9200/remote.php/dav/files/uploader
+        // We want: http://opensme-opencloud:9200 + /remote.php/dav/files/<new-user>
+        let base_url = self.dav_base.trim_end_matches('/');
+        let new_path = get_user_dav_path(&username);
+        let new_dav_base = format!("{}{}", base_url, new_path);
+        Self {
+            dav_base: new_dav_base,
+            share_url: self.share_url.clone(),
+            user: username,
+            pass: self.pass.clone(),
+            http: self.http.clone(),
         }
     }
 
