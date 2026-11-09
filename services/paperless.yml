@@ -80,8 +80,8 @@ services:
       # these hosts — without the bypass the SSO entry renders but the login
       # dies right after the button click (discovery 000/503 through the
       # proxy). Same pattern as SOGO_NO_PROXY in mail/sogo.yml.
-      NO_PROXY: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
-      no_proxy: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
+      NO_PROXY: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
+      no_proxy: ${PAPERLESS_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai,paperless-gotenberg}
       # TLS trust for the OIDC backchannel (discovery/token/userinfo against
       # https://auth.<domain> via host-gateway -> traefik): the lab wildcard
       # is baked into the image's SYSTEM bundle (images/paperless-oidc:
