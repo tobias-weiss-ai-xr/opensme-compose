@@ -1037,6 +1037,14 @@ impl CloudFiles {
         })
     }
 
+    /// Download file and return raw bytes. Simpler interface than download()
+    /// which returns CloudDownload with content_type.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn download_file(&self, remote_path: &str) -> Result<Vec<u8>, String> {
+        let file = self.download(remote_path).await?;
+        Ok(file.bytes)
+    }
+
     /// DELETE `<dav_base>/<remote_path>`.
     #[allow(dead_code)] // generalized client — consumers adopt incrementally
     pub async fn delete(&self, remote_path: &str) -> Result<(), String> {
