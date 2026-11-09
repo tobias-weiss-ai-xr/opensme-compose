@@ -144,6 +144,8 @@ catalog:
 
 excluded:
   # Infrastructure surfaces — no end-user journey starts here.
+  - id: calendar-radicale   # CalDAV store for calrs; public read via /dav
+                               # but accessed as part of the calendar tile
   - id: vc-livekit   # media plane behind the vc tile — signaling is
                      # path-routed (/rtc, /twirp) on the same vc host
   - id: portal       # the catalog itself

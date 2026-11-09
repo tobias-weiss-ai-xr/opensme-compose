@@ -177,6 +177,11 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                         # opensme-net overlay, so it carries no leak risk.
                         if "ipv4_address:" in line:
                             continue
+                        # Documentation files intentionally describe internal
+                        # network topology (e.g., service IPs, subnet ranges).
+                        # Its not a leak when it is explanatory text.
+                        if filepath.suffix in (".md", ".txt", ".rst"):
+                            continue
                         findings.append((i, name, line.rstrip()))
                         break
     except (OSError, UnicodeDecodeError):
