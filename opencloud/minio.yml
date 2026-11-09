@@ -10,7 +10,7 @@ x-service-defaults: &service-defaults
   security_opt:
     - no-new-privileges:true
 
-# ── S3 object storage: SeaweedFS (was MinIO until 2026-10-05) ──
+# S3-compatible object storage: SeaweedFS (was MinIO until 2026-10-05)
 # MinIO community edition is dead upstream: images pulled from Docker Hub
 # 2026-09, quay.io anonymous pulls closed 2026-10, and the final release
 # (RELEASE.2025-10-15) will never receive a fix. SeaweedFS serves the same

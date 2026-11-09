@@ -1,0 +1,68 @@
+# docker-compose.s3-includes.yml
+#
+# Reusable S3 configuration include for all openSME services that talk to
+# object storage. Define once, merge everywhere - keeps the OC_S3_* <-> AWS_*
+# env-var mapping consistent across notes, invoice-ninja and any future
+# service overlay.
+#
+# What is "minio"?
+# The `minio` network alias is NOT MinIO. MinIO community edition is dead
+# upstream (images pulled from Docker Hub 2026-09, final release
+# RELEASE.2025-10-15 never fixed). The S3-compatible object storage backing
+# openSME is **SeaweedFS** (`opencloud/seaweedfs-s3.json`), which serves the
+# same S3 API on :9000 and keeps the legacy `http://minio:9000` endpoint
+# working unchanged via a network alias on opensme-net. See
+# `opencloud/minio.yml` for the SeaweedFS service definition.
+#
+# Source of truth:
+# OC_S3_* in `.env.example` is the single source of truth. This anchor maps
+# those onto the AWS_*/S3_* variable names expected by S3 SDKs and Laravel's
+# filesystem abstraction. The access/secret pair MUST match
+# `opencloud/seaweedfs-s3.json`.
+#
+# Usage:
+# Append this file to COMPOSE_FILE, then merge the anchor into any service's
+# `environment:` block:
+#
+#     COMPOSE_FILE=docker-compose.yml:...:docker-compose.s3-includes.yml
+#
+#     services:
+#       my-service:
+#         environment:
+#           <<: *s3-defaults
+#           AWS_S3_BUCKET: my-service
+#
+# The S3_* variant names are for apps that prefer that prefix.
+
+# ── S3 Defaults ────────────────────────────────────────────────────────
+x-s3-defaults: &s3-defaults
+  environment:
+    # Endpoint: SeaweedFS via the minio alias
+    AWS_S3_ENDPOINT: "http://minio:9000"
+    S3_ENDPOINT: "http://minio:9000"
+    S3_URL: "http://minio:9000"
+
+    # Credentials: pulled from OC_S3_* env or defaults (MAKE SURE these match
+    # opencloud/seaweedfs-s3.json!). Empty defaults are intentional - if the
+    # env is not set we want compose to fail fast rather than use garbage.
+    AWS_S3_ACCESS_KEY_ID: "${OC_S3_ACCESS_KEY:-}"
+    AWS_S3_SECRET_ACCESS_KEY: "${OC_S3_SECRET_KEY:-}"
+    AWS_ACCESS_KEY_ID: "${OC_S3_ACCESS_KEY:-}"
+    AWS_SECRET_ACCESS_KEY: "${OC_S3_SECRET_KEY:-}"
+
+    # Region and path-style addressing for the S3 SDK
+    AWS_S3_REGION: "${OC_S3_REGION:-us-east-1}"
+    AWS_DEFAULT_REGION: "${OC_S3_REGION:-us-east-1}"
+
+    # Path-style addressing is REQUIRED for SeaweedFS (it speaks HTTP, not
+    # DNS-style buckethostname).  Force it to be true even if some obscure
+    # SDK tries to be clever.
+    AWS_S3_USE_PATH_STYLE: "true"
+    S3_USE_PATH_STYLE: "true"
+    S3_FORCE_PATH_STYLE: "true"
+
+    # Bucket name - can be overridden per-service.  Default empty buckets
+    # will cause most apps to fail - they MUST set their own bucket.
+    AWS_S3_BUCKET: "${OC_S3_BUCKET:-}"
+    AWS_BUCKET: "${OC_S3_BUCKET:-}"
+    S3_BUCKET: "${OC_S3_BUCKET:-}"
