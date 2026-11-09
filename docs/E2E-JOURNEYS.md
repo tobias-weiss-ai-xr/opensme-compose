@@ -420,8 +420,9 @@ X5 is the regression gate for the write-back chain: the public booking
 page → Radicale → sogo6 mirror must be a live, bidirectional round trip.
 Both require `CALENDAR_URL`, `RADICALE_USER`/`PASSWORD`, `E2E_ZITADEL_PAT`,
 `E2E_ZITADEL_LOGINCLIENT_PAT`, and `CALRS_ADMIN_EMAIL`/`PASSWORD` env vars
-(the dashboard cancel needs admin login — guest cancel tokens go by email
-which is broken on this stack with `UnknownIssuer`).
+(the dashboard cancel needs admin login — guest cancel tokens go by email,
+which now delivers against the internal Stalwart relay, patch 0004; the
+dashboard path avoids depending on mailbox round-trips in CI).
 
 ## Epic Y — Disaster recovery: a backup that has survived its drill
 

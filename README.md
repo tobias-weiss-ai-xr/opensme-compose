@@ -1330,7 +1330,10 @@ attendees or staff calendars; bookings live only in the dedicated
 Radicale calendar.** Booking page:
 `https://<CALENDAR_DOMAIN>/u/<admin-user>/vc`. See
 [`docs/calendar.md`](docs/calendar.md) for the full deploy + privacy
-contract. Env keys (placeholders only — set in `.env`):
+contract. Booking e-mails (confirmations, host notifications, cancel/
+reschedule tokens) are delivered through the compose-internal Stalwart
+relay (smtp_config in `calrs.db`; see `docs/calendar.md` → *Management*).
+Env keys (placeholders only — set in `.env`):
 
 | Variable | Default | Description |
 |---|---|---|
@@ -1340,7 +1343,7 @@ contract. Env keys (placeholders only — set in `.env`):
 | `RADICALE_USER` / `RADICALE_PASSWORD` | *(empty)* | Booking CalDAV login, seeded into Radicale htpasswd by `scripts/calendar-setup.sh` |
 | `RADICALE_AUTH_HTPASSWD_ENCRYPTION` | `bcrypt` | htpasswd hash type (`bcrypt` or `plain`) |
 | `CALRS_ADMIN_EMAIL` / `CALRS_ADMIN_PASSWORD` | *(empty)* | Bootstrap admin (first registered user is admin) |
-| `CALRS_VC_URL` | `https://` | Template meeting link rendered as the booking location |
+| `CALRS_VC_URL` | `https://` | Per-booking meeting template: with patch 0003 the location may be `{VC}/room/{uid}` — every booking resolves to its own join URL (confirmation page, e-mails, ICS `LOCATION:`) |
 | `CALRS_OIDC_ISSUER` / `CALRS_OIDC_CLIENT_ID` / `CALRS_OIDC_CLIENT_SECRET` | *(empty)* | Optional Zitadel SSO (blank = local-auth only; `scripts/zitadel-client.sh --app calendar`) |
 
 ### Optional components — maturity notes

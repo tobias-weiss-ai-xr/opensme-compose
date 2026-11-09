@@ -161,3 +161,9 @@ Verified live (2026-11-09): booking → Stalwart `queue.queue-message` →
 `delivery.completed` to `testuser@opensme.local`. Guest addresses outside
 the local domain correctly bounce with `550 Relay not allowed` (the demo
 relays no external mail).
+
+The config lives in the `smtp_config` row of `calrs.db` (volume
+`compose_calrs-data`) — no env var. Operational details, failure
+symptoms and the `calrs.db` surgery (empty `password_enc` silently kills
+all booking e-mail; restore from a `.bak` volume copy) are in
+[`docs/calendar.md`](calendar.md) → *Management* / *Troubleshooting*.

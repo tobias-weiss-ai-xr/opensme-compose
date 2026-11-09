@@ -45,13 +45,29 @@ reach the booking dashboard from the portal, and the `calrs-data` / `radicale-co
 > `/booking/<uid>@calrs.ics`. The web dashboard cancel flow (login →
 > `/dashboard/bookings` → POST `/dashboard/bookings/<id>/cancel`) is the
 > only path that triggers write-back deletion; guest cancel tokens go by
-> email (SMTP `UnknownIssuer` on this stack, so tokens are undeliverable).
+> email (delivered via the internal Stalwart relay since patch 0004 — see
+> the “Booking e-mail delivery” note below; a CLI-cancelled booking must
+> still be cleaned by an explicit CalDAV DELETE on
+> `/booking/<uid>@calrs.ics`).
 
 > **CalDAV write-back (2026-11-08 fix):** calrs pushes bookings into the
 > dedicated Radicale calendar only via the **web booking flow** (the
 > dashboard cancel also writes back the DELETE). CLI `calrs booking create`
 > sets status `confirmed` but skips write-back. Two fixes were needed to
 > make write-back actually land:
+>
+> **Booking e-mail delivery (2026-11-09 fix):** confirmation, host-
+> notification, guest cancel-token and reschedule e-mails now deliver.
+> calrs historically failed every e-mail at the TLS handshake (lettre's
+> `UnknownIssuer` against Stalwart's per-boot self-signed STARTTLS cert)
+> — patch 0004 accepts the composition-internal relay cert and only
+> attaches SMTP credentials when a username is set (a bare relay port
+> advertises no AUTH). Live wiring: `stalwart:25`, empty username;
+> host notifications go to `COALESCE(booking_email, email)` — on this
+> stack the calrs admin's `booking_email` points at a real mailbox, so
+> they land in an actual INBOX. Guest addresses outside the local domain
+> correctly bounce `550 Relay not allowed` (the stack relays no external
+> mail).
 >
 > 1. **`write_calendar_href` must be the calendar collection**
 >    (`/booking/main/`), not the home (`/booking/`). calrs PUTs to
@@ -185,10 +201,21 @@ booking auth, 401 anonymous) and the subscription presence are verified by
 `tests/05-e2e/stories.py` **X4**; the full booking → CalDAV → mirror →
 cancel round trip is verified by **X5**.
 
+> **Listing CalDAV subscriptions (2026-11-09 fix):** `GET /external-calendars`
+> in sogo6-server used to call the interface with the hardcoded filter
+> `source_type="ics"`, so CalDAV rows like this booking mirror never
+> appeared in the list (they stayed synced, but were invisible to the
+> picker/API). It now passes `source_type=None` (no filter) — ICS **and**
+> CalDAV subscriptions are listed (sogo6-server `f3b47c2`). This keeps the
+> mirror visible and avoids “the subscription vanished” confusion in the
+> sogo6 webmail calendar picker after a redeploy.
+
 ## Deploy on the openSME VPS
 
-The repo on the VPS is `/opt/opensme-compose/compose`. The calendar overlay
-is **opt-in** via the `calendar` profile.
+The repo on the VPS is `/opt/opensme-compose/compose`. The `calendar` and
+`calendar-radicale` services are part of the **core stack** (default-
+included since the 2026-11-07 adoption — no overlay, no `--profile`),
+but deploying a *fresh* stack still needs the steps below once.
 
 1. **Build the calrs image locally** (no registry image exists — the repo
    does **not** ship the calrs sources; `images/calrs/Dockerfile` is a
@@ -201,18 +228,36 @@ is **opt-in** via the `calendar` profile.
    git -C calrs checkout v1.6.0
    git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
    git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
+   git -C calrs apply images/calrs/patches/0003-livekit-room-url.patch
+   git -C calrs apply images/calrs/patches/0004-smtp-selfsigned-relay.patch
    cd calrs && docker buildx build --network host -t calrs:1.6.0 .
    ```
 
-   Patch **0002** is **required** for the Radicale store: Radicale renders
-   the calendar resourcetype as `<C:calendar />` (space before the
-   self-closing slash) and stock calrs v1.6.0's substring match misses it —
-   calrs then discovers zero calendars, syncs nothing and write-back has no
-   target collection (the historical "empty booking store" symptom). The
-   patch is the backport of upstream PR #135 (commit 27a0e37, released in
-   calrs v1.14.0+).
+   Apply the patches **in order 0001 → 0004** (each is a delta against the
+   previous state). What they cover on top of stock v1.6.0:
 
-   The tag (`calrs:1.6.0`) must match `CALRS_IMAGE_TAG` in `.env`.
+   - **0001** — OIDC compat for Zitadel (multi-audience ID tokens + userinfo
+     email/name fallback), see step 6 below.
+   - **0002** — REQUIRED for the Radicale store: Radicale renders the
+     calendar resourcetype as `<C:calendar />` (space before the
+     self-closing slash) and stock calrs v1.6.0's substring match misses it —
+     calrs then discovers zero calendars, syncs nothing and write-back has no
+     target collection (the historical "empty booking store" symptom). The
+     patch is the backport of upstream PR #135 (commit 27a0e37, released in
+     calrs v1.14.0+).
+   - **0003** — per-booking LiveKit room URLs: event-type locations may use
+     the `{uid}` template (`https://…/room/{uid}`); every confirmed booking
+     renders its OWN resolved join URL on the confirmation page, in
+     confirmation/reschedule e-mails and in the ICS `LOCATION:` written
+     back to CalDAV. See [`docs/vc.md`](vc.md).
+   - **0004** — SMTP delivery against the compose-internal Stalwart relay
+     (accepts the self-signed STARTTLS cert; credentials only when a
+     username is set). See “Booking e-mail delivery” and
+     [`docs/vc.md`](vc.md).
+
+   The tag (`calrs:1.6.0`) must match `CALRS_IMAGE_TAG` in `.env`. (The
+   live demo image is built as `calrs:1.6.0-livekit` — same patches, the
+   tag suffix is a deploy-time choice; Watchtower is disabled for it.)
 
 2. **Pull the Radicale image** from Docker Hub (no build needed):
 
@@ -305,11 +350,24 @@ is **opt-in** via the `calendar` profile.
 
 - **Create more event types** on `https://<CALENDAR_DOMAIN>/dashboard`
   (each event type gets its own `/u/<user>/<slug>` booking page).
-- **Set / edit the VC link** per event type from the dashboard (the
-  setup script puts the `CALRS_VC_URL` template into the `vc` event
-  type's description).
-- **SMTP / e-mail confirmations** and **OIDC SSO** are configured from
-  the dashboard / `.env` as calrs supports them.
+- **Every booking gets its own meeting URL**: with patch 0003, an event
+  type's location may be the `{uid}` template (`{VC}/room/{uid}`) — the
+  dashboard event-type form has a **“Use self-hosted video (one room per
+  booking)”** button that fills it in one click. calrs substitutes the
+  booking's room-safe uid at booking time, so the confirmation page, the
+  e-mails and the ICS `LOCATION:` all carry that booking's own join URL.
+  See [`docs/vc.md`](vc.md).
+- **SMTP / booking e-mail** lives in calrs' own config (no env var): the
+  `smtp_config` row in `calrs.db` — on this stack `host = stalwart`,
+  `port = 25`, `username = ''` (relay mode; an empty username keeps lettre
+  from trying AUTH on a port that advertises none), `password_enc` = a
+  valid AES-256-GCM blob (leaving it empty silently disables ALL booking
+  e-mail, not just auth). Host notifications go to the admin's
+  `booking_email` (`COALESCE(booking_email, email)` on the user row) —
+  point it at a real mailbox so confirmations land in an INBOX. Seed the
+  row with the calrs CLI or SQLite surgery; details under *Troubleshooting*.
+- **OIDC SSO** is enabled from the dashboard / `auth_config` (calrs 1.6.0
+  is DB-driven; env is only passthrough) — see step 6 in *Setup*.
 
 ## Troubleshooting
 
@@ -322,6 +380,16 @@ is **opt-in** via the `calendar` profile.
   `scripts/calendar-setup.sh` via a one-shot `httpd:2.4-alpine` helper
   (the Radicale image ships no `htpasswd(1)`). Re-run the script to
   (re)seed it.
+- **Booking e-mail not arriving:** check calrs' SMTP config —
+  `smtp_config` in `calrs.db` (`host`/`port` should be `stalwart`/`25`,
+  `username` empty). Symptoms: `email delivery failed … UnknownIssuer` in
+  `docker logs opensme-calendar` = stale image without patch 0004;
+  *no e-mail attempts logged at all* = `password_enc` was emptied
+  (`load_smtp_config` fails closed — restoring a valid encrypted blob
+  from a backup is required). Host e-mails go to `booking_email` —
+  without it they are sent to the admin's login e-mail (undeliverable if
+  that mailbox doesn't exist). Backup the `compose_calrs-data` volume
+  (`.bak` copy) before any `calrs.db` edit — see `docs/vc.md`.
 - **PROPFIND smoke test** as the booking user — verify the CalDAV store
   answers authenticated requests over `opensme-net`:
 
