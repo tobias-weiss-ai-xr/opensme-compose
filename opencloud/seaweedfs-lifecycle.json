@@ -1,0 +1,45 @@
+{
+  "_documentation": {
+    "purpose": "S3 lifecycle rules applied to every bucket served by SeaweedFS.",
+    "format": "AWS S3 LifecycleConfiguration expressed as JSON. SeaweedFS loads it via the -s3.lifecycle flag.",
+    "version_requirement": "Requires a SeaweedFS image that supports the -s3.lifecycle flag and JSON-format lifecycle rules (SeaweedFS 3.x, 2024 builds or newer). Older images silently ignore the flag and the rules will not be enforced — verify with `weed version` inside the container.",
+    "rules": [
+      "A) Expire non-current (old) object versions after 90 days.",
+      "B) Expire tiny objects smaller than 1 KB after 30 days.",
+      "C) Abort incomplete multipart uploads 7 days after initiation."
+    ]
+  },
+  "Rules": [
+    {
+      "ID": "rule-cleanup-old-versions-90d",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 90
+      }
+    },
+    {
+      "ID": "rule-remove-tiny-files-30d",
+      "Status": "Enabled",
+      "Filter": {
+        "ObjectSizeGreaterThan": 0,
+        "ObjectSizeLessThan": 1024
+      },
+      "Expiration": {
+        "Days": 30
+      }
+    },
+    {
+      "ID": "rule-clean-incomplete-uploads",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}
