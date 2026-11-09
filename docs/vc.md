@@ -139,3 +139,25 @@ LiveKit 1.13.11 (console: `connection state changed: connecting ->`
 `connected`, room `<uuid>`, mic/camera/share/leave controls); the same
 URL is in the Radicale write-back (`REPORT .../dav/booking/main/` →
 `LOCATION:https://vc.../room/...`) and in the sogo6 mirror.
+
+## Booking emails now deliver (patch 0004 — SMTP TLS relay)
+
+calrs sends booking/confirmation emails over STARTTLS to the compose
+internal Stalwart relay (`stalwart:25`). Stalwart's SMTP listeners serve a
+per-boot SELF-SIGNED dev certificate, which lettre's default verifier
+rejected with `invalid peer certificate: UnknownIssuer` — every booking
+email died at the TLS handshake. Patch 0004 (`images/calrs/patches/
+0004-smtp-selfsigned-relay.patch`) makes calrs accept the internal relay's
+certificate and hostname (composition-internal hop, same posture as SOGo's
+IMAP hop), and only attaches SMTP credentials when the config carries a
+username — so a bare relay config (`username=""`) sails through
+unauthenticated.
+
+Live wiring: `smtp_config` = `stalwart:25`, empty username, `from_email =
+demo@opensme.local`; the calrs admin account's `booking_email` points at
+`testuser@opensme.local` (a real mailbox — Stalwart auto-provisions
+principals via the IdP), so **host notifications land in a real INBOX**.
+Verified live (2026-11-09): booking → Stalwart `queue.queue-message` →
+`delivery.completed` to `testuser@opensme.local`. Guest addresses outside
+the local domain correctly bounce with `550 Relay not allowed` (the demo
+relays no external mail).

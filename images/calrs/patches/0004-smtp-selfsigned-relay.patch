@@ -1,0 +1,43 @@
+diff --git a/src/email.rs b/src/email.rs
+index 7cd57f4..664e905 100644
+--- a/src/email.rs
++++ b/src/email.rs
+@@ -1606,12 +1606,33 @@ pub async fn send_invite_email(
+ }
+ 
+ async fn send_email(config: &SmtpConfig, email: Message) -> Result<()> {
+-    let creds = Credentials::new(config.username.clone(), config.password.clone());
+-
+-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)?
++    use lettre::transport::smtp::client::{Tls, TlsParameters};
++
++    // STARTTLS against the compose-internal mail relay. Stalwart's SMTP
++    // listeners serve a per-boot SELF-SIGNED dev certificate (same posture as
++    // the IMAP hop — see the stalwart config comments), which lettre's default
++    // verifier rejects with `invalid peer certificate: UnknownIssuer`. Accepting
++    // the internal relay's certificate keeps the hop encrypted on the compose
++    // network without pinning anything; the relay port (25) does not advertise
++    // AUTH, so the configured credentials are simply not challenged there (they
++    // apply when the config points at a real submission listener, e.g. 587).
++    let tls_params = TlsParameters::builder(config.host.clone())
++        .dangerous_accept_invalid_hostnames(true)
++        .dangerous_accept_invalid_certs(true)
++        .build()?;
++
++    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
+         .port(config.port)
+-        .credentials(creds)
+-        .build();
++        .tls(Tls::Required(tls_params));
++    // Only authenticate when the SMTP config carries a username: a bare relay
++    // (Stalwart port 25) advertises no AUTH mechanism, and lettre hard-errors
++    // with `No compatible authentication mechanism was found` if credentials
++    // are present while none are offered.
++    if !config.username.is_empty() {
++        builder =
++            builder.credentials(Credentials::new(config.username.clone(), config.password.clone()));
++    }
++    let mailer = builder.build();
+ 
+     let to_addrs: Vec<String> = email
+         .envelope()

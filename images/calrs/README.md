@@ -64,6 +64,27 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      fills the location field with `{VC}/room/{uid}` — one click, no
      copy-paste. `vc_url` is injected into all five event-type-form render
      contexts from `CALRS_VC_URL` (fallback `VC_URL`).
+5. `patches/0004-smtp-selfsigned-relay.patch` — SMTP delivery works against a
+   compose-internal Stalwart relay that serves a per-boot SELF-SIGNED dev
+   certificate (apply AFTER 0003):
+   - calrs used `AsyncSmtpTransport::starttls_relay`, whose default verifier
+     rejects Stalwart's self-signed certificate with `invalid peer
+     certificate: UnknownIssuer`, so every booking email failed at the TLS
+     handshake. The patch builds the transport with `TlsParameters` accepting
+     the local relay's certificate + hostname (composition-internal hop, same
+     posture as SOGo's IMAP hop — no pinning, no trusted-CA requirement).
+   - With credentials present, lettre also hard-fails with "No compatible
+     authentication mechanism was found" on a bare relay port (25) that
+     advertises no AUTH mechanism. Credentials are now added only when the
+     SMTP config carries a non-empty username, so a config of
+     `host=stalwart port=25 username=""` sends unauthenticated over STARTTLS
+     into Stalwart's local relay.
+   - Live wiring: `smtp_config` row `stalwart:25`, empty username, `from` =
+     the calrs admin address; the booking account's `booking_email` points at
+     a real mailbox (Stalwart auto-provisions principals via the IdP) so host
+     notifications land in an actual INBOX. Guest addresses outside the
+     local domain correctly bounce with `550 Relay not allowed` (no external
+     relaying in the demo).
 
 ## WARNING: this subtree does NOT self-build
 
@@ -79,6 +100,7 @@ git -C calrs checkout v1.6.0
 git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
 git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
 git -C calrs apply images/calrs/patches/0003-livekit-room-url.patch
+git -C calrs apply images/calrs/patches/0004-smtp-selfsigned-relay.patch
 cd calrs && docker buildx build --network host -t calrs:1.6.0 .
 ```
 
