@@ -41,7 +41,13 @@ services:
       - SETUID
       - SETGID
       - CHOWN
-    command: server -dir=/data -master.volumeSizeLimitMB=10240 -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+    # -s3.lifecycle loads ./opencloud/seaweedfs-lifecycle.json (cleanup of old
+    #   versions after 90d, tiny <1KB files after 30d, and aborted multipart
+    #   uploads after 7d). Requires a SeaweedFS image that supports the
+    #   -s3.lifecycle flag with JSON-format rules (SeaweedFS 3.x, 2024 builds
+    #   or newer; verify with `weed version`). On older images the flag is
+    #   silently ignored and the rules are not enforced.
+    command: server -dir=/data -master.volumeSizeLimitMB=10240 -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json -s3.lifecycle=/etc/seaweedfs/lifecycle.json
     environment:
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
@@ -52,6 +58,7 @@ services:
     volumes:
       - seaweedfs-data:/data
       - ./opencloud/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+      - ./opencloud/seaweedfs-lifecycle.json:/etc/seaweedfs/lifecycle.json:ro
     healthcheck:
       # weed binds S3 to the container IP only — 127.0.0.1:9000 is NOT up.
       # Raft leader election takes ~20s; the healthcheck start_period rides
