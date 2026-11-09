@@ -69,6 +69,14 @@ services:
       # set SOGO_NO_PROXY in your .env (gitignored).
       NO_PROXY: ${SOGO_NO_PROXY:-localhost,127.0.0.1,opencloud,traefik,zitadel,.opensme.local}
       no_proxy: ${SOGO_NO_PROXY:-localhost,127.0.0.1,opencloud,traefik,zitadel,.opensme.local}
+      # CardDAV backend (carddav) for OpenCloud contacts
+      # Primary address book stays in SOGo SQL backend; OpenCloud CardDAV is
+      # for shared/team address books. Users can access OpenCloud contacts
+      # from the SOGo UI.
+      SOGO_CARDDAV_ENABLED: ${SOGO_CARDDAV_ENABLED:-true}
+      SOGO_CARDDAV_SERVER: ${SOGO_CARDDAV_SERVER:-https://cloud.${OPENCLOUD_DOMAIN}}
+      SOGO_CARDDAV_AUTH_METHODS: ${SOGO_CARDDAV_AUTH_METHODS:-Basic,All}
+      SOGO_CARDDAV_REALM: ${SOGO_CARDDAV_REALM:-OpenCloud}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:
