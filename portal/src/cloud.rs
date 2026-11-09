@@ -121,6 +121,32 @@ pub fn http_status(err: &str) -> Option<u16> {
 
 // ── OCS response types (typed mirrors of the OCS v2 JSON envelope) ───
 
+/// OCS error type for share management operations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OcsError {
+    /// HTTP error with status code and message
+    HttpError(u16, String),
+    /// JSON parsing error
+    ParseError(String),
+    /// Share response carries no URL
+    NoShareUrl,
+    /// Authentication or permission error
+    AuthError(String),
+}
+
+impl fmt::Display for OcsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OcsError::HttpError(code, msg) => write!(f, "OCS HTTP error {}: {}", code, msg),
+            OcsError::ParseError(msg) => write!(f, "OCS parse error: {}", msg),
+            OcsError::NoShareUrl => write!(f, "OCS share response carries no URL"),
+            OcsError::AuthError(msg) => write!(f, "OCS auth error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for OcsError {}
+
 /// OCS API meta block: `{"status":...,"statuscode":...,"message":...}`.
 /// Every field defaults so a sparse meta block still parses.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +210,13 @@ pub struct ShareInfo {
     pub share_with_displayname: String,
     #[serde(default, rename = "name")]
     pub name: String,
+}
+
+/// Convenience getter for the share link (same as `url`).
+impl ShareInfo {
+    pub fn share_link(&self) -> &str {
+        &self.url
+    }
 }
 
 /// A list of OCS shares — the `data` array of a share-list response.
