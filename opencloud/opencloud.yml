@@ -178,6 +178,35 @@ services:
       - "traefik.http.routers.opencloud.tls=true"
       - "traefik.http.routers.opencloud.entrypoints=websecure"
       - "traefik.http.services.opencloud.loadbalancer.server.port=9200"
+      # CORS middleware mirrored from edge/opencloud.yml for docker-provider
+      # deployments (used by the caldav/carddav routers above).
+      - "traefik.http.middlewares.opencloud-cors.headers.accessControlAllowOriginList=*"
+      - "traefik.http.middlewares.opencloud-cors.headers.accessControlAllowMethods=GET,PUT,POST,DELETE,OPTIONS"
+      - "traefik.http.middlewares.opencloud-cors.headers.accessControlAllowHeaders=Authorization,Content-Type,X-Request-ID,X-OC"
+      - "traefik.http.middlewares.opencloud-cors.headers.accessControlMaxAge=86400"
+      # ── CalDAV / CardDAV / Principals (ocis DAV server) ──────────────
+      # ocis serves CalDAV (calendars) and CardDAV (addressbooks) under
+      # /remote.php/dav/. These labels expose the sub-trees so calendar/
+      # contact clients can reach them. The authoritative edge routing
+      # for these paths lives in edge/opencloud.yml (traefik file
+      # provider — see note at top of that file); these docker labels
+      # mirror the rules for any deployment that relies on the docker
+      # provider instead. Priority 9000 keeps the generic WebDAV rule
+      # (10000) as the catch-all.
+      - "traefik.http.routers.opencloud-caldav.rule=Host(`${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/calendars/`)"
+      - "traefik.http.routers.opencloud-caldav.tls=true"
+      - "traefik.http.routers.opencloud-caldav.entrypoints=websecure"
+      - "traefik.http.routers.opencloud-caldav.priority=9000"
+      - "traefik.http.routers.opencloud-caldav.middlewares=opencloud-cors@docker"
+      - "traefik.http.routers.opencloud-carddav.rule=Host(`${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/addressbooks/`)"
+      - "traefik.http.routers.opencloud-carddav.tls=true"
+      - "traefik.http.routers.opencloud-carddav.entrypoints=websecure"
+      - "traefik.http.routers.opencloud-carddav.priority=9000"
+      - "traefik.http.routers.opencloud-carddav.middlewares=opencloud-cors@docker"
+      - "traefik.http.routers.opencloud-principals.rule=Host(`${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/principals/`)"
+      - "traefik.http.routers.opencloud-principals.tls=true"
+      - "traefik.http.routers.opencloud-principals.entrypoints=websecure"
+      - "traefik.http.routers.opencloud-principals.priority=9000"
     deploy:
       resources:
         limits:
