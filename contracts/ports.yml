@@ -40,6 +40,9 @@ rules:
       - ollama
       - taskfleet
       - camunda
+      - calendar
+      - calendar-radicale
+      - vc-room
 
   - type: allowed-host-ports
     services:

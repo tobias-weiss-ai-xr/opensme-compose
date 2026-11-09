@@ -40,6 +40,10 @@ rules:
       - ollama
       - taskfleet
       - camunda
+      - calendar
+      - calendar-radicale
+      - vc-livekit
+      - vc-room
 
 ---
 

@@ -97,3 +97,125 @@ services:
     traefik_labels: true
     resource_limits:
       memory: 128M
+
+  portal-web:
+    image: null  # build context: ./portal/web
+    compose_file: docker-compose.yml
+    required: false
+    profiles: ["web"]
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    read_only: true
+    depends_on: [portal]
+    env:
+      - BACKEND_URL
+      - PORTAL_DOMAIN
+      - OPENSME_DOMAIN
+      - OPENCLOUD_URL
+      - MAIL_URL
+      - IDP_URL
+      - TICKETING_URL
+      - CMS_URL
+      - SHOP_URL
+      - BPM_URL
+      - INVOICE_URL
+      - PAPERLESS_URL
+      - CHAT_URL
+      - NOTES_URL
+      - SURVEYS_URL
+      - CALENDAR_URL
+      - VC_URL
+      - PORTAL_ANNOUNCEMENTS
+      - PORTAL_FEEDS
+      - AI_API_URL
+      - POLLS_ENABLED
+      - LOGIN_SESSION_COOKIE_SECRET
+      - PORTAL_OIDC_CLIENT_ID
+      - PORTAL_OIDC_CLIENT_SECRET
+    traefik_labels: true
+    resource_limits:
+      memory: 256M
+
+  calendar:
+    image: calrs:${CALRS_IMAGE_TAG:-1.6.0}
+    compose_file: docker-compose.yml
+    required: false
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    depends_on: [calendar-radicale]
+    volumes:
+      - calrs-data:/var/lib/calrs
+    env:
+      - TZ
+      - CALRS_BASE_URL
+      - CALRS_DATA_DIR
+      - CALRS_OIDC_ISSUER
+      - CALRS_OIDC_CLIENT_ID
+      - CALRS_OIDC_CLIENT_SECRET
+      - CALRS_OIDC_REDIRECT_URI
+      - CALRS_VC_URL
+    traefik_labels: true
+    resource_limits:
+      memory: 512M
+
+  calendar-radicale:
+    image: tomsquest/docker-radicale:${RADICALE_IMAGE_TAG:-3.9.0.0}
+    compose_file: docker-compose.yml
+    required: false
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    volumes:
+      - radicale-config:/config
+      - radicale-data:/data
+    env:
+      - TZ
+      - RADICALE_CONFIG_AUTH_TYPE
+      - RADICALE_CONFIG_AUTH_HTPASSWD_FILENAME
+      - RADICALE_CONFIG_AUTH_HTPASSWD_ENCRYPTION
+      - RADICALE_CONFIG_STORAGE_FILESYSTEM_FOLDER
+    traefik_labels: true
+    resource_limits:
+      memory: 256M
+
+  vc-livekit:
+    image: livekit/livekit-server:${LIVEKIT_IMAGE_TAG:-v1.13.11}
+    compose_file: docker-compose.yml
+    required: false
+    profiles: ["vc"]
+    host_ports: []
+    healthcheck: true
+    network_mode: host
+    volumes: []
+    env:
+      - TZ
+      - LIVEKIT_CONFIG
+      - NODE_IP
+      - LIVEKIT_API_KEY
+      - LIVEKIT_API_SECRET
+    traefik_labels: false
+    resource_limits:
+      memory: 1024M
+
+  vc-room:
+    image: vc-room:${VC_ROOM_IMAGE_TAG:-1.0.0}
+    compose_file: docker-compose.yml
+    required: false
+    profiles: ["vc"]
+    host_ports: []
+    healthcheck: true
+    networks: [opensme-net]
+    depends_on: [vc-livekit]
+    read_only: true
+    volumes: []
+    env:
+      - TZ
+      - LIVEKIT_URL
+      - LIVEKIT_API_KEY
+      - LIVEKIT_API_SECRET
+      - VC_TITLE
+    traefik_labels: true
+    resource_limits:
+      memory: 256M

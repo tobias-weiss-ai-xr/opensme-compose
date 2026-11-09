@@ -40,6 +40,10 @@ rules:
       - predictive-agent
       - ollama
       - camunda
+      - calendar
+      - calendar-radicale
+      - vc-livekit
+      - vc-room
 
   - type: healthcheck-exempt
     services:
