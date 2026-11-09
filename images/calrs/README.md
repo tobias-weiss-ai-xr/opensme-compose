@@ -64,6 +64,11 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      fills the location field with `{VC}/room/{uid}` — one click, no
      copy-paste. `vc_url` is injected into all five event-type-form render
      contexts from `CALRS_VC_URL` (fallback `VC_URL`).
+   - The guest/host RESCHEDULE path resolves `{uid}` too: the reschedule
+     confirmation/pending emails and the pushed ICS `LOCATION:` use the
+     booking's own resolved room URL instead of the literal template
+     (`resolve_location(loc_value.as_ref().map(...))` in
+     `guest_reschedule_booking`).
 5. `patches/0004-smtp-selfsigned-relay.patch` — SMTP delivery works against a
    compose-internal Stalwart relay that serves a per-boot SELF-SIGNED dev
    certificate (apply AFTER 0003):

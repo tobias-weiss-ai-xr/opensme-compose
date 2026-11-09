@@ -1,5 +1,5 @@
 diff --git a/src/web/mod.rs b/src/web/mod.rs
-index d3b6585..21691a2 100644
+index d3b6585..2a1b816 100644
 --- a/src/web/mod.rs
 +++ b/src/web/mod.rs
 @@ -3424,6 +3424,7 @@ async fn new_event_type_form(
@@ -136,7 +136,55 @@ index d3b6585..21691a2 100644
              additional_attendees => additional_attendees,
              company_link => state.company_link.read().await.clone(),
          })
-@@ -13779,6 +13817,31 @@ fn render_claim_error(state: &AppState, title: &str, message: &str) -> axum::res
+@@ -12761,6 +12799,11 @@ async fn guest_reschedule_booking(
+     let old_start_time = extract_time_24h(&old_start_at);
+     let old_end_time = extract_time_24h(&old_end_at);
+ 
++    // {uid} template → this booking's OWN room URL (patch 0003): the
++    // reschedule confirmation emails and the pushed ICS LOCATION must carry
++    // the resolved per-booking URL, never the literal template.
++    let resolved_loc = loc_value.as_ref().map(|v| resolve_location(v, &uid));
++
+     if needs_approval {
+         // Guest-initiated reschedule on requires_confirmation event → pending.
+         // Delete the prior CalDAV event (it will be re-pushed if/when the host approves),
+@@ -12795,7 +12838,7 @@ async fn guest_reschedule_booking(
+                 host_name: host_name.clone(),
+                 host_email,
+                 uid: uid.clone(),
+-                location: loc_value.clone(),
++                location: resolved_loc.clone(),
+             };
+             let _ = crate::email::send_host_reschedule_request(
+                 &smtp_config,
+@@ -12832,7 +12875,7 @@ async fn guest_reschedule_booking(
+                 host_email: String::new(),
+                 uid,
+                 notes: None,
+-                location: loc_value,
++                location: resolved_loc.clone(),
+                 reminder_minutes: None,
+                 additional_attendees: vec![],
+             };
+@@ -12859,7 +12902,7 @@ async fn guest_reschedule_booking(
+             host_email: host_email.clone(),
+             uid: uid.clone(),
+             notes: None,
+-            location: loc_value.clone(),
++            location: resolved_loc.clone(),
+             reminder_minutes: None,
+             additional_attendees: vec![],
+         };
+@@ -12908,7 +12951,7 @@ async fn guest_reschedule_booking(
+                     host_name: host_name.clone(),
+                     host_email: host_email.clone(),
+                     uid,
+-                    location: loc_value,
++                    location: resolved_loc,
+                 },
+                 guest_cancel_url.as_deref(),
+                 guest_reschedule_url.as_deref(),
+@@ -13779,6 +13822,49 @@ fn render_claim_error(state: &AppState, title: &str, message: &str) -> axum::res
  mod tests {
      use super::*;
  
@@ -162,6 +210,24 @@ index d3b6585..21691a2 100644
 +    fn resolve_location_no_suffix_uid() {
 +        let out = resolve_location("https://vc.example/room/{uid}", "plain-room");
 +        assert_eq!(out, "https://vc.example/room/plain-room");
++    }
++
++    #[test]
++    fn reschedule_resolved_loc_maps_optional_location() {
++        // The guest-reschedule path maps the event-type location through
++        // resolve_location per booking (patch 0003): a template becomes the
++        // booking's OWN room URL, a missing location stays None.
++        let uid = "0f4f0bed-3f66-4a9c-8c1d-4ec8b2a9d031@calrs";
++        let loc_value: Option<String> =
++            Some("https://vc.example/room/{uid}".to_string());
++        let resolved = loc_value.as_ref().map(|v| resolve_location(v, uid));
++        assert_eq!(
++            resolved.as_deref(),
++            Some("https://vc.example/room/0f4f0bed-3f66-4a9c-8c1d-4ec8b2a9d031")
++        );
++
++        let none_loc: Option<String> = None;
++        assert_eq!(none_loc.as_ref().map(|v| resolve_location(v, uid)), None);
 +    }
 +
 +
