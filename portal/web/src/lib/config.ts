@@ -20,6 +20,55 @@ export function envOr(key: string, fallback: string): string {
 }
 
 /**
+ * Health status cache with TTL.
+ */
+interface HealthCache {
+  status: boolean;
+  timestamp: number;
+}
+
+let healthCache: HealthCache | null = null;
+const HEALTH_TTL_MS = 30_000; // 30 seconds
+
+/**
+ * Fetch cloud health from the backend API.
+ * Returns the healthy field from /api/cloud/health endpoint.
+ */
+async function fetchCloudHealth(): Promise<boolean> {
+  const base = serverEnv("BACKEND_URL", "http://localhost:8080");
+  try {
+    const res = await fetch(`${base}/api/cloud/health`, { cache: "no-store" });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { healthy?: boolean };
+    return data.healthy ?? false;
+  } catch {
+    return false; // Graceful failure: assume unavailable
+  }
+}
+
+/**
+ * Check cloud health with caching (30-second TTL).
+ */
+export async function checkCloudHealth(): Promise<boolean> {
+  const now = Date.now();
+  if (healthCache && now - healthCache.timestamp < HEALTH_TTL_MS) {
+    return healthCache.status;
+  }
+  const healthy = await fetchCloudHealth();
+  healthCache = { status: healthy, timestamp: now };
+  return healthy;
+}
+
+/**
+ * Whether OpenCloud is available: OPENCLOUD_URL is configured AND health check passes.
+ */
+export async function cloudAvailable(): Promise<boolean> {
+  const openCloudUrl = serverEnv("OPENCLOUD_URL", "").trim();
+  if (!openCloudUrl) return false;
+  return checkCloudHealth();
+}
+
+/**
  * True when the operator explicitly configured at least one catalog URL
  * (OPENCLOUD_URL / MAIL_URL / … ). Used to decide whether the env-based
  * catalog may serve as a fallback when the /api/services backend is down.
@@ -75,6 +124,27 @@ export function buildServices(specs: Record<string, string>): Service[] {
   return order
     .filter((s) => s.url)
     .map(({ id, name, description, url }) => ({ id, name, description, url }));
+}
+
+/**
+ * Service with optional cloud availability flag (extended for OpenCloud).
+ */
+export interface ServiceWithAvailability extends Service {
+  cloudAvailable?: boolean;
+}
+
+/**
+ * Compute services with cloud availability context for OpenCloud service.
+ * The OpenCloud service will have cloudAvailable flag set based on health check.
+ */
+export async function computeServices(specs: Record<string, string>): Promise<ServiceWithAvailability[]> {
+  const services = buildServices(specs);
+  const openCloudAvailable = await cloudAvailable();
+  return services.map((s) => ({
+    ...s,
+    // Only add cloudAvailable flag to opencloud service
+    ...(s.id === "opencloud" ? { cloudAvailable: openCloudAvailable } : {}),
+  }));
 }
 
 export function loadServiceSpecs(): Record<string, string> {
