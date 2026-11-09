@@ -1103,6 +1103,10 @@ fn build_router(config: Arc<AppConfig>) -> Router {
                 .put(handle_cloud_upload),
         )
         .route(
+            "/api/cloud/files/metadata",
+            get(handle_cloud_list_files),
+        )
+        .route(
             "/api/cloud/file",
             get(handle_cloud_download).delete(handle_cloud_delete),
         )
@@ -1715,6 +1719,29 @@ async fn handle_cloud_list(
         Ok(entries) => (
             StatusCode::OK,
             Json(serde_json::json!({ "entries": entries })),
+        )
+            .into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
+/// GET /api/cloud/files/metadata?path=<dir> — list files with rich metadata
+/// Returns CloudFileInfo entries with name, path, size, last_modified, etc.
+async fn handle_cloud_list_files(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+) -> impl IntoResponse {
+    let dir = match cloud_dir_or_root(&q.path) {
+        Ok(d) => d,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    match cloud.list_files(&dir).await {
+        Ok(entries) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "files": entries })),
         )
             .into_response(),
         Err(e) => cloud_error(&e),

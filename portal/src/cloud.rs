@@ -885,6 +885,47 @@ impl CloudFiles {
         list(&body, &url_path(&url))
     }
 
+    /// List files with rich metadata via PROPFIND. Returns CloudFileInfo
+    /// entries with name, path, size, last_modified, is_directory, mime_type.
+    /// Unlike list() which returns CloudEntry, this returns richer metadata.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn list_files(&self, dir: &str) -> Result<Vec<CloudFileInfo>, String> {
+        let dir = dir.trim();
+        let url = if dir.is_empty() {
+            Ok(self.dav_base.clone())
+        } else {
+            dav_url(&self.dav_base, dir)
+        }?;
+        let propfind = reqwest::Method::from_bytes(b"PROPFIND").expect("valid method");
+        let res = self
+            .http
+            .request(propfind, &url)
+            .header("Depth", "1")
+            .header(reqwest::header::CONTENT_TYPE, "application/xml")
+            .basic_auth(&self.user, Some(&self.pass))
+            .body(
+                "<?xml version=\"1.0\"?>\n\
+                 <d:propfind xmlns:d=\"DAV:\"><d:prop>\
+                 <d:displayname/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype />\
+                 <d:resourcetype/>\
+                 </d:prop></d:propfind>",
+            )
+            .send()
+            .await
+            .map_err(|e| format!("PROPFIND {dir} unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!(
+                "PROPFIND {dir} failed: HTTP {}",
+                res.status().as_u16()
+            ));
+        }
+        let body = res
+            .bytes()
+            .await
+            .map_err(|e| format!("PROPFIND {dir} response unreadable: {e}"))?;
+        parse_propfind(&body, &url_path(&url))
+    }
+
     /// MKCOL `<dav_base>/<dir>`. RFC 4918: 405 means it already exists —
     /// callers commonly ignore the error for that case.
     #[allow(dead_code)] // generalized client — consumers adopt incrementally
