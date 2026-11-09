@@ -982,6 +982,72 @@ impl CloudFiles {
             Err(_) => false,
         }
     }
+
+    /// Check CalDAV endpoint health using an OPTIONS request.
+    /// The CalDAV endpoint is derived from the dav_base host as
+    /// `<host>/remote.php/dav/calendars/<user>/`.
+    /// Uses a dedicated client with a 5s timeout.
+    /// If dav_base is empty, returns true trivially.
+    pub async fn check_caldav_health(&self) -> bool {
+        let dav_base = self.dav_base.trim_end_matches('/');
+        if dav_base.is_empty() {
+            return true;
+        }
+        // Extract the host part from dav_base
+        let host = dav_base_host_base(dav_base);
+        // Build the CalDAV principal URL: <host>/remote.php/dav/calendars/<user>/
+        let caldav_url = format!("{}/remote.php/dav/calendars/{}/", host, self.user);
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let res = client
+            .request(reqwest::Method::OPTIONS, &caldav_url)
+            .basic_auth(&self.user, Some(&self.pass))
+            .send()
+            .await;
+        match res {
+            Ok(res) => res.status().is_success(),
+            Err(_) => false,
+        }
+    }
+
+    /// Check CardDAV endpoint health using an OPTIONS request.
+    /// The CardDAV endpoint is derived from the dav_base host as
+    /// `<host>/remote.php/dav/addressbooks/<user>/`.
+    /// Uses a dedicated client with a 5s timeout.
+    /// If dav_base is empty, returns true trivially.
+    pub async fn check_carddav_health(&self) -> bool {
+        let dav_base = self.dav_base.trim_end_matches('/');
+        if dav_base.is_empty() {
+            return true;
+        }
+        // Extract the host part from dav_base
+        let host = dav_base_host_base(dav_base);
+        // Build the CardDAV principal URL: <host>/remote.php/dav/addressbooks/<user>/
+        let carddav_url = format!("{}/remote.php/dav/addressbooks/{}/", host, self.user);
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let res = client
+            .request(reqwest::Method::OPTIONS, &carddav_url)
+            .basic_auth(&self.user, Some(&self.pass))
+            .send()
+            .await;
+        match res {
+            Ok(res) => res.status().is_success(),
+            Err(_) => false,
+        }
+    }
 }
 
 /// Standalone health check function that checks if opencloud is reachable.
