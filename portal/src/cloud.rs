@@ -567,6 +567,80 @@ pub struct CloudEntry {
     pub mtime: Option<String>,
 }
 
+/// Rich file metadata extracted from WebDAV PROPFIND responses.
+/// Mirrors the properties returned for each file/collection entry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CloudFileInfo {
+    /// Display name, or the href-decoded file name when the server omits
+    /// `displayname`.
+    pub name: String,
+    /// Decoded absolute DAV path as returned by the server
+    /// (e.g. `/remote.php/dav/files/user/Umfragen/x.pdf`).
+    pub path: String,
+    /// Size in bytes for files; None for collections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// HTTP-date Last-Modified as reported by the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    /// True for collections (directories), false for files.
+    pub is_directory: bool,
+    /// MIME type from the `getcontenttype` property (e.g. `text/plain`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+/// Parse a Depth:1 PROPFIND multistatus body into a list of `CloudFileInfo`
+/// entries with rich metadata. The request URI's own entry (the listed
+/// collection itself) is skipped. Entries are sorted: collections first,
+/// then by name (case-insensitive, then byte-wise).
+pub fn parse_propfind(body: &[u8], request_path: &str) -> Result<Vec<CloudFileInfo>, String> {
+    let xml = String::from_utf8_lossy(body).into_owned();
+    if !xml.to_ascii_lowercase().contains("multistatus") {
+        return Err(format!(
+            "propfind response is not a WebDAV multistatus ({} bytes)",
+            body.len()
+        ));
+    }
+    let want = request_path.trim_end_matches('/');
+    let mut entries = Vec::new();
+    for block in xml_blocks(&xml, "response") {
+        let Some(href) = xml_first_text(block, "href").map(|h| href_path(&h)) else {
+            continue;
+        };
+        let path = href.trim_end_matches('/').to_string();
+        if path == want {
+            continue; // the collection itself (Depth:1 always echoes it)
+        }
+        let name = xml_first_text(block, "displayname")
+            .map(|n| xml_decode_entities(&n))
+            .filter(|n| !n.is_empty())
+            .or_else(|| path.rsplit('/').next().map(str::to_string))
+            .filter(|n| !n.is_empty());
+        let Some(name) = name else { continue };
+        let size =
+            xml_first_text(block, "getcontentlength").and_then(|s| s.trim().parse::<u64>().ok());
+        let last_modified = xml_first_text(block, "getlastmodified")
+            .map(|s| xml_decode_entities(&s));
+        let mime_type = xml_first_text(block, "getcontenttype");
+        entries.push(CloudFileInfo {
+            name,
+            path,
+            size,
+            last_modified,
+            is_directory: block_has_collection(block),
+            mime_type,
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.is_directory
+            .cmp(&a.is_directory)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(entries)
+}
+
 /// Parse a Depth:1 PROPFIND multistatus body into sorted `CloudEntry`s
 /// (collections first, then by name). The request URI's own entry — the
 /// listed collection itself — is skipped. This is the offline-testable
@@ -720,7 +794,7 @@ impl CloudFiles {
             .body(
                 "<?xml version=\"1.0\"?>\n\
                  <d:propfind xmlns:d=\"DAV:\"><d:prop>\
-                 <d:displayname/><d:getcontentlength/><d:getlastmodified/>\
+                 <d:displayname/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype />\
                  <d:resourcetype/>\
                  </d:prop></d:propfind>",
             )
