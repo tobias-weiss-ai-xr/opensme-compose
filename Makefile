@@ -576,7 +576,7 @@ help:
 	@echo "    make test-static         Layers 0-2 (all static checks, no running stack)"
 	@echo "    make container           Layer 3: container health (requires stack)"
 	@echo "    make smoke               Layer 3: HTTP smoke tests (requires stack)"
-	@echo "    make integration         Layer 4: integration tests (not yet implemented)"
+	@echo "    make integration         Layer 4: cross-service wiring tests"
 	@echo "    make e2e                 Layer 5: e2e SSO/OIDC flows (running stack; e.g. make e2e DOMAIN=opensme.local)"
 	@echo "    make saga                Layer 5: saga journey blueprints (running stack; skips cleanly on partial deployments)"
 	@echo "    make security            Layer 6: security audit (exposed ports, secrets, TLS)"
