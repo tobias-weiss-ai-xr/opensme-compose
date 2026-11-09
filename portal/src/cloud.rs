@@ -762,6 +762,27 @@ impl CloudFiles {
         Ok(())
     }
 
+    /// Create a directory at `<dav_base>/<path>` using MKCOL.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn create_directory(&self, path: &str) -> Result<(), String> {
+        let url = dav_url(&self.dav_base, path)?;
+        let mkcol = reqwest::Method::from_bytes(b"MKCOL").expect("valid method");
+        let res = self
+            .http
+            .request(mkcol, &url)
+            .basic_auth(&self.user, Some(&self.pass))
+            .send()
+            .await
+            .map_err(|e| format!("MKCOL {path} unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!(
+                "MKCOL {path} failed: HTTP {}",
+                res.status().as_u16()
+            ));
+        }
+        Ok(())
+    }
+
     /// PUT bytes to `<dav_base>/<remote_path>`; non-2xx maps to `Err`
     /// with the operation and HTTP status.
     pub async fn put(
@@ -844,6 +865,26 @@ impl CloudFiles {
         if !res.status().is_success() {
             return Err(format!(
                 "DELETE {remote_path} failed: HTTP {}",
+                res.status().as_u16()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Delete a file at `<dav_base>/<path>` using DELETE.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn delete_file(&self, path: &str) -> Result<(), String> {
+        let url = dav_url(&self.dav_base, path)?;
+        let res = self
+            .http
+            .delete(&url)
+            .basic_auth(&self.user, Some(&self.pass))
+            .send()
+            .await
+            .map_err(|e| format!("DELETE {path} unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!(
+                "DELETE {path} failed: HTTP {}",
                 res.status().as_u16()
             ));
         }
