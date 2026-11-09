@@ -47,6 +47,35 @@ async function fetchCloudHealth(): Promise<boolean> {
 }
 
 /**
+ * CalDAV/CardDAV endpoint helpers
+ */
+export const caldavEndpoint = serverEnv("OPENCLOUD_CALDAV_URL", "");
+export const carddavEndpoint = serverEnv("OPENCLOUD_CARDDAV_URL", "");
+export const caldavPrincipalEndpoint = serverEnv("OPENCLOUD_PRINCIPAL_URL", "");
+
+/**
+ * Compute CalDAV URL for a specific user
+ */
+export function computeCaldavUrl(userId: string): string {
+  const base = caldavEndpoint.trim();
+  if (!base) return "";
+  // Ensure trailing slash
+  const normalized = base.endsWith("/") ? base : base + "/";
+  return `${normalized}${encodeURIComponent(userId)}/`;
+}
+
+/**
+ * Compute CardDAV URL for a specific user
+ */
+export function computeCarddavUrl(userId: string): string {
+  const base = carddavEndpoint.trim();
+  if (!base) return "";
+  // Ensure trailing slash
+  const normalized = base.endsWith("/") ? base : base + "/";
+  return `${normalized}${encodeURIComponent(userId)}/`;
+}
+
+/**
  * Check cloud health with caching (30-second TTL).
  */
 export async function checkCloudHealth(): Promise<boolean> {
