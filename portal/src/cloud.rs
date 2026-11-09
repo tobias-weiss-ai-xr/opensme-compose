@@ -32,6 +32,17 @@ use std::time::Duration;
 
 // ── env + OCS helpers (mirroring the original polls.rs seed) ─────────
 
+/// OCS (OpenCloud/Nextcloud "Open Collaboration Services") API v2 base
+/// path, mounted under the cloud host's root. Exposed as a public
+/// constant so callers building bespoke OCS endpoints share one source
+/// of truth for the version path.
+#[allow(dead_code)] // public OCS API surface — consumers adopt incrementally
+pub const OCS_API_V2: &str = "/ocs/v2.php";
+
+/// OCS files_sharing API base path. The concrete shares endpoint is
+/// `<host>{OCS_SHARE_API}/shares` (POST to create, GET to list).
+pub const OCS_SHARE_API: &str = "/ocs/v2.php/apps/files_sharing/api/v1";
+
 /// Read an env var, trimmed; None when unset or blank.
 pub fn non_empty(key: &str) -> Option<String> {
     std::env::var(key)
@@ -53,6 +64,34 @@ pub fn dav_base_host_base(dav_base: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Resolve the OCS shares endpoint URL from explicit overrides or the
+/// WebDAV base host. Precedence (mirrors [`CloudFiles::from_parts`]):
+///
+/// 1. `share_url_override` — full shares endpoint (legacy `CLOUD_SHARE_URL`),
+/// 2. `ocs_url_override`   — OCS base (`CLOUD_OCS_URL`); endpoint =
+///    `<ocs>{OCS_SHARE_API}/shares`,
+/// 3. derived from `dav_base`'s scheme://authority + `{OCS_SHARE_API}/shares`.
+///
+/// Pure (no env, no I/O) so the precedence is unit-testable without
+/// process-global env races.
+pub fn resolve_share_url(
+    dav_base: &str,
+    share_url_override: Option<&str>,
+    ocs_url_override: Option<&str>,
+) -> String {
+    if let Some(s) = share_url_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return s.to_string();
+    }
+    if let Some(o) = ocs_url_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return format!("{}{}/shares", o.trim_end_matches('/'), OCS_SHARE_API);
+    }
+    format!(
+        "{}{}/shares",
+        dav_base_host_base(dav_base),
+        OCS_SHARE_API
+    )
 }
 
 /// Extract the public share URL from an OCS share-create response
@@ -78,6 +117,113 @@ pub fn http_status(err: &str) -> Option<u16> {
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(rest.len())];
     digits.parse().ok()
+}
+
+// ── OCS response types (typed mirrors of the OCS v2 JSON envelope) ───
+
+/// OCS API meta block: `{"status":...,"statuscode":...,"message":...}`.
+/// Every field defaults so a sparse meta block still parses.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcsMeta {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub statuscode: i64,
+    #[serde(default)]
+    pub message: String,
+}
+
+/// Inner `{"meta":...,"data":...}` body of an OCS v2 response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OcsBody<T> {
+    #[serde(default)]
+    pub meta: OcsMeta,
+    pub data: T,
+}
+
+/// Typed OCS v2 response envelope: `{"ocs":{"meta":{...},"data":...}}`.
+/// Generic over `data` so the same envelope parses a single share
+/// (`OcsResponse<ShareInfo>`) or a share list (`OcsResponse<ShareList>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OcsResponse<T> {
+    pub ocs: OcsBody<T>,
+}
+
+/// One OCS share record — the subset of fields Nextcloud/OpenCloud
+/// returns for a share-create / share-list response. Unknown fields are
+/// ignored; every known field defaults so partial payloads still parse.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShareInfo {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default, rename = "share_type")]
+    pub share_type: i64,
+    #[serde(default, rename = "uid_owner")]
+    pub uid_owner: String,
+    #[serde(default, rename = "displayname_owner")]
+    pub displayname_owner: String,
+    #[serde(default, rename = "path")]
+    pub path: String,
+    #[serde(default, rename = "item_type")]
+    pub item_type: String,
+    #[serde(default, rename = "mimetype")]
+    pub mimetype: String,
+    #[serde(default, rename = "file_target")]
+    pub file_target: String,
+    #[serde(default, rename = "url")]
+    pub url: String,
+    #[serde(default, rename = "token")]
+    pub token: String,
+    #[serde(default, rename = "expiration")]
+    pub expiration: Option<String>,
+    #[serde(default, rename = "permissions")]
+    pub permissions: i64,
+    #[serde(default, rename = "share_with")]
+    pub share_with: String,
+    #[serde(default, rename = "share_with_displayname")]
+    pub share_with_displayname: String,
+    #[serde(default, rename = "name")]
+    pub name: String,
+}
+
+/// A list of OCS shares — the `data` array of a share-list response.
+/// (De)serializes as a bare JSON array so `OcsResponse<ShareList>`
+/// matches `{"ocs":{"data":[{...},{...}]}}` directly.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ShareList {
+    pub shares: Vec<ShareInfo>,
+}
+
+impl<'de> Deserialize<'de> for ShareList {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let shares = Vec::<ShareInfo>::deserialize(deserializer)?;
+        Ok(ShareList { shares })
+    }
+}
+
+/// Parse the `data.url` of an OCS share-create response typed as
+/// `OcsResponse<ShareInfo>`. Mirrors [`parse_share_url`] but returns the
+/// validated typed envelope, leaving the URL extraction to the caller.
+pub fn parse_ocs_share_create(body: &[u8]) -> Result<OcsResponse<ShareInfo>, String> {
+    serde_json::from_slice::<OcsResponse<ShareInfo>>(body)
+        .map_err(|e| format!("share response not OCS json: {e}"))
+        .and_then(|r| {
+            if r.ocs.data.url.is_empty() {
+                Err("share response carries no url".to_string())
+            } else {
+                Ok(r)
+            }
+        })
+}
+
+/// Parse an OCS share-list response body into a `Vec<ShareInfo>`.
+pub fn parse_ocs_share_list(body: &[u8]) -> Result<Vec<ShareInfo>, String> {
+    serde_json::from_slice::<OcsResponse<ShareList>>(body)
+        .map(|r| r.ocs.data.shares)
+        .map_err(|e| format!("share list response not OCS json: {e}"))
 }
 
 // ── path building (the safety-critical part) ─────────────────────────
@@ -507,9 +653,13 @@ impl fmt::Debug for CloudFiles {
 
 impl CloudFiles {
     /// From CLOUD_WEBDAV_URL / CLOUD_WEBDAV_USER / CLOUD_WEBDAV_PASS
-    /// (+ optional CLOUD_SHARE_URL override); None unless all three are
-    /// set and non-blank (same trim semantics as the original polls
-    /// `CloudUploadConfig::from_env`).
+    /// (+ optional CLOUD_SHARE_URL or CLOUD_OCS_URL override for the OCS
+    /// shares endpoint); None unless all three WebDAV vars are set and
+    /// non-blank (same trim semantics as the original polls
+    /// `CloudUploadConfig::from_env`). The OCS sharing API (public link
+    /// creation + share listing) is reached through the derived/overridden
+    /// OCS endpoint — see [`Self::ocs_share_create_public_link`] and
+    /// [`Self::ocs_share_list`].
     pub fn from_env() -> Option<Self> {
         let dav_base = non_empty("CLOUD_WEBDAV_URL")?;
         let user = non_empty("CLOUD_WEBDAV_USER")?;
@@ -522,19 +672,17 @@ impl CloudFiles {
         ))
     }
 
-    /// Explicit constructor (share endpoint derived from `dav_base`
-    /// unless the CLOUD_SHARE_URL env override is set).
+    /// Explicit constructor (share endpoint resolved in this order:
+    /// 1. `CLOUD_SHARE_URL` — full shares endpoint override (legacy),
+    /// 2. `CLOUD_OCS_URL`   — OCS base; endpoint = `<ocs>{OCS_SHARE_API}/shares`,
+    /// 3. derived from `dav_base`'s scheme://authority + `{OCS_SHARE_API}/shares`).
     pub fn from_parts(dav_base: String, user: String, pass: String, http: reqwest::Client) -> Self {
         let dav_base = dav_base.trim_end_matches('/').to_string();
-        let share_url = std::env::var("CLOUD_SHARE_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| {
-                format!(
-                    "{}/ocs/v2.php/apps/files_sharing/api/v1/shares",
-                    dav_base_host_base(&dav_base)
-                )
-            });
+        let share_url = resolve_share_url(
+            &dav_base,
+            non_empty("CLOUD_SHARE_URL").as_deref(),
+            non_empty("CLOUD_OCS_URL").as_deref(),
+        );
         Self {
             dav_base,
             share_url,
@@ -734,6 +882,76 @@ impl CloudFiles {
             .await
             .map_err(|e| format!("share response unreadable: {e}"))?;
         parse_share_url(&body)
+    }
+
+    /// Mint a public read-only share link for a remote path through the
+    /// OCS v2 shares API and return the parsed share URL. This is the
+    /// typed counterpart to [`Self::create_share`]: same network call,
+    /// but the response is decoded into an [`OcsResponse<ShareInfo>`]
+    /// and the `data.url` is returned. The `path` is validated with the
+    /// same traversal guard as WebDAV operations.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn ocs_share_create_public_link(&self, path: &str) -> Result<String, String> {
+        // Reuse the WebDAV URL builder purely as the traversal guard: a
+        // share path must be a sane relative path under the base, too.
+        dav_url(&self.dav_base, path)?;
+        let form = [
+            ("path", format!("/{path}")),
+            ("shareType", "3".to_string()),   // public link
+            ("permissions", "1".to_string()), // read only
+        ];
+        let res = self
+            .http
+            .post(&self.share_url)
+            .header("OCS-APIRequest", "true")
+            .header(reqwest::header::ACCEPT, "application/json")
+            .basic_auth(&self.user, Some(&self.pass))
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| format!("share creation unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!(
+                "share creation failed: HTTP {}",
+                res.status().as_u16()
+            ));
+        }
+        let body = res
+            .bytes()
+            .await
+            .map_err(|e| format!("share response unreadable: {e}"))?;
+        let parsed = parse_ocs_share_create(&body)?;
+        Ok(parsed.ocs.data.url)
+    }
+
+    /// List the existing shares for a remote path through the OCS v2
+    /// shares API (`GET <share_url>?path=/<path>`). Returns the typed
+    /// [`ShareInfo`] records the server reports. The `path` is validated
+    /// with the same traversal guard as WebDAV operations.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn ocs_share_list(&self, path: &str) -> Result<Vec<ShareInfo>, String> {
+        dav_url(&self.dav_base, path)?;
+        let res = self
+            .http
+            .get(&self.share_url)
+            .header("OCS-APIRequest", "true")
+            .header(reqwest::header::ACCEPT, "application/json")
+            .basic_auth(&self.user, Some(&self.pass))
+            .query(&[("path", format!("/{path}")), ("reshares", "true".to_string())])
+            .send()
+            .await
+            .map_err(|e| format!("share list unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!(
+                "share list failed: HTTP {}",
+                res.status().as_u16()
+            ));
+        }
+        let body = res
+            .bytes()
+            .await
+            .map_err(|e| format!("share list response unreadable: {e}"))?;
+        parse_ocs_share_list(&body)
     }
 
     /// Check if opencloud is reachable by GET /health/ready at the
@@ -1116,6 +1334,9 @@ mod tests {
 
     #[test]
     fn from_parts_trims_base_and_debug_redacts_password() {
+        // These tests must not be polluted by host env overrides.
+        std::env::remove_var("CLOUD_SHARE_URL");
+        std::env::remove_var("CLOUD_OCS_URL");
         let cfg = CloudFiles::from_parts(
             format!("{BASE}/"),
             "bot".into(),
@@ -1124,19 +1345,96 @@ mod tests {
         );
         assert_eq!(cfg.dav_base, BASE);
         assert_eq!(cfg.user, "bot");
-        // share endpoint only overridden when CLOUD_SHARE_URL is set
-        if std::env::var("CLOUD_SHARE_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .is_none()
-        {
-            assert_eq!(
-                cfg.share_url,
-                "http://opensme-opencloud:9200/ocs/v2.php/apps/files_sharing/api/v1/shares"
-            );
-        }
+        // share endpoint derived from the WebDAV base host when neither
+        // CLOUD_SHARE_URL nor CLOUD_OCS_URL is set.
+        assert_eq!(
+            cfg.share_url,
+            "http://opensme-opencloud:9200/ocs/v2.php/apps/files_sharing/api/v1/shares"
+        );
         let dbg = format!("{cfg:?}");
         assert!(dbg.contains("***"), "debug must redact: {dbg}");
         assert!(!dbg.contains("hunter2"), "password must never leak: {dbg}");
+    }
+
+    #[test]
+    fn from_parts_honors_cloud_ocs_url_override() {
+        // Pure precedence check — no env mutation, so no parallel-test races.
+        assert_eq!(
+            resolve_share_url(BASE, None, Some("http://cloud.example/ocs")),
+            "http://cloud.example/ocs/ocs/v2.php/apps/files_sharing/api/v1/shares"
+        );
+        // trailing slash on the OCS base is trimmed
+        assert_eq!(
+            resolve_share_url(BASE, None, Some("http://cloud.example/ocs/")),
+            "http://cloud.example/ocs/ocs/v2.php/apps/files_sharing/api/v1/shares"
+        );
+        // blank OCS override falls through to the dav-host derivation
+        assert_eq!(
+            resolve_share_url(BASE, None, Some("   ")),
+            "http://opensme-opencloud:9200/ocs/v2.php/apps/files_sharing/api/v1/shares"
+        );
+    }
+
+    #[test]
+    fn from_parts_cloud_share_url_wins_over_ocs_url() {
+        assert_eq!(
+            resolve_share_url(
+                BASE,
+                Some("https://share.example/api/shares"),
+                Some("http://ignored.example/ocs")
+            ),
+            "https://share.example/api/shares"
+        );
+        // neither override → derived from dav base host
+        assert_eq!(
+            resolve_share_url(BASE, None, None),
+            "http://opensme-opencloud:9200/ocs/v2.php/apps/files_sharing/api/v1/shares"
+        );
+    }
+
+    #[test]
+    fn parse_ocs_share_create_decodes_typed_envelope() {
+        let body = br#"{"ocs":{"meta":{"status":"ok","statuscode":200,"message":""},"data":{"id":42,"share_type":3,"path":"/Umfragen/x.pdf","url":"https://cloud.example/s/abc","token":"tok","permissions":1}}}"#;
+        let parsed = parse_ocs_share_create(body).unwrap();
+        assert_eq!(parsed.ocs.meta.status, "ok");
+        assert_eq!(parsed.ocs.meta.statuscode, 200);
+        assert_eq!(parsed.ocs.data.id, 42);
+        assert_eq!(parsed.ocs.data.share_type, 3);
+        assert_eq!(parsed.ocs.data.url, "https://cloud.example/s/abc");
+        assert_eq!(parsed.ocs.data.token, "tok");
+        assert_eq!(parsed.ocs.data.permissions, 1);
+        // missing url → Err (parity with parse_share_url)
+        assert!(parse_ocs_share_create(br#"{"ocs":{"data":{}}}"#).is_err());
+        // non-json → Err
+        assert!(parse_ocs_share_create(b"<xml/>").is_err());
+    }
+
+    #[test]
+    fn parse_ocs_share_list_decodes_array_data() {
+        let body = br#"{"ocs":{"meta":{"status":"ok","statuscode":200},"data":[{"id":1,"share_type":3,"path":"/Umfragen/a.pdf","url":"https://cloud.example/s/1","permissions":1},{"id":2,"share_type":0,"path":"/Umfragen/a.pdf","share_with":"alice","permissions":31}]}}"#;
+        let shares = parse_ocs_share_list(body).unwrap();
+        assert_eq!(shares.len(), 2);
+        assert_eq!(shares[0].id, 1);
+        assert_eq!(shares[0].share_type, 3);
+        assert_eq!(shares[0].url, "https://cloud.example/s/1");
+        assert_eq!(shares[1].id, 2);
+        assert_eq!(shares[1].share_with, "alice");
+        assert_eq!(shares[1].permissions, 31);
+        // empty list
+        assert_eq!(
+            parse_ocs_share_list(br#"{"ocs":{"meta":{"status":"ok"},"data":[]}}"#).unwrap(),
+            Vec::<ShareInfo>::new()
+        );
+        // non-json → Err
+        assert!(parse_ocs_share_list(b"nope").is_err());
+    }
+
+    #[test]
+    fn ocs_constants_are_the_documented_paths() {
+        assert_eq!(OCS_API_V2, "/ocs/v2.php");
+        assert_eq!(
+            OCS_SHARE_API,
+            "/ocs/v2.php/apps/files_sharing/api/v1"
+        );
     }
 }
