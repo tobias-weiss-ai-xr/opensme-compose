@@ -80,8 +80,8 @@ http:
 
     # Principals: DAV clients look up the current-user-principal (and
     # from there the calendar/addressbook homes) via this sub-tree.
-    # No CORS middleware: principals is an internal-protocol lookup,
-    # not a browser-facing path.
+    # CORS middleware is applied to allow cross-origin requests from
+    # portal applications.
     opencloud-principals:
       rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/principals/`)"
       priority: 9000
@@ -90,18 +90,26 @@ http:
         - websecure
       tls:
         certResolver: mytlschallenge
+      middlewares:
+        - opencloud-cors
 
   middlewares:
+    # CORS middleware: sets Access-Control-Allow-Origin for openSME domains,
+    # Access-Control-Allow-Methods (GET/PUT/POST/DELETE/OPTIONS/PROPFIND/MKCOL),
+    # and access-control-max-age: 86400
     opencloud-cors:
       headers:
         accessControlAllowOriginList:
-          - "*"
+          - "https://*.opensme.graphwiz.ai"
+          - "https://*.graphwiz.ai"
         accessControlAllowMethods:
           - GET
           - PUT
           - POST
           - DELETE
           - OPTIONS
+          - PROPFIND
+          - MKCOL
         accessControlAllowHeaders:
           - Authorization
           - Content-Type
