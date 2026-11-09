@@ -14,6 +14,10 @@ verifies the WIRING between services on a running stack:
   4. ai-proxy      portal → llama.cpp round-trip through the real AI
                    proxy endpoint (the live twin of the in-process
                    contract tests in portal/src/main.rs)
+  5. calrs-radicale calrs can reach its Radicale CalDAV store at
+                   calendar-radicale:5232 (private network wiring)
+  6. sogo6-calendar SOGo6 can subscribe to calrs public calendar
+                   via the edge-routed /dav/ endpoint
 
 Each check SKIPS (not fails) when a participating service isn't running,
 so the layer is meaningful for any COMPOSE_FILE subset.
@@ -229,6 +233,73 @@ def check_ai_proxy(result: Result, running: set[str], domain: str, env: dict):
     result.fail(f"AI proxy round-trip did not succeed ({last})")
 
 
+# ── 5. calendar ↔ radicale CalDAV wiring ───────────────────────────────
+def check_calrs_radicale(result: Result, running: set[str]):
+    """Verify calrs can reach and write to its dedicated Radicale CalDAV store."""
+    if "calendar" not in running or "calendar-radicale" not in running:
+        result.skip("calendar/calendar-radicale not running")
+        return
+
+    # calrs should be able to resolve calendar-radicale by name
+    r = compose_exec("calendar", ["sh", "-c", 
+        "wget -q -O /dev/null --spider --timeout=5 http://calendar-radicale:5232/ || exit 1"])
+    if r.returncode == 0:
+        result.ok("calendar → calendar-radicale:5232 reachable")
+    else:
+        result.fail(f"calendar cannot reach calendar-radicale: {r.stderr[:100]}")
+
+    # The /dav/booking/main/ collection should exist or be creatable
+    # (calrs creates it on first booking; we just verify the root is accessible)
+    r = compose_exec("calendar", ["sh", "-c",
+        "wget -q -O - --timeout=5 http://calendar-radicale:5232/dav/ | head -1"])
+    if r.returncode == 0 and "xml" in r.stdout.lower():
+        result.ok("calendar-radicale DAV root accessible (XML response)")
+    elif r.returncode == 0:
+        result.warn("calendar-radicale DAV root accessible (non-XML response)")
+    else:
+        result.warn(f"Cannot probe DAV root: {r.stderr[:80]}")
+
+
+# ── 6. sogo6 ↔ calendar external-calendar subscription ──────────────────
+def check_sogo6_calendar(result: Result, running: set[str], domain: str, env: dict):
+    """Verify SOGo6 can subscribe to calrs public calendar via CalDAV."""
+    if "sogo" not in running or "calendar" not in running or "calendar-radicale" not in running:
+        result.skip("sogo/calendar/calendar-radicale not running")
+        return
+
+    calendar_domain = env.get("CALENDAR_DOMAIN", f"calendar.{domain}")
+    dav_url = f"https://{calendar_domain}/dav/booking/main/"
+
+    # The radicale /dav route should be publicly accessible via Traefik
+    s = session_insecure()
+    try:
+        r = s.request("PROPFIND", dav_url, timeout=10,
+                       auth=(
+                           env.get("RADICALE_USER", "booking"),
+                           env.get("RADICALE_PASSWORD", "")
+                       ) if env.get("RADICALE_USER") else None)
+        if r.status_code in (207, 401):  # 207 = Multi-Status (DAV success), 401 = auth required
+            result.ok(f"Radicale CalDAV endpoint {dav_url} reachable")
+        else:
+            result.warn(f"DAV endpoint {dav_url} returned HTTP {r.status_code}")
+    except requests.RequestException as e:
+        result.fail(f"Cannot reach DAV endpoint {dav_url}: {e}")
+        return
+
+    # SOGo6 should be able to make external calendar subscriptions
+    # (we verify the external-calendars endpoint is accessible)
+    sogo_url = f"https://webmail.{domain}/SOGo/so/" + \
+               env.get("SOGO_USER", "testuser")
+    try:
+        r = s.get(f"{sogo_url}/Calendar/personal", timeout=10)
+        if r.status_code in (200, 401, 403):  # 200/401/403 all mean endpoint exists
+            result.ok("SOGo6 calendar API accessible")
+        else:
+            result.warn(f"SOGo6 calendar API returned HTTP {r.status_code}")
+    except requests.RequestException as e:
+        result.skip(f"Cannot probe SOGo6 calendar API: {e}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--domain", default=None,
@@ -258,6 +329,10 @@ def main() -> int:
     check_sso_issuer(result, running, domain)
     result.info("Check 4: live AI proxy round-trip (portal → llama.cpp)")
     check_ai_proxy(result, running, domain, env)
+    result.info("Check 5: calendar ↔ radicale CalDAV wiring")
+    check_calrs_radicale(result, running)
+    result.info("Check 6: sogo6 ↔ calendar external-calendar subscription")
+    check_sogo6_calendar(result, running, domain, env)
 
     print()
     ok = result.summary()

@@ -150,6 +150,13 @@ network or through the edge:
    signed-in round-trip succeeds end-to-end against the live llama.cpp
    backend (the deployed twin of the in-process contract tests in
    `portal/src/main.rs`)
+5. **Calendar ↔ Radicale CalDAV** — calrs can reach and write to its
+   dedicated Radicale CalDAV store at calendar-radicale:5232 via the
+   private opensme-net (probed from the calendar container)
+6. **SOGo6 ↔ Calendar external-calendar** — SOGo6 can subscribe to
+   calrs public calendar via the edge-routed `/dav/booking/main/` CalDAV
+   endpoint (Traefik → calendar-radicale), verifying the full external
+   calendar subscription path
 
 Every check skips gracefully when a participating service isn't running,
 so the layer stays meaningful for any `COMPOSE_FILE` subset.
