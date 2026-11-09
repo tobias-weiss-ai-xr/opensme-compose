@@ -996,6 +996,13 @@ impl CloudFiles {
         Ok(())
     }
 
+    /// Upload file with raw bytes. Simpler interface than put() which
+    /// exposes content_type parameter. Uses application/octet-stream as default.
+    #[allow(dead_code)] // generalized client — consumers adopt incrementally
+    pub async fn upload_file(&self, remote_path: &str, bytes: &[u8]) -> Result<(), String> {
+        self.put(remote_path, bytes, "application/octet-stream").await
+    }
+
     /// GET `<dav_base>/<remote_path>` bytes.
     #[allow(dead_code)] // generalized client — consumers adopt incrementally
     pub async fn get(&self, remote_path: &str) -> Result<Vec<u8>, String> {
