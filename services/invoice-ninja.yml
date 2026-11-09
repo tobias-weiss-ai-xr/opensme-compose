@@ -93,8 +93,8 @@ services:
       # the proxy (guzzle honours these env vars) — same pattern as the portal.
       HTTPS_PROXY: ${INVOICENINJA_HTTPS_PROXY:-}
       HTTP_PROXY: ${INVOICENINJA_HTTP_PROXY:-}
-      NO_PROXY: ${INVOICENINJA_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
-      no_proxy: ${INVOICENINJA_NO_PROXY:-localhost,127.0.0.1,opencloud,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
+      NO_PROXY: ${INVOICENINJA_NO_PROXY:-localhost,127.0.0.1,opencloud,minio,seaweedfs,zitadel,traefik,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
+      no_proxy: ${INVOICENINJA_NO_PROXY:-localhost,127.0.0.1,opencloud,minio,seaweedfs,zitadel,traefik,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
       # Database: MariaDB (upstream pgsql migrations broken in v5)
       DB_HOST: invoiceninja-db
       DB_PORT: "3306"
