@@ -57,13 +57,15 @@ services:
   invoiceninja:
     <<: *service-defaults
     image: invoiceninja-pg:5
-    # upstream image lacks pdo_pgsql — local build adds it (see Dockerfile);
-    # harmless with MariaDB but keeps the pg option buildable
+    # upstream image lacks pdo_pgsql and OIDC support — local build adds
+    # both via services/invoice-ninja/Dockerfile. 'local build' tag inhibits
+    # watchtower auto-updates (we rebuild manually when base image changes).
     labels: ["com.centurylinklabs.watchtower.enable=false"]  # local build
     build: ./services/invoice-ninja
     container_name: opensme-invoiceninja
     restart: unless-stopped
     profiles: ["invoice"]
+    entrypoint: ["/invoiceninja-entrypoint.sh"]
     environment:
       APP_URL: "https://invoices.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
       # HOSTING NOTE: on live chains opensme-coexist.yml overrides APP_URL
@@ -105,6 +107,24 @@ services:
       REQUIRE_CONFIRMATION: "false"
       SET_UNCONFIRMED: "true"
       SELF_UPDATE: "false"
+      # ── S3-compatible object storage: SeaweedFS (was MinIO) ──────────
+      # Default storage driver: s3. Files (invoices, PDFs, logos, etc.)
+      # go to the shared object store instead of the local storage volume.
+      # This enables cross-container access (paperless can ingest directly
+      # from the bucket) and unified lifecycle/backups.
+      # Local volumes (invoiceninja-public, invoiceninja-storage) stay as
+      # a cold fallback — existing files are NOT migrated automatically.
+      FILESYSTEM_DISK: s3
+      AWS_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
+      AWS_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set in .env}
+      AWS_DEFAULT_REGION: ${OC_S3_REGION:-us-east-1}
+      AWS_BUCKET: ${INVOICENINJA_S3_BUCKET:-invoiceninja}
+      AWS_ENDPOINT: ${OC_S3_ENDPOINT:-http://minio:9000}
+      AWS_URL: ${OC_S3_ENDPOINT:-http://minio:9000}
+      # S3 settings: path-style addressing ( SeaweedFS only speaks http, not https)
+      AWS_USE_PATH_STYLE_ENDPOINT: "true"
+      # URL-signed expiries (hours) for file download links sent to clients
+      NINJA_S3_FILE_EXPIRES: "24"
     volumes:
       - invoiceninja-public:/var/www/app/public
       - invoiceninja-storage:/var/www/app/storage
@@ -113,8 +133,9 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # fpm image: no HTTP on :9000 (FastCGI) — just check the process
-      test: ["CMD", "pgrep", "-f", "php-fpm"]
+      # fpm image: no HTTP on :9000 (FastCGI) — check both process and
+      # that the artisan config cache is current (signals Laravel booted)
+      test: ["CMD-SHELL", "pgrep -f php-fpm > /dev/null && test -f /var/www/app/bootstrap/cache/config.php"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -159,8 +180,10 @@ services:
       # NOTE: no certresolver here — internal hosts without LE use the
       # host-only compose.internal.yml to override these labels
     healthcheck:
-      # env -u: never let host-injected proxy env redirect the health probe
-      test: ["CMD-SHELL", "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -q -O /dev/null http://127.0.0.1:80/health"]
+      # env -u: never let host-injected proxy env redirect the health probe.
+      # Use --spider to avoid writing to disk and --max-redirect=0 to
+      # avoid following the SSO redirect (we just want nginx to answer).
+      test: ["CMD-SHELL", "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -q --spider --max-redirect=0 -O /dev/null http://127.0.0.1:80/health"]
       interval: 30s
       timeout: 5s
       retries: 5
