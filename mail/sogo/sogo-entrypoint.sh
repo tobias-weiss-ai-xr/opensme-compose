@@ -43,6 +43,12 @@ if [ -f "$TEMPLATE" ]; then
     "$TEMPLATE" > "$OUTPUT"
   chown sogo:sogo "$OUTPUT"
   echo "[sogo-entrypoint] Done."
+  # Echo CalDAV configuration during startup for debugging
+  echo "[sogo-entrypoint] CalDAV configuration:"
+  echo "  SOGO_CALDAV_ENABLED=${SOGO_CALDAV_ENABLED:-false}"
+  echo "  SOGO_CALDAV_SERVER=${SOGO_CALDAV_SERVER:-not set}"
+  echo "  SOGO_CALDAV_AUTH_METHODS=${SOGO_CALDAV_AUTH_METHODS:-not set}"
+  echo "  SOGO_CALDAV_USER_SCRIPT=${SOGO_CALDAV_USER_SCRIPT:-not set}"
 else
   echo "[sogo-entrypoint] No template found, using existing $OUTPUT"
 fi

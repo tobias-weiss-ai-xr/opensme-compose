@@ -77,6 +77,14 @@ services:
       SOGO_CARDDAV_SERVER: ${SOGO_CARDDAV_SERVER:-https://cloud.${OPENCLOUD_DOMAIN}}
       SOGO_CARDDAV_AUTH_METHODS: ${SOGO_CARDDAV_AUTH_METHODS:-Basic,All}
       SOGO_CARDDAV_REALM: ${SOGO_CARDDAV_REALM:-OpenCloud}
+      # CalDAV backend (caldav) for OpenCloud calendars
+      # Primary calendar stays in SOGo SQL backend; OpenCloud CalDAV is for
+      # shared/team calendars. Users can subscribe to OpenCloud calendars
+      # from the SOGo UI.
+      SOGO_CALDAV_ENABLED: ${SOGO_CALDAV_ENABLED:-true}
+      SOGO_CALDAV_SERVER: ${SOGO_CALDAV_SERVER:-https://cloud.${OPENCLOUD_DOMAIN}}
+      SOGO_CALDAV_AUTH_METHODS: ${SOGO_CALDAV_AUTH_METHODS:-Basic,All}
+      SOGO_CALDAV_USER_SCRIPT: ${SOGO_CALDAV_USER_SCRIPT:-/usr/lib/GNUstep/SOGo/CALDAVUserScript.sh}
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:
