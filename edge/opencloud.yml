@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenCloud — PUBLIC edge router (openSME suite, traefik file provider)
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy/adapt this block into the fleet traefik's file provider
+# (dynamic/opencloud.yml) on PUBLIC deployments. Rationale (same as
+# invoices-standin.yml): the fleet traefik's docker-provider event stream dies
+# after docker daemon restarts on the OpenVZ-style host and deterministically
+# ignores some containers, so docker labels alone are not reliable.
+#
+# Browser-based access:
+#   - WebDAV: https://cloud.<domain>/remote.php/dav/
+#   - OCS API: https://cloud.<domain>/ocs/v2.php/
+# Both endpoints are exposed publicly with TLS. The browser will complete the
+# Zitadel OIDC round trip against cloud.<domain> directly.
+#
+# Notes:
+#   - Replace <domain> with the actual public domain (e.g., opensme.graphwiz.ai)
+#   - The service points to the opensme-opencloud container on the opensme-net
+#     Docker network, port 9200 (openCloud's internal HTTP port).
+#   - CORS middleware is applied to both WebDAV and OCS routers to support
+#     cross-origin requests from portal applications.
+#   - Priority 10000 ensures these rules take precedence over catch-all routes.
+# ─────────────────────────────────────────────────────────────────────────────
+http:
+  routers:
+    opencloud-webdav:
+      rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/`)"
+      priority: 10000
+      service: opencloud
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+      middlewares:
+        - opencloud-cors
+
+    opencloud-ocs:
+      rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/ocs/v2.php/`)"
+      priority: 10000
+      service: opencloud
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+      middlewares:
+        - opencloud-cors
+
+  middlewares:
+    opencloud-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "*"
+        accessControlAllowMethods:
+          - GET
+          - PUT
+          - POST
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Authorization
+          - Content-Type
+          - X-Request-ID
+          - X-OC
+        accessControlMaxAge: 86400
+
+  services:
+    opencloud:
+      loadBalancer:
+        servers:
+          - url: "http://opensme-opencloud:9200"
