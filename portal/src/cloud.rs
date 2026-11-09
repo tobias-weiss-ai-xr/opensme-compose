@@ -25,8 +25,10 @@
 //! operation and the HTTP status, connection failures → `Err` with
 //! `unreachable`.
 
+use axum::{http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::time::Duration;
 
 // ── env + OCS helpers (mirroring the original polls.rs seed) ─────────
 
@@ -733,6 +735,52 @@ impl CloudFiles {
             .map_err(|e| format!("share response unreadable: {e}"))?;
         parse_share_url(&body)
     }
+
+    /// Check if opencloud is reachable by GET /health/ready at the
+    /// WebDAV base URL. Uses a dedicated client with a 5s timeout.
+    /// If dav_base is empty, returns true trivially.
+    pub async fn check_health(&self) -> bool {
+        let dav_base = self.dav_base.trim_end_matches('/');
+        if dav_base.is_empty() {
+            return true;
+        }
+        // Build the health check URL: <dav_base>/health/ready
+        let health_url = format!("{}/health/ready", dav_base);
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let res = client
+            .get(&health_url)
+            .basic_auth(&self.user, Some(&self.pass))
+            .send()
+            .await;
+        match res {
+            Ok(res) => res.status().is_success(),
+            Err(_) => false,
+        }
+    }
+}
+
+/// Standalone health check function that checks if opencloud is reachable.
+/// GET /health/ready at CLOUD_WEBDAV_URL with a 5s timeout.
+/// If CLOUD_WEBDAV_URL is empty, succeeds trivially.
+pub async fn cloud_health() -> bool {
+    let Some(cloud) = CloudFiles::from_env() else {
+        // No config means no cloud service to check
+        return true;
+    };
+    cloud.check_health().await
+}
+
+/// Handler for GET /api/cloud/health - returns JSON with healthy bool field.
+pub async fn get_health() -> impl axum::response::IntoResponse {
+    let healthy = cloud_health().await;
+    (StatusCode::OK, Json(serde_json::json!({ "healthy": healthy })))
 }
 
 // ── offline tests (no network) ───────────────────────────────────────

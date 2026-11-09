@@ -1107,6 +1107,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
             get(handle_cloud_download).delete(handle_cloud_delete),
         )
         .route("/api/cloud/share", post(handle_cloud_share))
+        .route("/api/cloud/health", get(cloud::get_health))
         // Cloud picker page (browse + upload + select; ?picker=1 turns
         // it into the cross-tab attachment picker). Session-gated like
         // the bridge it drives — anonymous callers get 401 from the
@@ -2412,6 +2413,17 @@ async fn main() {
         feed_columns = config.feed_fetcher.columns().len(),
         "starting opensme-portal"
     );
+
+    // Startup check: log warning if opencloud env vars are set but service is unreachable
+    if let Some(ref cloud) = config.cloud {
+        let healthy = cloud.check_health().await;
+        if !healthy {
+            tracing::warn!(
+                cloud_url = %cloud.dav_base,
+                "opencloud env vars are set but service is unreachable (non-fatal)"
+            );
+        }
+    }
 
     let app = build_router(config);
 
