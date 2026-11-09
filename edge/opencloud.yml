@@ -45,6 +45,52 @@ http:
       middlewares:
         - opencloud-cors
 
+    # ── CalDAV / CardDAV / Principals (ocis DAV server) ──────────────
+    # ocis (openCloud) serves CalDAV (calendar storage) and CardDAV
+    # (address-book storage) under the same /remote.php/dav/ tree as
+    # WebDAV, on the internal HTTP listener (:9200). These routers
+    # expose the calendar, addressbook and principals sub-trees so that
+    # calendaring clients (e.g. DAVx5, macOS Calendar/Contacts) and
+    # CardDAV/CalDAV automation can reach them on the public edge.
+    # Priority 9000 sits below the catch-all WebDAV router (10000) so
+    # that any DAV path not matched here still falls through to the
+    # generic WebDAV handler; CORS is applied to calendars/addressbooks
+    # so portal/web clients can issue cross-origin DAV requests.
+    opencloud-caldav:
+      rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/calendars/`)"
+      priority: 9000
+      service: opencloud
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+      middlewares:
+        - opencloud-cors
+
+    opencloud-carddav:
+      rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/addressbooks/`)"
+      priority: 9000
+      service: opencloud
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+      middlewares:
+        - opencloud-cors
+
+    # Principals: DAV clients look up the current-user-principal (and
+    # from there the calendar/addressbook homes) via this sub-tree.
+    # No CORS middleware: principals is an internal-protocol lookup,
+    # not a browser-facing path.
+    opencloud-principals:
+      rule: "Host(`cloud.${DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/remote.php/dav/principals/`)"
+      priority: 9000
+      service: opencloud
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: mytlschallenge
+
   middlewares:
     opencloud-cors:
       headers:
