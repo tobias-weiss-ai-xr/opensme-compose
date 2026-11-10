@@ -52,8 +52,20 @@ Modules (blackbox.yml)
 | `http_avail`  | 2xx, 3xx, 401                     | routing/availability       |
 | `http_200`    | 2xx only (no redirect)            | deep checks (`/health`)    |
 | `http_content`| 200 + your marker in the body    | marketing site (anti-empty)|
+| `matrix_sso`  | /login body has m.login.sso + a Zitadel idp | chat SSO wiring  |
+| `sso_redirect_to_idp` | synapse SSO redirect lands on the IdP login UI ("Welcome back") | full chat-SSO hop |
+| `webmail_health` | sogo6 /health reports `"status": "ok"` | webmail backend health |
 | `tcp_connect` | TCP dial succeeds                 | SMTP / submission / IMAPS  |
+| `tcp_smtp_ehlo` | real EHLO dialog answered with 250 | Stalwart submission (:587) |
+| `tcp_imap_noop` | real NOOP answered with tagged OK  | Stalwart IMAP (:143)      |
 | `icmp`        | host answers ping                 | hosts (opt-in)             |
+
+The rows after `http_content` are FUNCTIONAL probes, not just
+reachability: they verify chat SSO is actually wired (`m.login.sso` +
+Zitadel idp, and a redirect that lands on the IdP login UI), that the
+sogo6 webmail backend reports ok (database/redis/mail deps), and that the
+mail daemon answers real SMTP/IMAP commands (EHLO→250, NOOP→tagged OK) —
+a listener that accepts connections but never answers now alerts.
 
 The `http_content` marker is a per-deployment string — **edit
 `fail_if_body_not_matches_regexp` in `blackbox.yml`** to something unique to

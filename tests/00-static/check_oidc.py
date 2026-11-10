@@ -47,6 +47,18 @@ exists, but the stack must still complete a real login):
        — Zitadel's OPAQUE default is rejected by every JWKS-validating
        backend (ocis 'invalid number of segments'), so a registrar that
        drops the field breaks every SSO login after the code exchange.
+  R9 — sogo6 callback allowlist: the sogo branch of scripts/zitadel-client.sh
+       must register the webmail OIDC callback(s) the RUNNING sogo6
+       actually emits. sogo6 builds its redirect_uri as
+       {public_base}/api/user/v1/auth/callback/{TENANT} where TENANT is
+       taken from the USER's login domain (= the webmail host's parent,
+       e.g. webmail.home.opensme.graphwiz.ai -> home.opensme.graphwiz.ai) —
+       deriving it from OPENSME_DOMAIN (the apex) made Zitadel answer
+       authorize with HTTP 400 "redirect_uri is missing in the client
+       configuration" on every webmail login (live regression 2026-11-10).
+       The branch must therefore derive the callback domain from SOGO_DOMAIN
+       (or the SOGO_OIDC_DOMAIN override) and register BOTH the bare form
+       and the tenant-suffixed form.
 
 Pure file inspection — no docker, runs on any fresh checkout.
 
@@ -345,6 +357,71 @@ def check_app_token_type(result: Result) -> None:
         )
 
 
+def check_sogo_redirect_allowlist(result: Result) -> None:
+    """R9 — the sogo branch must register the callback URI(s) sogo6 emits.
+
+    A wrong (apex-derived) tenant domain in the allowlist makes Zitadel
+    answer the webmail authorize request with HTTP 400 "invalid_request:
+    The requested redirect_uri is missing in the client configuration"
+    (live 2026-11-10: deployed sogo6 emitted
+    .../callback/home.opensme.graphwiz.ai but the allowlist only held
+    .../callback/opensme.graphwiz.ai + opensme.local).
+    """
+    if not ZITADEL_CLIENT_SH.exists():
+        result.fail(
+            "scripts/zitadel-client.sh missing — cannot verify the sogo "
+            "callback allowlist (R9)"
+        )
+        return
+    text = ZITADEL_CLIENT_SH.read_text()
+
+    # 1) the callback tenant domain must be derived from SOGO_DOMAIN (or its
+    #    SOGO_OIDC_DOMAIN override), never from OPENSME_DOMAIN directly.
+    if 'oidc_domain="$(env_get SOGO_OIDC_DOMAIN' in text and "${app_domain#webmail.}" in text:
+        result.ok("sogo callback tenant domain derived from the webmail host "
+                  "(SOGO_DOMAIN / SOGO_OIDC_DOMAIN, not OPENSME_DOMAIN)")
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh (R9): the sogo branch must derive "
+            "oidc_domain from SOGO_OIDC_DOMAIN / ${SOGO_DOMAIN#webmail.} — "
+            "deriving it from OPENSME_DOMAIN registers the apex callback and "
+            "Zitadel 400s ('redirect_uri missing in client configuration') "
+            "every webmail SSO login on a home.<apex> deployment"
+        )
+
+    # 2) both the bare and the tenant-suffixed sogo6 callback paths must be
+    #    in the branch's base_paths.
+    bare = "/api/user/v1/auth/callback\"" in text
+    suffixed = ("/api/user/v1/auth/callback/${oidc_domain}") in text
+    if bare and suffixed:
+        result.ok("sogo6 callbacks registered: bare + tenant-suffixed "
+                  "(/api/user/v1/auth/callback[/{domain}])")
+    else:
+        missing = []
+        if not bare:
+            missing.append("/api/user/v1/auth/callback (bare)")
+        if not suffixed:
+            missing.append("/api/user/v1/auth/callback/${oidc_domain}")
+        result.fail(
+            "scripts/zitadel-client.sh (R9): sogo branch base_paths missing "
+            + "; ".join(missing) + " — the running sogo6 emits exactly "
+            "these redirect_uris and Zitadel rejects any allowlist that "
+            "lacks them with HTTP 400"
+        )
+
+    # 3) the .local tenant variant should stay registered too (the *.local
+    #    login domain of the demo stack).
+    if "/api/user/v1/auth/callback/${local_cb_domain}" in text:
+        result.ok("sogo6 .local callback variant registered "
+                  "(/api/user/v1/auth/callback/${local_cb_domain})")
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh (R9): sogo branch lacks the .local "
+            "callback variant — demo-stack *.local logins (testuser@opensme.local) "
+            "would 400 at the IdP"
+        )
+
+
 # ── Checks ─────────────────────────────────────────────────────
 
 def main() -> bool:
@@ -429,6 +506,9 @@ def main() -> bool:
 
     # ── R8: JWT access-token registration ──
     check_app_token_type(result)
+
+    # ── R9: sogo6 webmail callback allowlist (tenant-domain mismatch) ──
+    check_sogo_redirect_allowlist(result)
 
     return result.summary()
 

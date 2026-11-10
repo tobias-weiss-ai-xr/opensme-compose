@@ -46,6 +46,66 @@ modules:
     prober: tcp
     timeout: 5s
 
+  # ── Tier 5: FUNCTIONAL probe — Matrix login API must advertise SSO ──
+  # Not just a 200: the body must contain the m.login.sso flow AND a
+  # Zitadel/OIDC identity provider. Losing the OIDC wiring makes Synapse
+  # fall back to a local password form — the element "Weiter mit Zitadel"
+  # button disappears while every 200-probe stays green.
+  matrix_sso:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp: ["m.login.sso", "(?i)zitadel"]
+
+  # ── Tier 6: FUNCTIONAL probe — SSO redirect chain (synapse -> IdP) ──
+  # Follows /_matrix/client/v3/login/sso/redirect and requires the final
+  # landing page to be the IdP's login UI (marker "Welcome back"). This
+  # proves the whole chat-SSO hop works (Synapse OIDC provider, Zitadel
+  # route, login UI) — a 200 from an empty/broken page still alerts.
+  sso_redirect_to_idp:
+    prober: http
+    timeout: 15s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp: ["Welcome back"]
+
+  # ── Tier 7: FUNCTIONAL probe — sogo6 webmail deep health ──
+  # /api/user/v1/health answers {status, version, dependencies{database,
+  # ldap, redis, stalwart_mail}}. Requiring "status": "ok" catches a
+  # webmail whose DB/redis/mail backend went down — a plain /en 200 probe
+  # would stay green while logins fail server-side.
+  webmail_health:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp: ['"status": "ok"']
+
+  # ── Tier 8: FUNCTIONAL protocol dialogs (not just TCP connect) ──────
+  # These exchange real protocol commands with the mail daemon, so a
+  # wedged listener that still accepts connections now alerts.
+  tcp_smtp_ehlo:
+    prober: tcp
+    timeout: 8s
+    tcp:
+      query_response:
+        - expect: "^220"          # server greeting (sent on connect)
+        - send: "EHLO blackbox.opensme.monitoring\r"   # note: blackbox appends \n
+        - expect: "250"           # EHLO must be answered, not just tolerated
+
+  tcp_imap_noop:
+    prober: tcp
+    timeout: 8s
+    tcp:
+      query_response:
+        - expect: "^\\* OK"      # IMAP greeting (sent on connect)
+        - send: "a01 NOOP\r"
+        - expect: "a01 OK"        # tagged response proves commands are served
+
   # ── Tier 5: ICMP (only where you are allowed to ping the host) ─────
   icmp:
     prober: icmp

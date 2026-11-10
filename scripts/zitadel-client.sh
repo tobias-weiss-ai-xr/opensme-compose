@@ -284,21 +284,28 @@ case "$APP_KIND" in
     #   {SOGO_P_PUBLIC_BASE_URL}/api/user/v1/auth/callback/{domain}
     # and get_login_mech hands that authorize URL to the frontend. The
     # {domain} in that callback is the TENANT domain taken from the USER's
-    # login name — so testuser@opensme.local gets a
-    # .../callback/opensme.local redirect even on the public VPS whose
-    # OPENSME_DOMAIN is opensme.graphwiz.ai. If only the public-domain
-    # callback is registered, Zitadel answers the authorize request with
+    # login name — so testuser@<tenant> gets a .../callback/<tenant> redirect.
+    #
+    # LIVE REGRESSION (2026-11-10): on the home.<apex> deployment the login
+    # tenant is the WEBMAIL HOST's parent (webmail.home.opensme.graphwiz.ai
+    # -> home.opensme.graphwiz.ai), NOT OPENSME_DOMAIN (opensme.graphwiz.ai).
+    # The script derived the callback from OPENSME_DOMAIN, so the deployed
+    # sogo6 emitted .../callback/home.opensme.graphwiz.ai, which the client
+    # allowlist had never seen, and Zitadel answered the authorize request
+    # with
     #   HTTP 400 invalid_request "The requested redirect_uri is missing in
     #   the client configuration"
-    # (live regression 2026-11-06, T1-SOGO). Register BOTH the configured
-    # domain and its derived .local tenant variant so the allowlist and the
-    # running server stay in sync by construction; enforce_redirect_uris()
-    # rewrites the allowlist to exactly this list on every run. Override the
-    # derived local/tenant domain with SOGO_OIDC_LOCAL_DOMAIN when the
-    # tenant suffix differs from ${OPENSME_DOMAIN%%.*}.local.
-    oidc_domain="$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)"
+    # => every webmail SSO login dead-ended. Fix (durable): derive the
+    # primary tenant callback domain from the webmail host itself (strip the
+    # leading 'webmail.' label, overridable via SOGO_OIDC_DOMAIN) and
+    # register the bare unsuffixed callback too (some sogo6 builds/locales
+    # emit .../api/user/v1/auth/callback with NO tenant suffix). The .local
+    # tenant variant is kept for *.local login-domain deployments.
+    # enforce_redirect_uris() rewrites the allowlist to exactly this list on
+    # every run so the allowlist and the running server stay in sync.
+    oidc_domain="$(env_get SOGO_OIDC_DOMAIN "${app_domain#webmail.}")"
     local_cb_domain="$(env_get SOGO_OIDC_LOCAL_DOMAIN "${oidc_domain%%.*}.local")"
-    base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback/${oidc_domain}")
+    base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback" "/api/user/v1/auth/callback/${oidc_domain}")
     if [[ -n "${local_cb_domain}" && "${local_cb_domain}" != "${oidc_domain}" ]]; then
       base_paths+=("/api/user/v1/auth/callback/${local_cb_domain}")
     fi

@@ -125,7 +125,7 @@ def render_jobs(bp: dict, env: dict[str, str]) -> list[dict]:
             continue
         module = target.get("module", "http_avail")
         fqdn = fqdn_for(target, env, apex, sub_base)
-        path = target.get("path", "/")
+        path = resolve(target.get("path", "/"), env)
         by_module.setdefault(module, []).append(f"{scheme}://{fqdn}{path}")
 
     relabel = [
@@ -146,18 +146,20 @@ def render_jobs(bp: dict, env: dict[str, str]) -> list[dict]:
         })
     tcps = bp.get("tcp", [])
     if tcps:
-        tcp_targets = []
+        tcp_targets: dict[str, list[str]] = {}
         for t in tcps:
             fqdn = fqdn_for(t, env, apex, sub_base)
-            tcp_targets.append(f"{fqdn}:{t['port']}")
-        jobs.append({
-            "job_name": "opensme-blackbox-tcp",
-            "metrics_path": "/probe",
-            "scrape_interval": "60s",
-            "params": {"module": ["tcp_connect"]},
-            "static_configs": [{"targets": tcp_targets, "labels": {"group": "opensme"}}],
-            "relabel_configs": relabel,
-        })
+            module = t.get("module", "tcp_connect")
+            tcp_targets.setdefault(module, []).append(f"{fqdn}:{t['port']}")
+        for module, urls in sorted(tcp_targets.items()):
+            jobs.append({
+                "job_name": "opensme-blackbox-" + module,
+                "metrics_path": "/probe",
+                "scrape_interval": "60s",
+                "params": {"module": [module]},
+                "static_configs": [{"targets": urls, "labels": {"group": "opensme"}}],
+                "relabel_configs": relabel,
+            })
     return jobs
 
 
@@ -187,10 +189,11 @@ def main() -> int:
             if not target.get("enabled", True):
                 continue
             fqdn = fqdn_for(target, env, apex, sub_base)
-            print(f"[{target.get('module', 'http_avail')}] {scheme}://{fqdn}{target.get('path', '/')}")
+            path = resolve(target.get("path", "/"), env)
+            print(f"[{target.get('module', 'http_avail')}] {scheme}://{fqdn}{path}")
         for t in bp.get("tcp", []):
             fqdn = fqdn_for(t, env, apex, sub_base)
-            print(f"[tcp_connect] {fqdn}:{t['port']}")
+            print(f"[{t.get('module', 'tcp_connect')}] {fqdn}:{t['port']}")
         return 0
 
     jobs = render_jobs(bp, env)

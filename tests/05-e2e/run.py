@@ -964,28 +964,144 @@ def section_opencloud(result: Result, session, cloud_base: str, idp_base: str,
         result.warn(f"opencloud OIDC probe failed: {e.__class__.__name__}")
 
 
+def demo_sso_login_name(root: Path) -> str:
+    """First demo user's bare login (bootstrap/demo-users.json) or env override."""
+    u = os.environ.get("SOGO_E2E_USER", "").strip() or os.environ.get("E2E_SOGO_LOGIN", "").strip()
+    if u:
+        return u
+    try:
+        users = json.loads((root / "bootstrap" / "demo-users.json").read_text()).get("users") or []
+    except (OSError, ValueError, KeyError, TypeError):
+        return "testuser"
+    return (users[0].get("username") or "testuser") if users else "testuser"
+
+
+def _env_or_envfile(key: str, default: str = "") -> str:
+    """Environment variable, falling back to ROOT/.env, then default."""
+    v = os.environ.get(key)
+    if v is not None and v:
+        return v
+    return load_env_file().get(key, default)
+
+
+def section_sogo6_sso(result, session, webmail_base, idp_base, client_id=None,
+                      user=None):
+    """Functional webmail (sogo6) SSO — the browser path, no browser.
+
+    The sogo6 login page calls `GET /api/user/v1/auth/mode?username=<u>@<t>`
+    to learn the login mechanism; for an OIDC domain it answers with the
+    authorize URL whose redirect_uri carries the TENANT suffix
+    (.../callback/{tenant}). The URL is then probed against Zitadel: the
+    client must exist AND its registered redirect allowlist must contain
+    exactly the tenant-suffixed callback the running server emits. A 400
+    invalid_request here is the 2026-11-10 regression (allowlist derived
+    from the apex domain instead of the webmail host's parent) — it showed
+    up only as a dead login page, never in any 200-probe.
+    """
+    # Tenant to exercise: prefer an explicit SOGO_OIDC_DOMAIN, else the
+    # webmail host's parent (webmail.<tenant> -> <tenant>), else the first
+    # demo user's email suffix.
+    domain = _env_or_envfile("SOGO_OIDC_DOMAIN")
+    if not domain:
+        sogo_host = _env_or_envfile("SOGO_DOMAIN", "")
+        if sogo_host.startswith("webmail."):
+            domain = sogo_host[len("webmail."):]
+    user = user or "testuser"
+    if not domain and user and "@" in user:
+        domain = user.rsplit("@", 1)[1]
+    if not domain:
+        result.skip("sogo6 SSO: no tenant domain resolvable (set SOGO_DOMAIN)")
+        return
+    username = user if "@" in user else f"{user}@{domain}"
+
+    try:
+        r = session.get(
+            webmail_base + "/api/user/v1/auth/mode",
+            params={"username": username}, allow_redirects=False, timeout=T,
+        )
+    except requests.RequestException:
+        result.fail("sogo6 auth/mode unreachable")
+        return
+    if r.status_code != 200:
+        result.fail(f"sogo6 auth/mode: HTTP {r.status_code}")
+        return
+    try:
+        data = (r.json() or {}).get("data") or {}
+    except ValueError:
+        result.fail("sogo6 auth/mode did not answer JSON")
+        return
+    if data.get("kind") != "sso":
+        result.skip(f"sogo6 login mode is {data.get('kind')!r}, not sso "
+                    "(OIDC not enabled for this tenant)")
+        return
+    authz = data.get("location", "")
+    if not authz.startswith(idp_base) or "/oauth/v2/authorize" not in authz:
+        result.fail(f"sogo6 auth/mode returned a non-authorize location: "
+                    f"{authz[:100]}")
+        return
+    az = parse_qs(urlparse(authz).query)
+    cid = (az.get("client_id") or [""])[0]
+    redir = (az.get("redirect_uri") or [""])[0]
+    if client_id and cid and cid != client_id:
+        result.fail(
+            f"sogo6 SSO targets client {cid!r} but .env configures "
+            f"{client_id!r} — SOGo and the registered OIDC app drifted apart"
+        )
+    else:
+        result.ok(f"sogo6 SSO redirect targets client {cid or '<none>'!r} "
+                  f"(redirect_uri {redir[:70]})")
+
+    # The decisive functional check: does Zitadel ACCEPT the authorize URL
+    # sogo6 handed out? A 4xx invalid_request here means the redirect_uri
+    # is not in the client's registered allowlist — every webmail SSO
+    # login dead-ends (the 2026-11-10 regression).
+    try:
+        probe_r = session.get(authz, allow_redirects=False, timeout=T)
+    except requests.RequestException:
+        result.fail("sogo6 authorize probe failed (transport)")
+        return
+    if probe_r.status_code in REDIRECTS:
+        result.ok("sogo6 SSO authorize accepted by Zitadel "
+                  f"(redirect to {probe_r.headers.get('Location', '')[:60]})")
+    elif probe_r.status_code in (400, 403):
+        msg = ""
+        try:
+            msg = (probe_r.json() or {}).get("error_description", "")
+        except ValueError:
+            msg = probe_r.text[:80]
+        result.fail(
+            f"sogo6 SSO authorize rejected: HTTP {probe_r.status_code} "
+            f"{msg} — the sogo client's registered redirect allowlist is "
+            "out of sync with the running server (run scripts/zitadel-client.sh "
+            "--app sogo to enforce the allowlist)"
+        )
+    else:
+        result.warn(f"sogo6 SSO authorize probe: HTTP {probe_r.status_code}")
+
+
 def section_sogo_sso(result, session, webmail_base, idp_base, client_id=None):
     """Groupware journey: the webmail SSO contract (Epic C3). SOGo must
     delegate authentication to the IdP: an unauthenticated /SOGo/ REDIRECTS
     to the authorize endpoint (carrying the configured client_id) — a local
     login form is a failure, not a warning. The login page's asset contract
-    lives in tests/05-e2e/webmail.py (which walks the whole flow)."""
-    # The experimental sogo6 webmail stack (SOGo6-UI/server) answers its own
-    # health contract and does not serve /SOGo/ — the SOGo5 probe below would
-    # misfire on it. Classify it explicitly instead of failing.
+    lives in tests/05-e2e/webmail.py (which walks the whole flow).
+
+    The experimental sogo6 webmail stack (SOGo6-UI/server) answers its own
+    health contract and does not serve /SOGo/ — for it, the functional
+    sogo6 check (auth/mode -> authorize accepted by Zitadel) runs instead
+    of the SOGo5 probe.
+    """
     try:
         h = session.get(webmail_base + "/api/user/v1/health", timeout=T)
-        # sogo6 health shape: {status: ok|degraded, version, uptime_seconds,
-        # dependencies{database,ldap}} — version 6.x is the giveaway. A
-        # degraded stack (no LDAP user source yet) answers 503, so the shape
-        # is matched regardless of the status code.
         hj = h.json()
         if str(hj.get("version", "")).startswith("6.") and "dependencies" in hj:
-            result.skip(
-                f"sogo6 webmail stack detected (health={hj.get('status')}) — "
-                "SOGo5 SSO probe not applicable (sogo6 login enablement: "
-                "LDAP user source pending)"
+            result.info(
+                f"sogo6 webmail stack detected (health={hj.get('status')}, "
+                f"version={hj.get('version')}) — running the functional "
+                "sogo6 SSO probe"
             )
+            section_sogo6_sso(result, session, webmail_base, idp_base,
+                              client_id=client_id, user=demo_sso_login_name(ROOT))
             return
     except (requests.RequestException, ValueError):
         pass  # not sogo6 — fall through to the SOGo5 probe
@@ -1169,15 +1285,65 @@ def section_session_isolation(result: Result, session, disc: dict, client_id: st
             _purge_user(session, idp_base, pat, u)
 
 
-def section_synapse_sso(result, session, matrix_base, idp_base):
-    url = f"{matrix_base}/_matrix/client/v3/login/sso/redirect"
+def section_synapse_sso(result, session, matrix_base, idp_base, client_id=None):
+    """Chat SSO — functional, not just a bounce:
+
+    1. the client login API must advertise `m.login.sso` with a Zitadel
+       identity provider (if OIDC were unwired, Synapse serves only
+       password/token flows and the SSO button disappears);
+    2. the SSO redirect endpoint must answer with a 3xx to the IdP.
+    Both are guarded against the API surface a browser actually uses.
+    """
+    try:
+        r = session.get(
+            matrix_base + "/_matrix/client/v3/login", allow_redirects=False, timeout=T
+        )
+    except requests.RequestException:
+        result.skip("synapse not running")
+        return
+    if r.status_code not in (200,):
+        if r.status_code == 404:
+            result.skip("synapse not running")
+            return
+        result.fail(f"matrix login API: HTTP {r.status_code}")
+        return
+    try:
+        flows = r.json().get("flows") or []
+    except ValueError:
+        result.fail("matrix login API did not answer JSON")
+        return
+    sso = next((f for f in flows if f.get("type") == "m.login.sso"), None)
+    if sso is None:
+        result.fail(
+            "chat SSO broken: matrix /login does not advertise m.login.sso "
+            "(OIDC provider unwired) — the element 'Weiter mit Zitadel' "
+            "button disappears"
+        )
+    else:
+        providers = [
+            p.get("id", "") for p in (sso.get("identity_providers") or [])
+            if isinstance(p, dict)
+        ]
+        if any("zitadel" in p or "oidc" in p for p in providers):
+            result.ok(
+                f"chat SSO advertised: m.login.sso with "
+                f"idp(s) {sorted(providers)}"
+            )
+        else:
+            result.fail(
+                f"chat SSO: m.login.sso present but no Zitadel/OIDC "
+                f"identity provider ({providers!r})"
+            )
+
+    # SSO redirect endpoint — answer a redirect (to the IdP) rather than 404.
+    url = matrix_base + "/_matrix/client/v3/login/sso/redirect"
     try:
         r = session.get(
             url, params={"redirectUrl": matrix_base + "/"},
             allow_redirects=False, timeout=T,
         )
     except requests.RequestException:
-        result.skip("synapse not running")
+        result.fail("synapse SSO redirect endpoint unreachable")
         return
     if r.status_code == 404:
         result.skip("synapse SSO not enabled (no OIDC provider wired)")

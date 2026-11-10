@@ -46,6 +46,12 @@ targets:
     path: /en
     module: http_200
     comment: "Deep check on the locale landing page (200). Avoid /SOGo — it 307-chains to /en/SOGo which 404s; root / already 307→/en (http_avail)"
+  - name: webmail (sogo6 deep health)
+    sub: webmail
+    env: WEBMAIL_DOMAIN
+    path: /api/user/v1/health
+    module: webmail_health
+    comment: "FUNCTIONAL: sogo6 /health must report \"status\": \"ok\" incl. database/redis/mail deps — a CRUD probe catches a webmail whose backend went down"
 
   # ── Suite services under sub_base + <OPENSME_DOMAIN> ─────────────────
   - name: idp (Zitadel)
@@ -76,6 +82,19 @@ targets:
     env: MATRIX_DOMAIN
     path: /_matrix/client/versions
     module: http_200
+  - name: matrix (SSO availability)
+    sub: matrix
+    env: MATRIX_DOMAIN
+    path: /_matrix/client/v3/login
+    module: matrix_sso
+    enabled: true
+    comment: "FUNCTIONAL: login API must advertise m.login.sso + a Zitadel idp (if the OIDC wiring is lost the SSO button disappears while 200-probes stay green)"
+  - name: matrix (SSO redirect chain)
+    sub: matrix
+    env: MATRIX_DOMAIN
+    path: /_matrix/client/v3/login/sso/redirect?redirectUrl=https%3A%2F%2F{{ OPENSME_DOMAIN }}%2F
+    module: sso_redirect_to_idp
+    comment: "FUNCTIONAL: synapse SSO redirect must land on the IdP login UI (marker 'Welcome back') — proves the whole chat-SSO hop"
   - name: paperless
     sub: paperless
     env: PAPERLESS_DOMAIN
@@ -110,16 +129,24 @@ targets:
 
 # Port-level checks (SMTP / IMAP / submission against Stalwart — these are
 # the authoritative mail surfaces; stalwart publishes 25, 143 and 587).
+# Beyond pure TCP-connect probes (tcp_connect) there are FUNCTIONAL
+# protocol-dialog probes that exchange real commands with the daemon
+# (module: tcp_smtp_ehlo / tcp_imap_noop) — a listener that accepts
+# connections but never answers now alerts.
 tcp:
   - name: smtp (Stalwart :25)
     sub: mail
     env: MAIL_DOMAIN
     port: 25
+  - name: smtp (Stalwart :587, EHLO dialog)
+    sub: mail
+    env: MAIL_DOMAIN
+    port: 587
+    module: tcp_smtp_ehlo
+    comment: "FUNCTIONAL: send EHLO, require a 250 response (mail submission actually speaks SMTP)"
   - name: imap (Stalwart :143)
     sub: mail
     env: MAIL_DOMAIN
     port: 143
-  - name: submission (Stalwart :587)
-    sub: mail
-    env: MAIL_DOMAIN
-    port: 587
+    module: tcp_imap_noop
+    comment: "FUNCTIONAL: send NOOP, require a tagged OK (IMAP actually answers commands)"
