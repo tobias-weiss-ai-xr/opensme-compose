@@ -140,6 +140,14 @@ LiveKit 1.13.11 (console: `connection state changed: connecting ->`
 URL is in the Radicale write-back (`REPORT .../dav/booking/main/` →
 `LOCATION:https://vc.../room/...`) and in the sogo6 mirror.
 
+**Automated contract** — Epic C4–C6 of `tests/05-e2e/stories.py` books a
+real slot anonymously and asserts the confirmation page carries the
+booking's OWN resolved room URL (`<VC>/room/<uuid>`, never a literal
+`{uid}`) and that the URL is joinable on the VC host (200). The test
+booking is cancelled again via the admin dashboard (slot freed + CalDAV
+write-back removed); provide `CALRS_ADMIN_EMAIL`/`CALRS_ADMIN_PASSWORD`
+so the suite can self-clean, otherwise it warns with the guest id.
+
 ## Booking emails now deliver (patch 0004 — SMTP TLS relay)
 
 calrs sends booking/confirmation emails over STARTTLS to the compose

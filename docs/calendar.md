@@ -199,7 +199,9 @@ than repoint when creds change — the provision script repairs stale creds
 directly in Postgres as noted above). The CalDAV edge (PROPFIND 207 with
 booking auth, 401 anonymous) and the subscription presence are verified by
 `tests/05-e2e/stories.py` **X4**; the full booking → CalDAV → mirror →
-cancel round trip is verified by **X5**.
+cancel round trip is verified by **X5**, and Epic C4–C6 verifies the
+per-booking VC room-URL contract (confirmation page + joinable room +
+cancel) for every event.
 
 > **Listing CalDAV subscriptions (2026-11-09 fix):** `GET /external-calendars`
 > in sogo6-server used to call the interface with the hardcoded filter
@@ -276,8 +278,8 @@ but deploying a *fresh* stack still needs the steps below once.
    | `RADICALE_USER` | *(set)* | booking CalDAV login, seeded into Radicale htpasswd |
    | `RADICALE_PASSWORD` | *(set)* | booking CalDAV password (bcrypt-hashed at rest) |
    | `RADICALE_AUTH_HTPASSWD_ENCRYPTION` | `bcrypt` | `bcrypt` (needs `htpasswd -B`) or `plain` |
-   | `CALRS_ADMIN_EMAIL` | `admin@example.org` | bootstrap admin; first registered user becomes admin |
-   | `CALRS_ADMIN_PASSWORD` | *(set)* | bootstrap admin password |
+   | `CALRS_ADMIN_EMAIL` | `admin@example.org` | bootstrap admin; first registered user becomes admin; also lets the E2E suite (Epic C6) cancel its own test bookings |
+   | `CALRS_ADMIN_PASSWORD` | *(set)* | bootstrap admin password; feeds the E2E self-cleanup (Epic C6) |
    | `CALRS_VC_URL` | `https://meet.example.org/` | template meeting link rendered as the booking location |
    | `CALRS_OIDC_ISSUER` | *(empty)* | passthrough only for calrs 1.6.0 — enablement is DB-driven (admin panel); see step 6 |
    | `CALRS_OIDC_CLIENT_ID` | *(empty)* | OIDC client id from `zitadel-client.sh --app calendar` |

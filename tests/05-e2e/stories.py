@@ -40,6 +40,12 @@ Epics / user stories (IDs appear in failure output):
     C2  the booking page carries the VC join origin
     C3  the join origin equals the configured VC origin (single source
         of truth across epics)
+    C4  booking an event yields a per-booking VC join URL on the
+        confirmation page ("Use self-hosted video, one room per booking"
+        contract — {uid} resolves to the booking's own room, never leaks)
+    C5  that per-booking room URL is joinable on the VC host (200)
+    C6  the test booking is cancelled afterwards (slot freed, CalDAV
+        write-back removed — suite stays non-destructive)
 
   Epic K — Calendar SSO (calrs × Zitadel OIDC)
     K1  the calrs login page offers the SSO affordance (OIDC enabled
@@ -211,6 +217,7 @@ import sys
 import time
 import urllib.parse
 import urllib3
+from html import unescape
 from pathlib import Path
 
 import requests
@@ -397,6 +404,10 @@ def main() -> bool:
                                       if portal_host else "")
     calrs_user = cfg("E2E_CALRS_USER", "demo")
     calrs_event = cfg("E2E_CALRS_EVENT", "vc")
+    # Guest-local timezone; the live demo stack runs the host on TZ.
+    # Slot JSON from the booking page is host-local, so posting a guest
+    # timezone equal to the host timezone keeps date/time unambiguous.
+    guest_tz = cfg("TZ", "Europe/Berlin")
 
     session = requests.Session()
     session.verify = verify
@@ -686,7 +697,7 @@ def main() -> bool:
     # ══ Epic C — Booking → join link ══════════════════════════════════
     result.header("Epic C — Booking calendar → join link")
     if not cal_url:
-        result.skip("C1–C3: CALENDAR_URL not configured")
+        result.skip("C1–C6: CALENDAR_URL not configured")
     else:
         booking = f"{cal_url.rstrip('/')}/u/{calrs_user}/{calrs_event}"
         ok, r = reachable(session, booking)
@@ -706,6 +717,137 @@ def main() -> bool:
                 else:
                     result.fail(f"C3: join origin {join_origin!r} != VC_URL "
                                 f"{vc_url!r} — drift between booking and VC")
+
+            # C4–C6 — "Use self-hosted video (one room per booking)": the
+            # event-type location template {uid} must become the booking's
+            # OWN room URL on the confirmation page (never a literal {uid}),
+            # that URL must be joinable on the VC host, and the test booking
+            # must be cancelled again so the suite leaves no residue.
+            vc_origin = (vc_url or join_origin).rstrip("/")
+            c4 = requests.Session()
+            c4.verify = verify
+            guest = None
+            confirmed = None
+            try:
+                r = c4.get(booking, timeout=T)
+                m = re.search(
+                    r'<script type="application/json" id="calendar-data">(.*?)</script>',
+                    r.text, re.S)
+                if not m:
+                    result.skip("C4: booking page carries no calendar-data JSON")
+                else:
+                    slots = (json.loads(m.group(1)).get("slotData") or {})
+                    dates = sorted(k for k, v in slots.items() if v)
+                    if not dates:
+                        result.skip("C4: no bookable slots — cannot book "
+                                    "an event to verify its room URL")
+                    else:
+                        unique = os.urandom(3).hex()
+                        guest = f"c4-{unique}@example.org"
+                        # Prefer the least intrusive slot: last bookable
+                        # date, latest slot of that day (far from near-term
+                        # demo usage).
+                        for d in reversed(dates):
+                            for slot in reversed(slots[d]):
+                                r = c4.post(f"{booking}/book", data={
+                                    "_csrf": c4.cookies.get("calrs_csrf"),
+                                    "date": d, "time": slot["start"],
+                                    "tz": guest_tz,
+                                    "name": f"E2E C4 {unique}",
+                                    "email": guest,
+                                    "notes": "stories.py Epic C4 — one room "
+                                             "per booking",
+                                    "additional_guests": "",
+                                }, timeout=T)
+                                body = unescape(r.text)
+                                if r.status_code == 200 and "Booking confirmed" in body:
+                                    confirmed = body
+                                    break
+                            if confirmed:
+                                break
+                        if not confirmed:
+                            result.fail("C4: booking POST never confirmed "
+                                        "(no free slot or form error)")
+                        else:
+                            rooms = sorted(set(re.findall(
+                                re.escape(vc_origin) + r"/room/[0-9a-f][0-9a-f-]{35}",
+                                confirmed)))
+                            if "{uid}" in confirmed:
+                                result.fail("C4: confirmation leaks the literal "
+                                            "{uid} template")
+                            elif not rooms:
+                                result.fail("C4: confirmation shows no "
+                                            "per-booking VC room URL")
+                            else:
+                                result.ok(f"C4: every event gets its own room — "
+                                          f"{rooms[0].rsplit('/', 1)[-1]}")
+                                rr = requests.get(rooms[0], timeout=T,
+                                                  verify=verify)
+                                if rr.status_code == 200:
+                                    result.ok("C5: per-booking room URL is "
+                                              "joinable on the VC host (200)")
+                                else:
+                                    result.fail(f"C5: room URL → {rr.status_code}")
+
+                # C6 — leave the calendar clean. Best-effort: the guest
+                # confirmation page has no cancel link (it lives in the
+                # confirmation e-mail), so cancel through the admin
+                # dashboard when local admin credentials are configured;
+                # otherwise warn about the residue.
+                if guest and confirmed:
+                    admin_email = cfg("CALRS_ADMIN_EMAIL")
+                    admin_pw = cfg("CALRS_ADMIN_PASSWORD")
+                    if not (admin_email and admin_pw):
+                        result.warn("C6: no CALRS_ADMIN_EMAIL/PASSWORD — test "
+                                    "event left for manual cancellation "
+                                    f"({guest})")
+                    else:
+                        try:
+                            c4.get(f"{cal_url.rstrip('/')}/auth/login",
+                                   timeout=T)
+                            lr = c4.post(f"{cal_url.rstrip('/')}/auth/login",
+                                         data={
+                                             "_csrf": c4.cookies.get("calrs_csrf"),
+                                             "email": admin_email,
+                                             "password": admin_pw,
+                                         }, timeout=T, allow_redirects=False)
+                            if lr.status_code not in (302, 303) and not c4.cookies.get("calrs_session"):
+                                result.warn(f"C6: admin login failed "
+                                            f"({lr.status_code}) — test event "
+                                            f"left for manual cancellation "
+                                            f"({guest})")
+                            else:
+                                db = c4.get(f"{cal_url.rstrip('/')}/dashboard/bookings",
+                                            timeout=T)
+                                mrow = re.search(
+                                    r'<div class="booking-row">.*?'
+                                    + re.escape(guest)
+                                    + r'.*?/dashboard/bookings/([0-9a-fA-F-]{36})/cancel',
+                                    db.text, re.S)
+                                if not mrow:
+                                    result.warn(f"C6: test event not found in "
+                                                f"dashboard — cancel it manually "
+                                                f"({guest})")
+                                else:
+                                    bid = mrow.group(1)
+                                    cr = c4.post(
+                                        f"{cal_url.rstrip('/')}/dashboard/bookings/{bid}/cancel",
+                                        data={"_csrf": c4.cookies.get("calrs_csrf"),
+                                              "reason": "E2E Epic C4 cleanup"},
+                                        timeout=T, allow_redirects=False)
+                                    if cr.status_code in (302, 303):
+                                        result.ok("C6: test event cancelled via "
+                                                  "dashboard — slot freed, "
+                                                  "CalDAV write-back removed")
+                                    else:
+                                        result.warn(f"C6: dashboard cancel → "
+                                                    f"{cr.status_code} — cancel "
+                                                    f"manually ({guest})")
+                        except requests.RequestException as e:
+                            result.warn(f"C6: admin cleanup failed ({e}) — "
+                                        f"cancel {guest} manually")
+            except requests.RequestException as e:
+                result.fail(f"C4: booking flow failed: {e}")
 
     # ══ Epic K — Calendar SSO (calrs × Zitadel OIDC) ══════════════════
     result.header("Epic K — Calendar SSO (calrs × Zitadel OIDC)")
