@@ -55,6 +55,11 @@ export function serviceIcon(id: string): string {
       return "📋";
     case "surveys":
       return "🗳";
+    case "calendar":
+      return "📅";
+    case "vc":
+    case "meet":
+      return "🎥";
     default:
       return "🧩";
   }

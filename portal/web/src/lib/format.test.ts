@@ -33,6 +33,9 @@ describe("format helpers (legacy app.js parity)", () => {
   it("serviceIcon maps known ids and falls back", () => {
     expect(serviceIcon("opencloud")).toBe("☁");
     expect(serviceIcon("invoice")).toBe("🧾");
+    expect(serviceIcon("calendar")).toBe("📅");
+    expect(serviceIcon("vc")).toBe("🎥");
+    expect(serviceIcon("meet")).toBe("🎥");
     expect(serviceIcon("unknown")).toBe("🧩");
   });
 

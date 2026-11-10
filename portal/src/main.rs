@@ -220,6 +220,8 @@ fn service_icon(id: &str) -> &'static str {
         "chat" => "🗨",
         "notes" => "📋",
         "surveys" => "🗳",
+        "calendar" => "📅",
+        "vc" => "🎥",
         _ => "🧩",
     }
 }
@@ -705,7 +707,7 @@ fn build_landing_page(config: &AppConfig, authed: bool) -> String {
     <footer>
         <div class="container">
             <p>openSME — die selbst gehostete Suite für kleine und mittlere Unternehmen.</p>
-            <p class="row">Support &amp; Consulting: <a href="mailto:hello@opensme.org">hello@opensme.org</a> &middot; {domain}</p>
+            <p class="row">Support &amp; Consulting: <a href="mailto:hello@graphwiz.ai">hello@graphwiz.ai</a> &middot; {domain}</p>
         </div>
     </footer>
 </body>
