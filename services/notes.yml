@@ -93,8 +93,9 @@ services:
         limits:
           cpus: "0.35"
           # 256M OOM-killed Django boot (SIGKILL from kernel OOM, 2026-10-13
-          # live deploy) — 512M leaves headroom for migrations + gunicorn
-          memory: 512M
+          # live deploy) — 512M held, but the live deploy sat at 77% of it;
+          # 768M leaves headroom for migrations + gunicorn workers.
+          memory: 768M
         reservations:
           cpus: "0.1"
           memory: 64M

@@ -146,8 +146,10 @@ services:
         limits:
           cpus: "0.50"
           # 384M OOM-killed the container at startup: granian + celery worker
-          # + beat + OCR tooling all spawn before usage settles. 768M holds.
-          memory: 768M
+          # + beat + OCR tooling all spawn before usage settles. 768M held,
+          # but the live deploy sat at 84% of it — 1G leaves headroom for
+          # OCR bursts without risking a kernel OOM kill.
+          memory: 1G
         reservations:
           cpus: "0.25"
           memory: 256M
