@@ -93,9 +93,10 @@ services:
         limits:
           cpus: "0.35"
           # 256M OOM-killed Django boot (SIGKILL from kernel OOM, 2026-10-13
-          # live deploy) — 512M held, but the live deploy sat at 77% of it;
-          # 768M leaves headroom for migrations + gunicorn workers.
-          memory: 768M
+          # live deploy). Baseline is ~750M: the app spawns four
+          # multiprocessing workers, each importing Django (~185M RSS).
+          # 1.5G covers that baseline with room for request spikes.
+          memory: 1536M
         reservations:
           cpus: "0.1"
           memory: 64M
