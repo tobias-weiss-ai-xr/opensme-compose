@@ -109,7 +109,7 @@ Host-only-Zitadel-Router) auf Port 3000.
 **Live-Variante** (2026-10-26, Fleet auf opensme.graphwiz.ai): Der VM war der
 Network-Namespace-Pool ausgegangen — der Container läuft deshalb
 **Host-Network** als `opensme-zitadel-login` auf `127.0.0.1:3000`, und ein
-Fleet-Traefik-Standin (`/root/git/docker-traefik/dynamic/zitadel-login-standin.yml`)
+Fleet-Traefik-Standin (`$TRAEFIK_DIR/dynamic/zitadel-login-standin.yml`)
 routet `Host(auth.home.opensme.graphwiz.ai) && PathPrefix(/ui/v2/login)` mit
 Priority 1000 auf `http://127.0.0.1:3000`. Relevante Env (live):
 
@@ -485,7 +485,7 @@ Container-Restart behoben:
    Network Error → leere "Anmeldung erlaubt?"-Seite. Edge-Fix: Traefik-
    Datei-Router (Priority > Label-Router) auf `cloud.home…` override-t die
    CSP-Header-Zeile und erlaubt die IdP-Origin in `connect-src` (Rest
-   byte-identisch). Siehe VM `/root/git/docker-traefik/dynamic/cloud-csp.yml`.
+   byte-identisch). Siehe VM `$TRAEFIK_DIR/dynamic/cloud-csp.yml`.
 2. **OC-web braucht einen Public/PKCE-Client.** OC-web (oidc-client-ts)
    tauscht den Code **browser-seitig** mit `client_id` + `code_verifier`,
    aber **ohne** Client-Secret; ein confidencial registrierter Zitadel-Client

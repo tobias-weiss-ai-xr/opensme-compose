@@ -2,7 +2,7 @@
 # Laedt PECL-Tarballs + composer-setup.php lokal herunter (Proxy nötig, nur Host-seitig)
 # Nutzung: sudo ./fetch-sources.sh
 set -e
-PROXY=http://137.248.1.2:3128
+PROXY="${PROXY:?set PROXY=http://proxy-host:3128}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$DIR/pkg"
 cd "$DIR"

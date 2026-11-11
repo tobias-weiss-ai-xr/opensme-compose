@@ -40,7 +40,7 @@
 #   RADICALE_USER, RADICALE_PASSWORD
 set -euo pipefail
 
-VPS="${VPS:-root@195.90.216.140}"
+VPS="${VPS:?set VPS=user@host (SSH target of the deployment)}"
 WM="${WEBMAIL_URL:-${SOGO6_URL:-https://webmail.home.opensme.graphwiz.ai}}"
 CAL="${CALENDAR_URL:-https://calendar.home.opensme.graphwiz.ai}"
 CALDAV_URL="${CALDAV_URL:-$CAL/dav/booking/main/}"

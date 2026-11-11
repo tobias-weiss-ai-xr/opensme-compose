@@ -228,7 +228,7 @@ All tasks include testable acceptance gates using:
 ## Known Issues & Limitations
 
 ### 1. litellm Proxy Timeouts
-- The litellm proxy at 192.168.42.42:4000 has a 300-second (5-minute) timeout
+- The internal LiteLLM proxy has a 300-second (5-minute) timeout
 - Campaign 2 had several tasks timeout on the glm52 model
 - **Mitigation**: Campaign 3 used smaller, more focused tasks
 
@@ -302,9 +302,9 @@ Totals: 32+ commits, ~1000+ lines of code added/modified
 ## Campaign Files
 
 ### Configuration
-- `/home/weissto_local/git/agentflow/config/openSME-opencloud-connect/`
-- `/home/weissto_local/git/agentflow/config/openSME-opencloud-connect-2/`
-- `/home/weissto_local/git/agentflow/config/openSME-opencloud-connect-3/`
+- `<agentflow-config>/openSME-opencloud-connect/`
+- `<agentflow-config>/openSME-opencloud-connect-2/`
+- `<agentflow-config>/openSME-opencloud-connect-3/`
 
 ### Launch Scripts (cleaned up)
 - Previously: `state-openSME-opencloud-connect-launch.sh`, `state-openSME-opencloud-connect-2-launch.sh`, `state-openSME-opencloud-connect-3-launch.sh`

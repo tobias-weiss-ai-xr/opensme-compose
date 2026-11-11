@@ -161,6 +161,15 @@ jobs:
         run: |
           set -u
           FAIL=0
+          # Container-internal static addresses declared by the compose tree
+          # are overlay topology, not host infrastructure. Same exemption as
+          # the Python secret scanner (_compose_static_ips).
+          ALLOW=$(mktemp)
+          git grep -hoE 'ipv4_address:[[:space:]]*[0-9.]+' -- '*.yml' '*.yaml' 2>/dev/null \
+            | sed -E 's/.*ipv4_address:[[:space:]]*//' | sort -u > "$ALLOW" || true
+          allow_filter() {
+            if [ -s "$ALLOW" ]; then grep -vFf "$ALLOW"; else cat; fi
+          }
           while IFS= read -r -d '' f; do
             # Documented non-leaks, verified by hand:
             #  - vendored dependency tests (node_modules) contain upstream
@@ -171,11 +180,13 @@ jobs:
               */node_modules/*|*_test.go|*_test.py) continue ;;
             esac
             # RFC1918 10/8 — full dotted-quad only (avoids numeric literals)
-            if grep -E '\b10\.([0-9]{1,3}\.){2}[0-9]{1,3}\b' "$f" 2>/dev/null; then
+            if grep -E '\b10\.([0-9]{1,3}\.){2}[0-9]{1,3}\b' "$f" 2>/dev/null \
+              | allow_filter | grep -q .; then
               echo "::error::RFC1918 10/8 IP in $f"; FAIL=1
             fi
             # RFC1918 192.168/16, 172.16-31/12, link-local 169.254/16
-            if grep -E '\b192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.' "$f" 2>/dev/null; then
+            if grep -E '\b192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.' "$f" 2>/dev/null \
+              | allow_filter | grep -q .; then
               echo "::error::private/link-local IPv4 in $f"; FAIL=1
             fi
             # Host filesystem paths (require a component after the username so

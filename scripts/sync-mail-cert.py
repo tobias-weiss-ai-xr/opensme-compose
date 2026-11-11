@@ -22,10 +22,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-ACME_JSON = Path(os.environ.get("ACME_JSON", "/root/git/docker-traefik/letsencrypt/acme.json"))
-MAIL_DOMAIN = os.environ.get("MAIL_DOMAIN", "mail.home.opensme.graphwiz.ai")
+# All paths are deployment-specific and therefore supplied by the caller
+# (systemd unit / shell). Nothing host-specific is baked into this repo.
+ACME_JSON = Path(os.environ.get("ACME_JSON", ""))
+MAIL_DOMAIN = os.environ.get("MAIL_DOMAIN", "")
 RESOLVER = os.environ.get("ACME_RESOLVER", "mytlschallenge")
-OUTDIR = Path(os.environ.get("MAIL_TLS_DIR", "/opt/opensme-compose/compose/certs"))
+# Default: <repo>/certs — the directory mounted into Stalwart by
+# mail/stalwart.yml. Override with MAIL_TLS_DIR when running from elsewhere.
+OUTDIR = Path(os.environ.get("MAIL_TLS_DIR", "")) or (
+    Path(__file__).resolve().parent.parent / "certs"
+)
 CONTAINER = os.environ.get("STALWART_CONTAINER", "opensme-stalwart")
 
 
@@ -71,6 +77,10 @@ def write_if_changed(path: Path, content: str) -> bool:
 
 
 def main() -> int:
+    if not MAIL_DOMAIN:
+        die("MAIL_DOMAIN is not set (mail hostname whose certificate to sync)")
+    if not str(ACME_JSON) or str(ACME_JSON) == ".":
+        die("ACME_JSON is not set (path to the Traefik acme.json store)")
     if not ACME_JSON.is_file():
         die(f"ACME store not found: {ACME_JSON}")
     data = json.loads(ACME_JSON.read_text())

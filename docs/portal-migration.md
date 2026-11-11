@@ -9,7 +9,7 @@ Scope: compose `portal` service env + traefik file provider (`portal-standin.yml
 - The public openSME eval stack (`/opt/opensme-compose/compose` on the 1blu
   VPS) serves `https://home.opensme.graphwiz.ai/`.
 - The edge traefik runs on the **host network** and uses a **file provider**
-  in `/root/git/docker-traefik/dynamic/` because docker-provider events die
+  in `$TRAEFIK_DIR/dynamic/` because docker-provider events die
   after a daemon restart on that OpenVZ host.
 - The router `portal-standin.yml` (priority 1000) previously forwarded
   `Host(Home)` to the OLD standalone Next.js portal (`opensme-portal-web`,
@@ -42,7 +42,7 @@ Scope: compose `portal` service env + traefik file provider (`portal-standin.yml
    host traefik reaches it directly at that bridge IP on port 8080.
 
 2. **Edge retarget** — in
-   `/root/git/docker-traefik/dynamic/portal-standin.yml` change the service
+   `$TRAEFIK_DIR/dynamic/portal-standin.yml` change the service
    URL from `http://127.0.0.1:3001` to the Rust portal's reachable address
    `http://<IP>:8080` (keep router + rule + priority + host unchanged). The
    traefik file provider picks the change up within seconds (no reload). Note:
@@ -87,7 +87,7 @@ migration):
 ```sh
 TS=<backup-timestamp>
 cp /opt/opensme-compose/compose/docker-compose.yml.bak-$TS /opt/opensme-compose/compose/docker-compose.yml
-cp /root/git/docker-traefik/dynamic/portal-standin.yml.bak-$TS /root/git/docker-traefik/dynamic/portal-standin.yml
+cp "$TRAEFIK_DIR/dynamic/portal-standin.yml.bak-$TS" "$TRAEFIK_DIR/dynamic/portal-standin.yml"
 cd /opt/opensme-compose/compose && docker compose -f docker-compose.yml -f idm/zitadel.yml up -d portal
 ```
 

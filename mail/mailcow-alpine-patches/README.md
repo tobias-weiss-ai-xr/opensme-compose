@@ -15,11 +15,12 @@ sudo docker build --no-cache -t ghcr.io/mailcow/dovecot:2.3.21.1-2-patched .
 ## olefy (kein Repo-Egress -> lokale .apk via HTTP-Proxy)
 Die olefy-Basis erreicht dl-cdn NICHT (exit 99 bei apk update; Basis laeuft als
 nicht-root -> USER root im Build noetig). Lade die OpenSSL-Fix-Pakete Host-seitig
-ueber den HTTP-only-Proxy (NOT https!) von dl-cdn.alpinelinux.org:
+ueber einen HTTP-only-Proxy (NOT https!) von dl-cdn.alpinelinux.org
+(Proxy-Adresse via HTTP_PROXY, z. B. `export HTTP_PROXY=http://proxy-host:3128`):
 mkdir -p apk
-curl -sS --proxy http://137.248.1.2:3128 -o apk/libcrypto3.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libcrypto3-3.3.7-r2.apk
-curl -sS --proxy http://137.248.1.2:3128 -o apk/libssl3.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libssl3-3.3.7-r2.apk
-curl -sS --proxy http://137.248.1.2:3128 -o apk/openssl.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/openssl-3.3.7-r2.apk
+curl -sS --proxy "$HTTP_PROXY" -o apk/libcrypto3.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libcrypto3-3.3.7-r2.apk
+curl -sS --proxy "$HTTP_PROXY" -o apk/libssl3.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libssl3-3.3.7-r2.apk
+curl -sS --proxy "$HTTP_PROXY" -o apk/openssl.apk http://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/openssl-3.3.7-r2.apk
 sudo docker build --no-cache -t ghcr.io/mailcow/olefy:1.15-patched .
 
 ## Deploy (beide)

@@ -26,7 +26,7 @@ Operational knowledge for calrs (olivierlambert/calrs v1.6.0) in openSME-compose
 
 ## Build & Deploy
 ```bash
-cd /root/build/calrs
+cd "${CALRS_DIR:-$HOME/build/calrs}"
 git clone https://github.com/olivierlambert/calrs --branch v1.6.0 --depth 1 src
 for p in 0001 0002 0003 0004; do git -C src apply ../patches/${p}-*.patch; done
 docker buildx build --network host -t calrs:1.6.0-livekit .

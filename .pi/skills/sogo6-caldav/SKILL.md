@@ -23,7 +23,7 @@ description: SOGo6 CalDAV external calendar knowledge — endpoint fixes, IcsFet
 ```
 
 ## IcsFetcher URL Validation (marshmallow fields.Url)
-**REJECTS**: private IPs (172.19.0.1), TLD-less names (radicale:5232), HTTP when SOGO_ICS_USE_HTTPS=True
+**REJECTS**: private/bridge IPs, TLD-less names (radicale:5232), HTTP when SOGO_ICS_USE_HTTPS=True
 **Workaround**: edge-terminate via Traefik with public FQDN + HTTPS
 
 ## sogo6-ui API Proxy 502 Fix

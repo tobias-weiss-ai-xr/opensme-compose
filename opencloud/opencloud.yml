@@ -164,10 +164,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    # Static IP: /root/git/docker-traefik/dynamic/cloud-csp.yml pins
-    # cloud.home to 172.19.0.17 (CSP override via traefik file provider
-    # — keep its frame-src in sync with opencloud/csp.yaml) — a
-    # dynamic renumber on recreate would 502 the whole cloud UI at the edge.
+    # Static IP: the Traefik file provider (dynamic/cloud-csp.yml) pins
+    # cloud.home to 172.19.0.17 (CSP override) — keep its frame-src in
+    # sync with opencloud/csp.yaml. A dynamic renumber on recreate would
+    # 502 the whole cloud UI at the edge.
     networks:
       opensme-net:
         ipv4_address: 172.19.0.17

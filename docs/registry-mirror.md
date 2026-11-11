@@ -40,7 +40,7 @@ docker compose -f registry-compose.yml --env-file .env up -d
 ```
 
 Then place a file-provider router at
-`/root/git/docker-traefik/dynamic/registry-standin.yml` pointing at the
+`$TRAEFIK_DIR/dynamic/registry-standin.yml` pointing at the
 registry container's opensme-net IP:5000. (Managed via the `opensme_suite`
 ansible role like the other stand-ins; the backend IP changes whenever the
 container is recreated, so the router is re-rendered on deploy.)

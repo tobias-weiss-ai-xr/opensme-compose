@@ -6,7 +6,7 @@ Verifies that the orchestration platforms the stack targets meet a minimum
 version. Two checks:
 
   1. k3s on scs-k3s      — kubectl server + node kubelet versions
-  2. Docker on vhrz2392  — `ssh <host> docker version` server version
+  2. Docker on a remote host — `ssh <host> docker version` server version
 
 Semantics:
   version >= minimum          -> PASS  (reports the running version)
@@ -16,7 +16,7 @@ Semantics:
 Usage:
     python3 tests/00-static/check_platform.py
     python3 tests/00-static/check_platform.py --kubectl-min 1.28.0 --docker-min 24.0.0
-    python3 tests/00-static/check_platform.py --kubectl-context scs-k3s --ssh-host vhrz2392
+    python3 tests/00-static/check_platform.py --kubectl-context scs-k3s --ssh-host docker-host
     python3 tests/00-static/check_platform.py --strict
 
 Exit codes:
@@ -26,6 +26,7 @@ Exit codes:
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -39,7 +40,7 @@ from conftest import Result
 # ─── Defaults (overridable via CLI) ────────────────────────────────
 KUBECTL_MIN = "1.30.0"      # minimum k3s Kubernetes version
 DOCKER_MIN = "24.0.0"       # minimum Docker Engine version
-SSH_HOST = "vhrz2392"       # docker host (resolved via ~/.ssh/config)
+SSH_HOST = os.environ.get("SSH_HOST", "")  # docker host (resolved via ~/.ssh/config)
 KUBECTL_CONTEXT = None      # None = use current kubectl context
 
 
@@ -146,6 +147,9 @@ def check_k3s(result, kubectl_min, context):
 
 def check_docker(result, docker_min, ssh_host):
     """Check Docker server version on ssh_host against docker_min."""
+    if not ssh_host:
+        result.skip("no SSH_HOST set — Docker version check skipped")
+        return
     if not shutil.which("ssh"):
         result.skip("ssh not found on PATH — Docker version check skipped")
         return

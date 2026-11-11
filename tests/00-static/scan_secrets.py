@@ -67,6 +67,35 @@ INTERNAL_PATTERNS = [
     (r'\b169\.254\.\d{1,3}\.\d{1,3}\b', "link-local IPv4 (169.254/16)"),
 ]
 
+# Host-specific absolute paths that reveal the private deployment layout
+# (e.g. a checkout of an internal infrastructure repo). The path itself is
+# the leak, so these are matched literally in every file type.
+INTERNAL_PATH_PATTERNS = [
+    (r'/root/(?:git|build)/', "private root path"),
+    (r'/home/[A-Za-z0-9_.-]+/(?:git|build)/', "private home path"),
+]
+
+
+def _denylist_patterns() -> list[tuple[str, str]]:
+    """Extra literal markers from a private, gitignored denylist.
+
+    Hostnames and non-RFC1918 addresses cannot be hardcoded here without
+    re-introducing them into the public repo, so operators drop them into
+    tests/00-static/.internal-denylist.txt (one marker per line).
+    """
+    path = ROOT / "tests/00-static/.internal-denylist.txt"
+    if not path.is_file():
+        return []
+    out = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        marker = raw.strip()
+        if marker and not marker.startswith("#"):
+            out.append((re.escape(marker), "internal denylist entry"))
+    return out
+
+
+ALL_INTERNAL_PATTERNS = INTERNAL_PATTERNS + INTERNAL_PATH_PATTERNS + _denylist_patterns()
+
 # CHANGEME_ values are OK in .env.example but NOT in compose files ("safe"
 # defaults like ${VAR:-CHANGEME_...} are still known secrets — never allow them)
 CHANGEME_PATTERN = re.compile(r'CHANGEME_[a-z_]+', re.IGNORECASE)
@@ -82,7 +111,7 @@ SCAN_EXTS = {".yml", ".yaml", ".sh", ".py", ".md", ".env", ".env.example", ".env
 
 # Test fixtures MAY deliberately embed fake secrets/canaries (see CI leak-scan
 # excludes) — never scan them.
-_SCAN_SKIP_NAME = re.compile(r'(^|_)(test)\.(py|go)$|_test\.(py|go)$|(^|/)node_modules/')
+_SCAN_SKIP_NAME = re.compile(r'(^|_)(test)\.(py|go)$|_test\.(py|go)$|(^|/)node_modules/|(^|/)scan_secrets\.py$')
 
 
 def _submodule_paths() -> set[Path]:
@@ -210,7 +239,7 @@ def scan_file(filepath: Path, static_ips: set[str] | None = None) -> list[tuple[
                         findings.append((i, name, line.rstrip()))
 
                 # Check for internal network ranges / hostnames (never ship)
-                for pattern, name in INTERNAL_PATTERNS:
+                for pattern, name in ALL_INTERNAL_PATTERNS:
                     if re.search(pattern, line):
                         # Compose-net static addressing (`networks: … ipv4_address:`
                         # — opencloud pins 172.19.0.17 so the edge file-provider
@@ -226,11 +255,8 @@ def scan_file(filepath: Path, static_ips: set[str] | None = None) -> list[tuple[
                         m = re.search(pattern, line)
                         if m and static_ips and m.group(0) in static_ips:
                             continue
-                        # Documentation files intentionally describe internal
-                        # network topology (e.g., service IPs, subnet ranges).
-                        # Its not a leak when it is explanatory text.
-                        if filepath.suffix in (".md", ".txt", ".rst"):
-                            continue
+                        # Documentation is published with the repo: internal
+                        # addresses and private paths are leaks there too.
                         findings.append((i, name, line.rstrip()))
                         break
     except (OSError, UnicodeDecodeError):

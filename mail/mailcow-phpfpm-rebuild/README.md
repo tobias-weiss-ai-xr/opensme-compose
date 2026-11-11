@@ -12,12 +12,12 @@ Lokaler Rebuild mit **Alpine 3.23** Basis. Ergebnis:
 `ghcr.io/mailcow/phpfpm:8.2.29-4` — **0 CVEs** (Trivy, ignore-unfixed).
 
 ## Warum lokale PECL-Tarballs?
-Docker-Container auf vhrz2392 haben **kein Internet** (Proxy 137.248.1.2:3128
+Docker-Container auf dem Zielhost haben **kein Internet** (HTTP-Proxy
 funktioniert nur Host-seitig via curl, nicht in RUN). Daher werden die
 PECL/Tarballs + Composer per `fetch-sources.sh` lokal geladen und per COPY
 ins Image gelegt.
 
-## Build + Deploy (auf vhrz2392, als root)
+## Build + Deploy (auf dem Zielhost, als root)
 ```sh
 cd /opt/opensme-compose/mail/mailcow-phpfpm-rebuild
 sudo ./fetch-sources.sh          # laedt pkg/*.tgz + composer-setup.php
@@ -38,7 +38,7 @@ sudo docker compose up -d --no-deps php-fpm-mailcow
 ```sh
 sudo docker run --rm --entrypoint php ghcr.io/mailcow/phpfpm:8.2.29-4 -m  # keine Warnungen
 sudo docker run --rm --entrypoint sh ghcr.io/mailcow/phpfpm:8.2.29-4 -c "apk list --installed | grep libcrypto3" # 3.5.9-r0
-sudo docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /root/.cache/trivy:/root/.cache/trivy \
+sudo docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ~/.cache/trivy:/root/.cache/trivy \
   aquasec/trivy:latest image --cache-backend memory --ignore-unfixed --scanners vuln \
   --no-progress ghcr.io/mailcow/phpfpm:8.2.29-4   # 0 CVEs
 ```

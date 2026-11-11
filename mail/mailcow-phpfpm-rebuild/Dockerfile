@@ -3,7 +3,7 @@
 # Original: data/Dockerfiles/phpfpm/Dockerfile (mailcow-dockerized submodule, commit 81f6f7b0)
 #
 # WARUM KEIN INTERNET IM BUILD:
-#   Docker-Container auf vhrz2392 haben KEIN egress (Proxy 137.248.1.2:3128
+#   Docker-Container auf dem Zielhost haben KEIN egress (ein HTTP-Proxy
 #   funktioniert NUR Host-seitig via curl --proxy, NICHT in RUN).
 #   -> PECL-Tarballs + composer-setup.php werden per fetch-sources.sh lokal
 #      heruntergeladen und per COPY ins Image gelegt (kein Netz im Build noetig).
