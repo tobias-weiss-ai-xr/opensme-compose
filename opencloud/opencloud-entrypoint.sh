@@ -5,7 +5,12 @@ set -e
 # ── Validate required environment variables ──────────────────────────────
 echo "opencloud-entrypoint: validating environment..." >&2
 for var in OC_ADMIN_USERNAME OC_ADMIN_PASSWORD OC_DOMAIN; do
-  eval val=\$$"\$var"
+  # `eval "val=\$$var"` is the portable POSIX indirect expansion. The
+  # previous `eval val=\$$"\$var"` was undefined in POSIX sh: bash
+  # expanded it to "<pid>var" and dash to "<rc>VARNAME", so $val was
+  # never empty and this guard PASSED vacuously even when the required
+  # variables were missing (bug-hunt 2026-11).
+  eval "val=\$$var"
   if [ -z "$val" ]; then
     echo "opencloud-entrypoint: ERROR: required environment variable $var is not set" >&2
     exit 1

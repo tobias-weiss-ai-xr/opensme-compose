@@ -188,10 +188,9 @@ do_provision() {
     ###########################################################################
     info "  → Clients…"
     for c in "${CLIENTS[@]}"; do
-        local name email org street city postal country
+        local name email street city postal country
         name=$(echo "$c" | cut -d'|' -f1)
         email=$(echo "$c" | cut -d'|' -f2)
-        org=$(echo "$c" | cut -d'|' -f3)
         street=$(echo "$c" | cut -d'|' -f4)
         city=$(echo "$c" | cut -d'|' -f5)
         postal=$(echo "$c" | cut -d'|' -f6)

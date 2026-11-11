@@ -46,7 +46,7 @@ if [ -f "${INVOICENINJA_HOME}/artisan" ]; then
     
     # Wait for the invoiceninja-db service to be healthy
     # (it's on the same network via network_mode: service:invoiceninja-web)
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         if nc -z invoiceninja-db 3306 2>/dev/null; then
             echo "[invoiceninja-entrypoint] Database reachable"
             break

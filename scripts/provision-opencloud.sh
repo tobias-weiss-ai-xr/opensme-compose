@@ -74,7 +74,6 @@ CLEAN=false
 FORCE=false
 DRY_RUN=false
 VERBOSE=false
-HELP=false
 
 # ━━━━ argument parsing ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 while [[ $# -gt 0 ]]; do
@@ -153,10 +152,10 @@ ocis_curl() {
         return 0
     fi
 
-    debug "curl -s -o /dev/null -w '%{http_code}' -X $method \\"
-          -H 'Authorization: Basic $ADMIN_AUTH' \\"
-          -H 'OCS-APIRequest: true' \\"
-          -H 'Content-Type: application/json' \\"
+    debug "curl -s -o /dev/null -w '%{http_code}' -X $method \\
+          -H 'Authorization: Basic $ADMIN_AUTH' \\
+          -H 'OCS-APIRequest: true' \\
+          -H 'Content-Type: application/json' \\
           '$url'"
 
     local response
@@ -474,7 +473,7 @@ if [[ "$DRY_RUN" == true ]]; then
         ok "DRY-RUN: OpenCloud is reachable"
     fi
 else
-    if ! wait_for_health; then
+    if ! wait_for_health 300; then
         err "OpenCloud is not ready. Aborting."
         exit 1
     fi
