@@ -66,6 +66,13 @@ def safe_display(raw: str) -> str:
     return display
 
 
+def safe_identity(display: str) -> str:
+    """LiveKit identity must be `[A-Za-z0-9_-]` only — a display name like
+    'Max Müller' (allowed by NAME_RE) would otherwise mint a token the
+    LiveKit server rejects, so the guest could never join their room."""
+    return re.sub(r"[^A-Za-z0-9_-]", "", display) or "guest"
+
+
 @app.get("/healthz")
 def healthz():
     return "ok"
@@ -81,7 +88,7 @@ def room(name: str):
     if not ROOM_RE.match(name):
         abort(404)
     display = safe_display(request.args.get("name", ""))
-    identity = f"{display[:24]}-{uuid.uuid4().hex[:8]}"
+    identity = f"{safe_identity(display)[:24]}-{uuid.uuid4().hex[:8]}"
     token = mint_token(name, identity, display)
     return render_template(
         "room.html",

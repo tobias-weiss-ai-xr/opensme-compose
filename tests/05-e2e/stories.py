@@ -29,7 +29,8 @@ Epics / user stories (IDs appear in failure output):
     V2  hostile room names are rejected (traversal, space, unicode, junk)
     V3  malformed display name → 400
     V4  room page embeds a bare-wss SERVER_URL (no /rtc suffix — the
-        double-/rtc regression) and a 3-segment JWT
+        double-/rtc regression), a 3-segment JWT, and a sanitized LiveKit
+        identity for spaced/umlaut display names (e.g. "Max Müller")
     V5  livekit-client SDK is vendored locally (no CDN), size sanity
     V6  /healthz answers ok
     V7  vc hosts lift the camera/mic policy; calendar keeps the blanket
@@ -654,6 +655,33 @@ def main() -> bool:
             server_url = parse_server_url(r.text)
             tok = re.search(r'const TOKEN = "([^"]+)"', r.text)
             jwt_ok = bool(tok and tok.group(1).count(".") == 2)
+            # Regression (bug-hunt 2026-11): display names with spaces or
+            # umlauts ("Max Müller") previously minted an identity that was
+            # piped into the LiveKit `sub`/identity claim unchanged — LiveKit
+            # requires `[A-Za-z0-9_-]` and rejected such joins. The identity
+            # must now be sanitized to a valid charset (e2e can decode the
+            # JWT payload offline; it must not just render the page).
+            bad_identity = None
+            spaced = session.get(
+                vc_url + "/room/e2e-story?name=Max%20M%C3%BCller", timeout=T)
+            if spaced.status_code == 200:
+                stok = re.search(r'const TOKEN = "([^"]+)"', spaced.text)
+                if stok:
+                    try:
+                        payload = json.loads(
+                            base64.urlsafe_b64decode(
+                                stok.group(1).split(".")[1] + "=="))
+                        ident = payload.get("sub", "")
+                        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", ident or ""):
+                            bad_identity = ident
+                    except Exception:
+                        bad_identity = "undecodable"
+            if bad_identity is not None:
+                result.fail(
+                    f"V4: spaced/umlaut name minted invalid LiveKit identity "
+                    f"{bad_identity!r} (sub must be [A-Za-z0-9_-])")
+            else:
+                result.ok("V4: spaced/umlaut display name → sanitized identity")
             if server_url is None:
                 result.fail("V4: room page embeds no SERVER_URL")
             elif server_url.rstrip("/").endswith("/rtc"):
@@ -1622,7 +1650,6 @@ def main() -> bool:
             result.skip("X5: needs CALENDAR_URL + RADICALE_* + PAT env "
                         "+ CALRS_ADMIN_EMAIL/PASSWORD (dashboard cancel)")
         else:
-            x5_ok = True
             booked = None
             marker = f"x5.{int(time.time())}@example.org"
             try:
@@ -1668,7 +1695,6 @@ def main() -> bool:
                 if not booked:
                     result.fail("X5: no free slot after 6 tries — booking "
                                 "page refuses all candidates")
-                    x5_ok = False
                 else:
                     result.ok(f"X5: public booking confirmed on {booked[1]} "
                               f"(guest {marker})")
@@ -1682,7 +1708,6 @@ def main() -> bool:
                         result.fail(f"X5: write-back missing (REPORT "
                                     f"{rr.status_code}, marker absent) — the "
                                     f"empty-store regression")
-                        x5_ok = False
 
                     # ── X5.3: sogo6 mirror picks the event up
                     s6 = requests.Session(); s6.verify = verify
@@ -1733,11 +1758,9 @@ def main() -> bool:
                             else:
                                 result.fail("X5: booking event not in the sogo6 "
                                             "mirror after sync completed")
-                                x5_ok = False
                         else:
                             result.fail("X5: no caldav subscription on testuser — "
                                         "mirror cannot be verified")
-                            x5_ok = False
                     else:
                         result.warn("X5: webmail login-mode discovery failed "
                                     "(mirror check skipped)")
@@ -1794,7 +1817,6 @@ def main() -> bool:
                             else:
                                 result.fail("X5: Radicale VEVENT survived the "
                                             f"cancel (REPORT {rr.status_code})")
-                                x5_ok = False
                             # ── X5.5: mirror must drop it after re-sync
                             if got_events is not None:
                                 ev0, _mark = got_events
@@ -1825,7 +1847,6 @@ def main() -> bool:
                                     else:
                                         result.fail("X5: cancelled booking still in "
                                                     "the sogo6 mirror")
-                                        x5_ok = False
                                 except Exception as ex:
                                     result.warn(f"X5: mirror-drop re-sync skipped "
                                                 f"({ex})")
