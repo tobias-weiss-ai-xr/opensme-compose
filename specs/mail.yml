@@ -14,12 +14,13 @@ services:
     image: stalwartlabs/stalwart:v0.15
     compose_file: mail/stalwart.yml
     required: false
-    host_ports: [25, 143, 587]  # SMTP, IMAP, Submission (TLS terminated by Traefik)
+    host_ports: [25, 143, 465, 587, 993]  # SMTP, IMAP, SMTPS, Submission, IMAPS
     healthcheck: true
     networks: [opensme-net]
     volumes:
       - stalwart-etc:/opt/stalwart/etc
       - stalwart-data:/var/lib/stalwart
+      - ./certs:/opt/stalwart/etc/tls  # synced Let's Encrypt material (gitignored)
     env:
       - STALWART_ADMIN_PASSWORD
       - MAIL_DOMAIN

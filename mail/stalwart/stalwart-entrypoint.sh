@@ -43,6 +43,26 @@ if [ -f "$TEMPLATE" ]; then
     -e "s|\${ZITADEL_DOMAIN}|${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}|g" \
     "$TEMPLATE" > "$OUTPUT"
   echo "[stalwart-entrypoint] Done."
+
+  # Trusted TLS material: the fleet's Traefik owns ACME on this host, so
+  # scripts/sync-mail-cert.py copies the mail certificate out of acme.json
+  # into this directory. Only append the block when both files exist —
+  # otherwise Stalwart keeps its per-boot self-signed fallback.
+  TLS_DIR=/opt/stalwart/etc/tls
+  if [ -f "$TLS_DIR/fullchain.pem" ] && [ -f "$TLS_DIR/privkey.pem" ]; then
+    echo "[stalwart-entrypoint] Using synced certificate in $TLS_DIR"
+    cat >> "$OUTPUT" <<EOF
+
+# Let's Encrypt certificate synced from the fleet Traefik ACME store
+# (scripts/sync-mail-cert.py, opensme-mail-cert.timer).
+[certificate."mail"]
+cert = "%{file:$TLS_DIR/fullchain.pem}%"
+private-key = "%{file:$TLS_DIR/privkey.pem}%"
+default = true
+EOF
+  else
+    echo "[stalwart-entrypoint] No synced certificate — STARTTLS stays self-signed"
+  fi
 else
   echo "[stalwart-entrypoint] No template found, using existing $OUTPUT (if any)"
 fi

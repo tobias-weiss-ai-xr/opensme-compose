@@ -38,7 +38,11 @@ services:
       - "25:25"
       - "143:143"
       - "587:587"
-      # 465/993 implicit-TLS listeners need certificates; TLS is terminated by Traefik
+      # implicit TLS: served with the Let's Encrypt cert synced from the
+      # fleet Traefik ACME store (scripts/sync-mail-cert.py); self-signed
+      # until that first sync runs
+      - "465:465"
+      - "993:993"
     environment:
       TZ: Europe/Berlin
       MAIL_DOMAIN: ${MAIL_DOMAIN:-mail.opensme.graphwiz.ai}
@@ -50,6 +54,10 @@ services:
     volumes:
       - stalwart-etc:/opt/stalwart/etc
       - stalwart-data:/var/lib/stalwart
+      # Let's Encrypt material synced by scripts/sync-mail-cert.py (0600,
+      # gitignored). Empty until the first sync — the entrypoint then keeps
+      # the self-signed fallback.
+      - ./certs:/opt/stalwart/etc/tls:ro
       - ./mail/stalwart/config.toml.template:/etc/stalwart/config.toml.template:ro
       - ./mail/stalwart/stalwart-entrypoint.sh:/stalwart-entrypoint.sh:ro
     entrypoint: ["/stalwart-entrypoint.sh"]

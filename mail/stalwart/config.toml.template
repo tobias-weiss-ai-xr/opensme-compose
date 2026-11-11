@@ -6,7 +6,10 @@
 #   STALWART_BIND            -> listener bind address: [::] on a dual-stack
 #                               host, 0.0.0.0 when the container has no IPv6.
 #                               Resolved by the entrypoint, overridable.
-# Listeners are plain (Traefik terminates TLS for web; mail is internal).
+# Listeners are plain by default (Traefik terminates TLS for web; mail is
+# internal). When the entrypoint finds a synced Let's Encrypt certificate in
+# /opt/stalwart/etc/tls it appends a [certificate] block, so STARTTLS on
+# 25/587 and the implicit-TLS listeners on 465/993 present a trusted cert.
 # Store lives on the stalwart-data volume (RocksDB).
 
 [server]
@@ -23,6 +26,21 @@ protocol = "smtp"
 [server.listener.submission]
 bind = "${STALWART_BIND}:587"
 protocol = "smtp"
+
+# Implicit-TLS listeners: the client starts TLS on the first byte. The
+# certificate block is appended by the entrypoint when a Let's Encrypt
+# certificate has been synced into /opt/stalwart/etc/tls (see
+# scripts/sync-mail-cert.py); without one Stalwart falls back to its
+# per-boot self-signed certificate, exactly like the STARTTLS listeners.
+[server.listener.submissions]
+bind = "${STALWART_BIND}:465"
+protocol = "smtp"
+tls.implicit = true
+
+[server.listener.imaptls]
+bind = "${STALWART_BIND}:993"
+protocol = "imap"
+tls.implicit = true
 
 [server.listener.imap]
 bind = "${STALWART_BIND}:143"
