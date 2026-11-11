@@ -37,6 +37,55 @@ services:
       - "traefik.http.services.portal.loadbalancer.server.port=8080"
     ports: !reset []
 
+  # ── Public calendar + video ──────────────────
+  # These three routers ship certresolver=letsencrypt in docker-compose.yml
+  # (the built-in traefik). With a system Traefik that resolver does not
+  # exist, so re-point them at mytlschallenge and attach the system
+  # Traefik's network — otherwise traefik logs
+  # "uses a nonexistent resolver: letsencrypt" and the routes 404.
+  calendar:
+    networks:
+      - opensme-net
+      - traefik-web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-web"
+      - "traefik.http.routers.calendar.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.calendar.entrypoints=websecure"
+      - "traefik.http.routers.calendar.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.calendar.loadbalancer.server.port=3000"
+
+  calendar-radicale:
+    networks:
+      # keep the pinned address from docker-compose.yml (internal CalDAV
+      # clients depend on it) and add the system Traefik network
+      opensme-net:
+        ipv4_address: 172.19.0.250
+      traefik-web: {}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-web"
+      - "traefik.http.routers.calendar-dav.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`) && PathPrefix(`/dav`)"
+      - "traefik.http.routers.calendar-dav.entrypoints=websecure"
+      - "traefik.http.routers.calendar-dav.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.calendar-dav.priority=10010"
+      - "traefik.http.middlewares.calendar-dav-strip.stripprefix.prefixes=/dav"
+      - "traefik.http.routers.calendar-dav.middlewares=calendar-dav-strip"
+      - "traefik.http.services.calendar-dav.loadbalancer.server.port=5232"
+
+  vc-room:
+    networks:
+      - opensme-net
+      - traefik-web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-web"
+      - "traefik.http.routers.vc-room.rule=Host(`${VC_DOMAIN:-vc.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.vc-room.entrypoints=websecure"
+      - "traefik.http.routers.vc-room.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.vc-room.priority=10000"
+      - "traefik.http.services.vc-room.loadbalancer.server.port=8090"
+
 networks:
   opensme-net:
     name: opensme-net
