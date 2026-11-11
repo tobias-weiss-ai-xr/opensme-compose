@@ -87,11 +87,7 @@ pub fn resolve_share_url(
     if let Some(o) = ocs_url_override.map(str::trim).filter(|s| !s.is_empty()) {
         return format!("{}{}/shares", o.trim_end_matches('/'), OCS_SHARE_API);
     }
-    format!(
-        "{}{}/shares",
-        dav_base_host_base(dav_base),
-        OCS_SHARE_API
-    )
+    format!("{}{}/shares", dav_base_host_base(dav_base), OCS_SHARE_API)
 }
 
 /// Extract the public share URL from an OCS share-create response
@@ -120,32 +116,6 @@ pub fn http_status(err: &str) -> Option<u16> {
 }
 
 // ── OCS response types (typed mirrors of the OCS v2 JSON envelope) ───
-
-/// OCS error type for share management operations.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OcsError {
-    /// HTTP error with status code and message
-    HttpError(u16, String),
-    /// JSON parsing error
-    ParseError(String),
-    /// Share response carries no URL
-    NoShareUrl,
-    /// Authentication or permission error
-    AuthError(String),
-}
-
-impl fmt::Display for OcsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OcsError::HttpError(code, msg) => write!(f, "OCS HTTP error {}: {}", code, msg),
-            OcsError::ParseError(msg) => write!(f, "OCS parse error: {}", msg),
-            OcsError::NoShareUrl => write!(f, "OCS share response carries no URL"),
-            OcsError::AuthError(msg) => write!(f, "OCS auth error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for OcsError {}
 
 /// OCS API meta block: `{"status":...,"statuscode":...,"message":...}`.
 /// Every field defaults so a sparse meta block still parses.
@@ -210,13 +180,6 @@ pub struct ShareInfo {
     pub share_with_displayname: String,
     #[serde(default, rename = "name")]
     pub name: String,
-}
-
-/// Convenience getter for the share link (same as `url`).
-impl ShareInfo {
-    pub fn share_link(&self) -> &str {
-        &self.url
-    }
 }
 
 /// A list of OCS shares — the `data` array of a share-list response.
@@ -486,9 +449,7 @@ fn xml_first_text(haystack: &str, local: &str) -> Option<String> {
     let mut i = 0;
     while let Some(rel) = haystack[i..].find('<') {
         let start = i + rel;
-        let Some(gt_rel) = haystack[start..].find('>') else {
-            return None;
-        };
+        let gt_rel = haystack[start..].find('>')?;
         let gt = start + gt_rel;
         let raw_tag = &haystack[start + 1..gt];
         let self_closing = raw_tag.trim_end().ends_with('/');
@@ -501,9 +462,7 @@ fn xml_first_text(haystack: &str, local: &str) -> Option<String> {
         }
         let close = format!("</{name}>");
         let rest = &haystack[gt + 1..];
-        let Some(end_rel) = rest.find(&close) else {
-            return None;
-        };
+        let end_rel = rest.find(&close)?;
         let text = rest[..end_rel].trim();
         if !text.is_empty() {
             return Some(text.to_string());
@@ -525,7 +484,7 @@ fn xml_decode_entities(s: &str) -> String {
         out.push_str(&rest[..at]);
         let tail = &rest[at..];
         match tail.find(';') {
-            Some(end) if end <= 10 && end >= 2 => match decode_entity(&tail[1..end]) {
+            Some(end) if (2..=10).contains(&end) => match decode_entity(&tail[1..end]) {
                 Some(c) => {
                     out.push(c);
                     rest = &tail[end + 1..];
@@ -664,8 +623,8 @@ pub fn parse_propfind(body: &[u8], request_path: &str) -> Result<Vec<CloudFileIn
         let Some(name) = name else { continue };
         let size =
             xml_first_text(block, "getcontentlength").and_then(|s| s.trim().parse::<u64>().ok());
-        let last_modified = xml_first_text(block, "getlastmodified")
-            .map(|s| xml_decode_entities(&s));
+        let last_modified =
+            xml_first_text(block, "getlastmodified").map(|s| xml_decode_entities(&s));
         let mime_type = xml_first_text(block, "getcontenttype");
         entries.push(CloudFileInfo {
             name,
@@ -1000,7 +959,8 @@ impl CloudFiles {
     /// exposes content_type parameter. Uses application/octet-stream as default.
     #[allow(dead_code)] // generalized client — consumers adopt incrementally
     pub async fn upload_file(&self, remote_path: &str, bytes: &[u8]) -> Result<(), String> {
-        self.put(remote_path, bytes, "application/octet-stream").await
+        self.put(remote_path, bytes, "application/octet-stream")
+            .await
     }
 
     /// GET `<dav_base>/<remote_path>` bytes.
@@ -1179,15 +1139,15 @@ impl CloudFiles {
             .header("OCS-APIRequest", "true")
             .header(reqwest::header::ACCEPT, "application/json")
             .basic_auth(&self.user, Some(&self.pass))
-            .query(&[("path", format!("/{path}")), ("reshares", "true".to_string())])
+            .query(&[
+                ("path", format!("/{path}")),
+                ("reshares", "true".to_string()),
+            ])
             .send()
             .await
             .map_err(|e| format!("share list unreachable: {e}"))?;
         if !res.status().is_success() {
-            return Err(format!(
-                "share list failed: HTTP {}",
-                res.status().as_u16()
-            ));
+            return Err(format!("share list failed: HTTP {}", res.status().as_u16()));
         }
         let body = res
             .bytes()
@@ -1224,72 +1184,6 @@ impl CloudFiles {
             Err(_) => false,
         }
     }
-
-    /// Check CalDAV endpoint health using an OPTIONS request.
-    /// The CalDAV endpoint is derived from the dav_base host as
-    /// `<host>/remote.php/dav/calendars/<user>/`.
-    /// Uses a dedicated client with a 5s timeout.
-    /// If dav_base is empty, returns true trivially.
-    pub async fn check_caldav_health(&self) -> bool {
-        let dav_base = self.dav_base.trim_end_matches('/');
-        if dav_base.is_empty() {
-            return true;
-        }
-        // Extract the host part from dav_base
-        let host = dav_base_host_base(dav_base);
-        // Build the CalDAV principal URL: <host>/remote.php/dav/calendars/<user>/
-        let caldav_url = format!("{}/remote.php/dav/calendars/{}/", host, self.user);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let res = client
-            .request(reqwest::Method::OPTIONS, &caldav_url)
-            .basic_auth(&self.user, Some(&self.pass))
-            .send()
-            .await;
-        match res {
-            Ok(res) => res.status().is_success(),
-            Err(_) => false,
-        }
-    }
-
-    /// Check CardDAV endpoint health using an OPTIONS request.
-    /// The CardDAV endpoint is derived from the dav_base host as
-    /// `<host>/remote.php/dav/addressbooks/<user>/`.
-    /// Uses a dedicated client with a 5s timeout.
-    /// If dav_base is empty, returns true trivially.
-    pub async fn check_carddav_health(&self) -> bool {
-        let dav_base = self.dav_base.trim_end_matches('/');
-        if dav_base.is_empty() {
-            return true;
-        }
-        // Extract the host part from dav_base
-        let host = dav_base_host_base(dav_base);
-        // Build the CardDAV principal URL: <host>/remote.php/dav/addressbooks/<user>/
-        let carddav_url = format!("{}/remote.php/dav/addressbooks/{}/", host, self.user);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let res = client
-            .request(reqwest::Method::OPTIONS, &carddav_url)
-            .basic_auth(&self.user, Some(&self.pass))
-            .send()
-            .await;
-        match res {
-            Ok(res) => res.status().is_success(),
-            Err(_) => false,
-        }
-    }
 }
 
 /// Standalone health check function that checks if opencloud is reachable.
@@ -1306,7 +1200,10 @@ pub async fn cloud_health() -> bool {
 /// Handler for GET /api/cloud/health - returns JSON with healthy bool field.
 pub async fn get_health() -> impl axum::response::IntoResponse {
     let healthy = cloud_health().await;
-    (StatusCode::OK, Json(serde_json::json!({ "healthy": healthy })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "healthy": healthy })),
+    )
 }
 
 // ── offline tests (no network) ───────────────────────────────────────
@@ -1740,9 +1637,6 @@ mod tests {
     #[test]
     fn ocs_constants_are_the_documented_paths() {
         assert_eq!(OCS_API_V2, "/ocs/v2.php");
-        assert_eq!(
-            OCS_SHARE_API,
-            "/ocs/v2.php/apps/files_sharing/api/v1"
-        );
+        assert_eq!(OCS_SHARE_API, "/ocs/v2.php/apps/files_sharing/api/v1");
     }
 }

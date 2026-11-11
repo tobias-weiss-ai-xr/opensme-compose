@@ -110,13 +110,6 @@ export default function CloudFileBrowser({
     return crumbs;
   }, []);
 
-  // Parse path to get directory name
-  const getDirName = useCallback((p: string): string => {
-    if (p === "/") return "root";
-    const parts = p.split("/").filter(Boolean);
-    return parts[parts.length - 1] || "root";
-  }, []);
-
   // Load files for current path
   const loadFiles = useCallback(async (p: string) => {
     setLoading(true);

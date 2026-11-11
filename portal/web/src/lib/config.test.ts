@@ -198,6 +198,14 @@ describe("loadServiceSpecs", () => {
   });
 
   it("OPENSME_DOMAIN override re-bases every derived URL (resetModules + dynamic import)", async () => {
+    // Clear every explicit service-URL override so OPENSME_DOMAIN truly
+    // re-bases all derived URLs — the shell env (docker compose .env) may
+    // set MAIL_URL etc., which would shadow the derived fallback.
+    for (const k of ["OPENCLOUD_URL", "MAIL_URL", "BPM_URL", "INVOICE_URL",
+                     "PAPERLESS_URL", "CHAT_URL", "NOTES_URL", "SURVEYS_URL",
+                     "TICKETING_URL", "CMS_URL", "SHOP_URL"]) {
+      delete process.env[k];
+    }
     process.env.OPENSME_DOMAIN = "suite.example.com";
     const { loadServiceSpecs: load } = await freshConfig();
     const specs = load();
@@ -307,7 +315,16 @@ describe("catalogEnvConfigured", () => {
   });
 
   it("is false for whitespace-only values", () => {
-    delete process.env.PAPERLESS_URL;
+    // Clear every catalog URL var — the shell env may set MAIL_URL etc.,
+    // which would make catalogEnvConfigured() true even when the var
+    // under test is whitespace-only.
+    for (const key of [
+      "OPENCLOUD_URL", "MAIL_URL", "BPM_URL", "INVOICE_URL",
+      "PAPERLESS_URL", "CHAT_URL", "NOTES_URL", "SURVEYS_URL",
+      "TICKETING_URL", "CMS_URL", "SHOP_URL",
+    ]) {
+      delete process.env[key];
+    }
     process.env.OPENCLOUD_URL = "   ";
     expect(catalogEnvConfigured()).toBe(false);
   });

@@ -79,7 +79,7 @@ export default function CloudShareLink({
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       setError('Failed to copy link to clipboard');
       setTimeout(() => setError(null), 3000);
     }
@@ -109,7 +109,7 @@ export default function CloudShareLink({
   }, [expirationDate]);
   
   // Check if link is expired
-  const isExpired = expirationDate && expirationDate <= new Date();
+  const isExpired = !!(expirationDate && expirationDate <= new Date());
   
   // Compact mode renders a simple inline link with copy button
   if (mode === 'compact') {

@@ -154,12 +154,17 @@ def run_script(name: str, script_path: str, domain: str = "localhost",
     elif "integration" in script_path and domain_explicit:
         cmd += ["--domain", domain]
 
+    # Mutation tests are themselves a subprocess farm (a full shadow-copy
+    # of the repo per wired check, each check run as its own python): a 120s
+    # static cap lets them flap red on slower hosts. e2e gets the same
+    # headroom for the same reason.
+    timeout = 420 if ("e2e" in script_path or "mutations" in script_path) else 120
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=420 if "e2e" in script_path else 120,
+            timeout=timeout,
             cwd=str(ROOT),
         )
         output = result.stdout

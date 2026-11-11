@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import (
     ComposeLoader, SpecLoader, Result, ROOT,
     extract_host_ports, has_healthcheck, has_traefik_labels,
-    get_image, has_resource_limits, get_networks, get_volumes,
+    get_image, has_resource_limits, get_volumes,
     effective_networks,
 )
 

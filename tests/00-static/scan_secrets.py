@@ -111,7 +111,34 @@ def _in_submodule(fp: Path) -> bool:
         return False
 
 
-def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
+# Values that are NOT secrets even when a name-based pattern matches:
+# - boolean/config toggles shown in docs/envelopes (`.env` feature flags)
+# - Rust API signatures in README docs (Option<String>, Result<..> …)
+_NON_SECRET_VALUE = {
+    "true", "false", "yes", "no", "on", "off",
+    "option", "string", "vec", "result", "bool", "some", "none",
+}
+
+
+def _compose_static_ips(candidates: list[Path]) -> set[str]:
+    """IPs the compose tree itself declares as container static addresses
+    (`networks: … ipv4_address:`). Those values are overlay topology, not
+    host infrastructure: referencing them elsewhere (e.g. a NO_PROXY default
+    for the pinned OpenCloud address) is not an internal-IP leak."""
+    out: set[str] = set()
+    for fp in candidates:
+        if not fp.is_file() or fp.suffix not in (".yml", ".yaml"):
+            continue
+        try:
+            txt = fp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in re.finditer(r"ipv4_address\s*[:=]\s*([0-9.]+)", txt):
+            out.add(m.group(1))
+    return out
+
+
+def scan_file(filepath: Path, static_ips: set[str] | None = None) -> list[tuple[int, str, str]]:
     """Scan a file for secrets. Returns list of (line_number, pattern_name, line)."""
     findings = []
     # Scope rules (calibrated against the real tree):
@@ -154,6 +181,22 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                         if re.search(pattern, line, re.IGNORECASE):
                             # Exclude env var references like ${VAR}
                             if "${" not in line and "CHANGEME" not in line:
+                                # Boolean/flag defaults (`…PASSWORD=false`,
+                                # OC_SHARING_…_MUST_HAVE_PASSWORD=true) and Rust
+                                # API signatures (`password: Option<String>`) are
+                                # config/docs, not secrets — a truthful password
+                                # is never the bare words true/false/yes/no or a
+                                # type token.
+                                value = re.search(
+                                    r"password\s*[=:]\s*[\"']?([^\"'\s$<`]+)",
+                                    line, re.IGNORECASE)
+                                if value and (
+                                    value.group(1).lower() in _NON_SECRET_VALUE
+                                    or not value.group(1).strip('.')
+                                ):
+                                    # boolean flag value, type token, or a
+                                    # ``…``-style placeholder — not a secret
+                                    continue
                                 findings.append((i, name, line.rstrip()))
 
                 # Credential FORMAT patterns: match regardless of variable
@@ -174,8 +217,14 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str]]:
                         # CSP route cloud.home→IP survives recreates, 660804a) is
                         # container-internal topology, not host infra: the value
                         # can only ever be a private container IP inside an
-                        # opensme-net overlay, so it carries no leak risk.
+                        # opensme-net overlay, so it carries no leak risk. Covers
+                        # the declaring line AND any other line in this tree that
+                        # references a compose-pinned address (e.g. NO_PROXY
+                        # defaults that name the OpenCloud static IP).
                         if "ipv4_address:" in line:
+                            continue
+                        m = re.search(pattern, line)
+                        if m and static_ips and m.group(0) in static_ips:
                             continue
                         # Documentation files intentionally describe internal
                         # network topology (e.g., service IPs, subnet ranges).
@@ -215,6 +264,10 @@ def main():
         for ext in SCAN_EXTS:
             candidates.extend(scan_root.rglob(f"*{ext}"))
 
+    # IPs the compose tree pins as container static addresses — referencing
+    # one of these is overlay topology, not an internal-IP leak.
+    static_ips = _compose_static_ips(candidates)
+
     for fp in candidates:
         if ".git" in fp.parts or _SCAN_SKIP_NAME.search(str(fp)):
             continue
@@ -225,7 +278,7 @@ def main():
             continue
         if not fp.is_file():
             continue
-        findings = scan_file(fp)
+        findings = scan_file(fp, static_ips)
         files_scanned += 1
         if findings:
             for line_no, name, line in findings:

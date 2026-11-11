@@ -23,7 +23,6 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
-opensme-webdav = { path = "../services/rust-webdav-client" }
 
 [dev-dependencies]
 # SOTA test methods:

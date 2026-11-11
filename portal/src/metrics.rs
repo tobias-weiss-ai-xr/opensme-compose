@@ -8,8 +8,8 @@ use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
     Registry, TextEncoder,
 };
-use std::time::Instant;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 /// All portal metrics, registered exactly once per process.
 pub struct Metrics {

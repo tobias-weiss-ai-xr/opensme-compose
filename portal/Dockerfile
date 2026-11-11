@@ -1,10 +1,11 @@
 ARG RUST_VERSION=1.98
 FROM rust:${RUST_VERSION}-slim-bookworm AS chef
 RUN cargo install cargo-chef --locked
-# The build context is the REPO ROOT: portal/Cargo.toml depends on the
-# shared ../services/rust-webdav-client crate, which a ./portal-only
-# context cannot resolve (cargo chef fails on the missing path dep). The
-# checkout lands at /app, the package lives at /app/portal.
+# The build context is the REPO ROOT. A ./portal-only context was needed
+# only while portal/Cargo.toml carried the ../services/rust-webdav-client
+# path dependency; that crate is unused and was dropped (bug-hunt 2026-11),
+# so a ./portal context would work again — root context is retained until
+# the next Dockerfile edit so the deployed build pipeline stays unchanged.
 WORKDIR /app/portal
 
 FROM chef AS planner
@@ -15,9 +16,6 @@ FROM chef AS builder
 # data dir for the runtime stage (team-notes persistence); ownership is
 # applied on COPY --chown in the runtime stage
 RUN mkdir -p /data/attachments
-# The recipe records the ../services/rust-webdav-client PATH dependency,
-# so its manifest (and sources) must exist before `cargo chef cook` reads it.
-COPY services/rust-webdav-client /app/services/rust-webdav-client
 COPY --from=planner /app/portal/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . /app

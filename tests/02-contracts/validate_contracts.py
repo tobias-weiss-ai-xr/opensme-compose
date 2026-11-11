@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import (  # noqa: E402 (compose tags registered first)
     ComposeLoader, ContractLoader, EnvLoader, Result, ROOT,
     extract_host_ports, has_healthcheck, has_resource_limits,
-    get_networks, is_host_network, extract_env_vars_from_compose,
+    is_host_network, extract_env_vars_from_compose,
     effective_networks,
 )
 

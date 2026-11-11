@@ -1110,10 +1110,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
                 .post(handle_cloud_mkdir)
                 .put(handle_cloud_upload),
         )
-        .route(
-            "/api/cloud/files/metadata",
-            get(handle_cloud_list_files),
-        )
+        .route("/api/cloud/files/metadata", get(handle_cloud_list_files))
         .route(
             "/api/cloud/file",
             get(handle_cloud_download).delete(handle_cloud_delete),
