@@ -344,8 +344,9 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     build:
-      context: ./portal
-      dockerfile: Dockerfile
+      # root context: portal depends on ../services/rust-webdav-client
+      context: .
+      dockerfile: portal/Dockerfile
     container_name: opensme-portal
     restart: unless-stopped
     volumes:

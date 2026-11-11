@@ -1,0 +1,19 @@
+# Root-context builds (portal: builds the Rust API, whose Cargo.toml
+# depends on ../services/rust-webdav-client — the context must be the repo
+# root so that path dependency resolves). Keep the context lean: none of
+# the excluded trees are read at build time.
+.git
+**/node_modules
+**/target
+backups
+logs
+output
+state-opensme-agentic2
+opensme-dev-agent
+opensme-knowledge
+typesetting
+tests
+docs
+contracts
+specs
+openspec

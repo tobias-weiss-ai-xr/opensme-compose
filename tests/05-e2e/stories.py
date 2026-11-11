@@ -13,6 +13,8 @@ Epics / user stories (IDs appear in failure output):
   Epic P — Portal (signed-in catalog, anonymous public landing)
     P1  anonymous landing = public landing: login CTA + news, no tiles,
         no signed-in chrome (no logout, no app.js)          [contracts/tiles.yml]
+    P1f  anonymous landing loads the public feed filler (/feeds.js) so
+        the RSS headlines actually render for logged-out visitors
     P2  anonymous /api/services is refused (401) — the tiles API is gated
     P3  /health answers {"status":"ok"}
     P4  no dashboard-shaped leak: /dashboard anonymous never renders tiles
@@ -163,6 +165,9 @@ Epics / user stories (IDs appear in failure output):
     P12  session cookie hardening (HttpOnly, SameSite, Secure on https)
     P13  announcements readable anonymously (list contract)
     P14  feeds columns shape (server-side RSS aggregation)
+    P15  the anonymous landing actually loads the public feed filler
+         (/feeds.js) — RSS headlines render for logged-out visitors
+         (feeds.js is public; app.js stays off the public page)
 
     P9   /api/session anonymous introspection ({"authenticated": false})
     P10  /api/auth/login → 303 IdP authorize carrying the portal
@@ -443,6 +448,11 @@ def main() -> bool:
             result.ok("P1: anonymous landing = public landing (CTA, no signed-in chrome)")
         else:
             result.fail(f"P1: anonymous landing leaks signed-in UI: {leaks or 'no login CTA'}")
+        if "/feeds.js" in html:
+            result.ok("P1f: anonymous landing loads the public feed filler (/feeds.js)")
+        else:
+            result.fail("P1f: anonymous landing does not load /feeds.js — RSS "
+                        "headlines never render for logged-out visitors")
 
     r = anon.get(portal_base + "/api/services", timeout=T, allow_redirects=False)
     if r.status_code in (401, 403):
@@ -551,6 +561,15 @@ def main() -> bool:
     else:
         result.fail(f"P14: feeds → {r.status_code} "
                     f"{entry_keys or 'no columns'}")
+
+    r = anon.get(portal_base + "/feeds.js", timeout=T)
+    ct = r.headers.get("content-type", "")
+    if r.status_code == 200 and ct.startswith("application/javascript") \
+            and "/api/feeds" in r.text:
+        result.ok("P15: /feeds.js public filler served anonymously (200, JS)")
+    else:
+        result.fail(f"P15: /feeds.js → {r.status_code} "
+                    f"{ct or 'no JS content-type'}")
 
     # ── signed-in journeys ────────────────────────────────────────────
     signed = requests.Session()

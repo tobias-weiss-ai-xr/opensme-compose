@@ -393,10 +393,15 @@ fn build_landing_page(config: &AppConfig, authed: bool) -> String {
         </section>"#
         )
     };
+    // feeds.js loads on EVERY landing (public + signed-in) — it fills the
+    // /api/feeds news lists and touches nothing else. app.js is signed-in
+    // chrome only (contracts/tiles.yml: the anonymous landing never gets it).
     let script_tag = if authed {
-        r#"<script src="/app.js" defer></script>"#
+        r#"<script src="/app.js" defer></script>
+    <script src="/feeds.js" defer></script>"#
+            .to_string()
     } else {
-        ""
+        r#"<script src="/feeds.js" defer></script>"#.to_string()
     };
 
     format!(
@@ -1067,6 +1072,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
     let router = Router::new()
         .route("/", get(handle_root))
         .route("/app.js", get(handle_app_js))
+        .route("/feeds.js", get(handle_feeds_js))
         .route("/health", get(handle_health))
         .route("/api/announcements", get(handle_announcements))
         .route("/api/feeds", get(handle_feeds))
@@ -2308,6 +2314,18 @@ async fn handle_app_js() -> impl IntoResponse {
     )
 }
 
+/// Public feed filler (anonymous landing + signed-in): renders the
+/// /api/feeds news lists; no session, no signed-in chrome.
+async fn handle_feeds_js() -> impl IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("feeds.js"),
+    )
+}
+
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -2771,6 +2789,28 @@ mod tests {
         assert_eq!(cols[0]["entries"].as_array().unwrap().len(), 0);
     }
 
+    #[tokio::test]
+    async fn feeds_js_served_anonymously() {
+        // The public landing loads /feeds.js to fill the news lists; it is
+        // a plain asset — no session required, JS content-type, and it must
+        // touch nothing but /api/feeds.
+        let resp = respond_anon(cfg_with("", None, ""), "GET", "/feeds.js").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(ct.starts_with("application/javascript"));
+        let body = body_str(resp).await;
+        assert!(body.contains("/api/feeds"));
+        assert!(body.contains("feed-"));
+        // No auth/session endpoints referenced by the public filler.
+        assert!(!body.contains("/api/session"));
+        assert!(!body.contains("/api/logout"));
+    }
+
     #[test]
     fn intercom_card_always_on_page() {
         let html = build_landing_page(&cfg_with("", None, ""), true);
@@ -2816,11 +2856,13 @@ mod tests {
     }
 
     #[test]
-    fn anonymous_landing_needs_no_client_js() {
-        // The public page is static shell + server-rendered news; app.js
-        // (tabs, intercom, polls, AI) is pointless — and would only fire
-        // authenticated fetches that answer 401.
+    fn anonymous_landing_loads_public_feed_script() {
+        // The public page is static shell + server-rendered news; the lists
+        // are then filled by feeds.js from /api/feeds (anonymous endpoint).
+        // app.js (tabs, intercom, polls, AI) must NOT load — it would only
+        // fire authenticated fetches that answer 401.
         let html = build_landing_page(&cfg_with("", None, ""), false);
+        assert!(html.contains("/feeds.js"));
         assert!(!html.contains("/app.js"));
     }
 

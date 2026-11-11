@@ -87,7 +87,10 @@ portal-web images document in their Dockerfiles.
 
 ```sh
 # 1) build locally (same tags the server already runs)
-docker build -t opensme-compose-portal:latest portal/
+#    context is the REPO ROOT: the portal crate depends on the shared
+#    ../services/rust-webdav-client path dependency
+cd <repo-root>
+docker build -t opensme-compose-portal:latest -f portal/Dockerfile .
 docker build -t opensme-compose-portal-web:latest portal/web/  # profile "web"
 
 # 2) transfer + load
