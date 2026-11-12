@@ -262,7 +262,7 @@ jobs:
           fi
 
       - name: Boot demo stack (generates .env with random passwords)
-        run: bash scripts/demo.sh
+        run: bash scripts/ci-boot-demo.sh
 
       - name: Wait for IdP and Portal
         # Dev mode uses plain HTTP on port 80 (LE cannot issue certs for .local).
@@ -416,7 +416,7 @@ jobs:
           file idm/zitadel/busybox | grep -q static || { echo "::error::busybox is not static"; exit 1; }
 
       - name: Boot demo stack (generates .env with random passwords)
-        run: bash scripts/demo.sh
+        run: bash scripts/ci-boot-demo.sh
 
       - name: Register the webmail OIDC client in Zitadel
         # sogo.conf.template always runs SOGoAuthenticationType=openid and

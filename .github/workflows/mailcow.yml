@@ -49,7 +49,7 @@ jobs:
           chmod +x idm/zitadel/busybox
 
       - name: Boot demo stack (generates .env with random passwords)
-        run: bash scripts/demo.sh
+        run: bash scripts/ci-boot-demo.sh
 
       - name: Boot mailcow stack (submodule, demo-lean profile)
         env:
