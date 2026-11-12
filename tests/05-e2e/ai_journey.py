@@ -8,8 +8,8 @@ yet with AI unconfigured the suite only ever asserts the card is HIDDEN
 OpenAI-compatible backend (tests/05-e2e/ai_mock.py) and exercises the
 full user path:
 
-  O1  with AI configured, the landing page SHOWS the AI card
-      (inverse of the B5 gating check)
+  O1  with AI configured, the signed-in dashboard SHOWS the AI card
+      (the public landing stays free of signed-in affordances)
   O2  a question posted to the portal returns an answer — the round trip
       portal → OpenAI-compatible backend works end to end
   O3  the portal speaks the right contract upstream: bearer auth, model
@@ -169,16 +169,9 @@ def main() -> int:
             result.fail("portal did not come back healthy with AI configured")
             return 1
 
-        # O1: the AI card is VISIBLE when the feature is configured
-        page = session.get(portal_base + "/", timeout=T)
-        (result.ok if 'id="ai-card"' in page.text else result.fail)(
-            "AI card appears when AI is configured"
-            if 'id="ai-card"' in page.text
-            else "AI card missing despite AI_API_URL set"
-        )
-
         # O1b: the metered AI proxy is SESSION-GATED — an anonymous
-        # caller must never reach the upstream (cost-DoS guard)
+        # caller must never reach the upstream (cost-DoS guard). Checked
+        # before login, while this session is still anonymous.
         anon_chat = session.post(portal_base + "/api/ai/chat",
                                  json={"question": "free tokens?"}, timeout=T)
         (result.ok if anon_chat.status_code == 401 else result.fail)(
@@ -194,6 +187,16 @@ def main() -> int:
         else:
             result.fail("portal login failed — cannot exercise the gated AI surface")
             return 1
+
+        # O1: the AI card is VISIBLE on the signed-in dashboard. The card
+        # lives in the authenticated section (the public landing must stay
+        # free of signed-in affordances), so this runs after login.
+        page = session.get(portal_base + "/", timeout=T)
+        (result.ok if 'id="ai-card"' in page.text else result.fail)(
+            "AI card appears when AI is configured"
+            if 'id="ai-card"' in page.text
+            else "AI card missing despite AI_API_URL set"
+        )
 
         # O2: full round trip through the portal proxy
         chat = session.post(portal_base + "/api/ai/chat",
