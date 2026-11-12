@@ -157,6 +157,11 @@ def main() -> int:
         try:
             recreate_portal({"AI_API_URL": api_url, "AI_MODEL": MODEL,
                              "AI_API_KEY": API_KEY})
+        except subprocess.CalledProcessError as e:
+            tail = (e.stderr or b"").decode(errors="replace").strip()
+            lines = [ln for ln in tail.splitlines() if ln.strip()][-6:]
+            result.fail("portal recreate failed: " + " | ".join(lines))
+            return 1
         except subprocess.SubprocessError as e:
             result.fail(f"portal recreate failed: {e.__class__.__name__}")
             return 1
