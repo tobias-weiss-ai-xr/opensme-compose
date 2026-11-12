@@ -301,16 +301,16 @@ jobs:
 
       - name: Run e2e suite (Layer 5 — SSO flows)
         # Pass --insecure to allow HTTP-only dev endpoints
-        run: python3 tests/05-e2e/run.py --insecure opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/run.py --insecure opensme.local
       - name: Run portal logout journey (LO-1 single sign-out reaches OpenCloud)
         # Same IdP session machinery as run.py's section_logout, driven from the
         # portal's own POST /api/logout: cookie cleared, 303 to end-session with
         # id_token_hint, IdP session dead on replay, OpenCloud app signed out.
-        run: python3 tests/05-e2e/logout.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/logout.py opensme.local
       - name: Run session lifecycle journey (timeout, refresh, cross-service SSO)
         # S1 token bounds agree end to end, S2 offline_access refresh rotates
         # without re-login, S3 one IdP session covers portal + OpenCloud.
-        run: python3 tests/05-e2e/session_lifecycle.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/session_lifecycle.py opensme.local
       - name: Run epic user-story journeys (Portal/Video/Booking/Edge/Catalog)
         # contracts/tiles.yml-driven epics; legs skip when the participating
         # app is not running (VC/calendar absent on the demo stack). Epic P
@@ -340,73 +340,73 @@ jobs:
         # /api/feeds degrades to empty columns instead of erroring. The full
         # saga blueprints need overlays the demo stack does not ship — they run
         # via `make saga` against a full stack.
-        run: python3 tests/05-e2e/saga_smoke.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/saga_smoke.py opensme.local
       - name: Run operator broadcast journey (publish → escape check → withdraw)
-        run: python3 tests/05-e2e/broadcast.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/broadcast.py opensme.local
       - name: Run resilience journey (DB bounce + IdP outage → self-heal)
-        run: python3 tests/05-e2e/resilience.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/resilience.py opensme.local
       - name: Run backup journey (provable restore points)
-        run: python3 tests/05-e2e/backup.py
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/backup.py
       - name: Run exposure journey (management planes stay closed)
-        run: python3 tests/05-e2e/exposure.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/exposure.py opensme.local
       - name: Run runtime truth journey (no drift, no :latest)
-        run: python3 tests/05-e2e/runtime_truth.py
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/runtime_truth.py
       - name: Run local AI journey (mock backend, contract proof)
-        run: python3 tests/05-e2e/ai_journey.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/ai_journey.py opensme.local
       - name: Run agent saga AS1 (krank → diagnose → consent → heal → audit)
         # Isolated: builds the bot image if absent, drives its private REST
         # API via docker exec against self-created opensme-saga-* containers.
-        run: python3 tests/05-e2e/agent_saga.py
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/agent_saga.py
       - name: "Run agent draft saga (AS2/AS3/AS5 write gate: draft -> approve -> commit)"
         # Isolated: proves the generic agent write gate (drafts inert until a
         # human approves; audit at each stage) against its own bot container.
-        run: python3 tests/05-e2e/agent_draft_saga.py
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/agent_draft_saga.py
       - name: "Run agent injection saga (AE2 prompt-injection: no commit from hostile input)"
         # Isolated: proves injection payloads fed to the dev-agent NEVER result
         # in committed drafts or injected strings in evidence beyond sanitised form.
-        run: python3 tests/05-e2e/agent_injection.py
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/agent_injection.py
       - name: Run burst journey (concurrent load, zero 5xx)
-        run: python3 tests/05-e2e/burst.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/burst.py opensme.local
       - name: Run hygiene journey (no default creds, no open writes)
-        run: python3 tests/05-e2e/hygiene.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/hygiene.py opensme.local
       - name: Run transport journey (redirects, security headers, no leaks)
-        run: python3 tests/05-e2e/transport.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/transport.py opensme.local
       - name: Run accessibility journey (SSR document hygiene)
-        run: python3 tests/05-e2e/accessibility.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/accessibility.py opensme.local
       - name: Run rate limit journey (the edge limiter actually limits)
-        run: python3 tests/05-e2e/rate_limit.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/rate_limit.py opensme.local
       - name: Run tls contract journey (legacy TLS refused, HSTS, cert window)
-        run: python3 tests/05-e2e/tls_contract.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/tls_contract.py opensme.local
       - name: Run secret surface journey (least privilege on secrets)
-        run: python3 tests/05-e2e/secret_surface.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/secret_surface.py opensme.local
       - name: Run observability journey (healthchecks + secrets-out-of-logs)
-        run: python3 tests/05-e2e/observability.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/observability.py opensme.local
       - name: Run portability journey (portal migrates to another domain)
-        run: python3 tests/05-e2e/portability.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/portability.py opensme.local
       - name: Run intercom journey (notes + cloud attachments, SSRF guard)
         env:
           E2E_DEBUG: "1"
-        run: python3 tests/05-e2e/intercom.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/intercom.py opensme.local
       - name: Run polls journey (voting lifecycle, double-vote 409, gated surface)
         env:
           E2E_DEBUG: "1"
-        run: python3 tests/05-e2e/polls.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/polls.py opensme.local
       - name: Run hostile input journey (nothing breaks out of the renderer)
         env:
           E2E_DEBUG: "1"
-        run: python3 tests/05-e2e/hostile_input.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/hostile_input.py opensme.local
       - name: Run concurrent writers journey (the intercom store under contention)
         env:
           E2E_DEBUG: "1"
-        run: python3 tests/05-e2e/concurrent_writers.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/concurrent_writers.py opensme.local
       - name: Run rolling recreate journey (deploy without turbulence)
-        run: python3 tests/05-e2e/rolling_recreate.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/rolling_recreate.py opensme.local
       - name: Run idempotency journey (second boot converges, no duplicates)
-        run: python3 tests/05-e2e/idempotency.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/idempotency.py opensme.local
       - name: Run persistence journey (state survives full restart)
-        run: python3 tests/05-e2e/persistence.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/persistence.py opensme.local
       - name: Run restore drill (backup → destroy → restore → verify)
-        run: python3 tests/05-e2e/restore_drill.py opensme.local
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/restore_drill.py opensme.local
 
   mail:
     name: E2E — mail profile (Stalwart + SOGo webmail)
