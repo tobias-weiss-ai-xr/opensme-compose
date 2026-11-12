@@ -975,17 +975,24 @@ def main() -> bool:
 
     # ── anonymous gates ──────────────────────────────────────────────
     gates = []
+    absent = []
     for label, url in (("intercom", portal_base + "/api/intercom"),
                        ("polls", portal_base + "/api/polls"),
                        ("cloud-share", portal_base + "/api/cloud/share?path=x.txt")):
         r = anon.get(url, timeout=T, allow_redirects=False)
         r2 = anon.post(url, json={"x": 1}, timeout=T, allow_redirects=False)
+        if r.status_code == 404 and r2.status_code == 404:
+            absent.append(label)          # surface not enabled on this stack
+            continue
         ok = r.status_code in (401, 403, 303) and r2.status_code in (401, 403, 303)
         gates.append(f"{label} {r.status_code}/{r2.status_code}{'✓' if ok else '✗'}")
-    if all("✓" in g for g in gates):
+    if gates and all("✓" in g for g in gates):
         result.ok(f"L1/L4/L7: member APIs refuse anonymous ({'; '.join(gates)})")
+    elif not gates:
+        result.skip("L1/L4/L7: member APIs not enabled on this stack")
     else:
-        result.fail(f"L1/L4/L7: anonymous gate broken: {'; '.join(gates)}")
+        result.fail(f"L1/L4/L7: anonymous gate broken: {'; '.join(gates)}"
+                    + (f" (absent: {', '.join(absent)})" if absent else ""))
 
     r = anon.get(portal_base + "/api/announcements", timeout=T)
     r2 = anon.get(portal_base + "/api/feeds", timeout=T)
@@ -2155,7 +2162,11 @@ def main() -> bool:
     if vc_url:
         hardened(anon.get(vc_url + "/", timeout=T), result, "E2 vc")
     if cal_url:
-        hardened(anon.get(cal_url + "/", timeout=T), result, "E3 calendar")
+        ok, r = reachable(anon, cal_url + "/")
+        if ok:
+            hardened(r, result, "E3 calendar")
+        else:
+            result.skip(f"E3 calendar: not deployed ({cal_url})")
     for label, host in (("E4 chat", f"{schema}chat.{portal_host}"),
                         ("E4 surveys", f"{schema}surveys.{portal_host}")):
         ok, r = reachable(anon, host + "/")

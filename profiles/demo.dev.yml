@@ -182,7 +182,7 @@ services:
       # there is no env to disable it. Upstream's external-proxy docs set
       # X-Forwarded-Proto: https explicitly; mirror that per-router so the
       # http-only demo works. Only the opencloud router is affected.
-      - "traefik.http.routers.opencloud.middlewares=oc-https@docker"
+      - "traefik.http.routers.opencloud.middlewares=oc-https@docker,hsts@file"
       - "traefik.http.middlewares.oc-https.headers.customrequestheaders.X-Forwarded-Proto=https"
 
   # ── Collabora (skip for demo/dev - too heavy) ─
