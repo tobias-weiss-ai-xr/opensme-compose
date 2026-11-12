@@ -322,7 +322,17 @@ jobs:
           rc=0
           python3 tests/05-e2e/stories.py opensme.local 2>&1 | tee /tmp/stories.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            tail -60 /tmp/stories.log | sed 's/%/%25/g' | awk '{printf "::error::%s%%0A\n", $0}'
+            {
+              echo "## Epic story failures"
+              echo '```'
+              grep -nE "✗|Traceback|Error|FAIL" /tmp/stories.log | head -40 || true
+              echo '```'
+              echo "### last 40 lines"
+              echo '```'
+              tail -40 /tmp/stories.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "✗|Traceback" /tmp/stories.log | head -10 | sed 's/%/%25/g' | awk '{printf "::error::%s%%0A\n", $0}' || true
           fi
           exit "$rc"
       - name: Run saga navigation smoke (no tile to nowhere)
