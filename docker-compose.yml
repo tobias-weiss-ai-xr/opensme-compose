@@ -98,6 +98,7 @@ services:
       #    enforced (verified: 1000-request flood → 743×429, zero 5xx).
       - "--entryPoints.websecure.http.middlewares=compress@docker"
       - "--entryPoints.websecure.http.middlewares=ratelimit@file"
+      - "--entryPoints.websecure.http.middlewares=hsts@file"
     ports:
       - "80:80"
       - "443:443"
