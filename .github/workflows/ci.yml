@@ -332,7 +332,7 @@ jobs:
               tail -40 /tmp/stories.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "✗|Traceback" /tmp/stories.log | head -10 | sed 's/%/%25/g' | awk '{printf "::error::%s%%0A\n", $0}' || true
+            grep -E "✗|Traceback|File \"|Error" /tmp/stories.log | head -12 | sed 's/%/%25/g' | awk '{printf "::error::%s%%0A\n", $0}' || true
           fi
           exit "$rc"
       - name: Run saga navigation smoke (no tile to nowhere)
