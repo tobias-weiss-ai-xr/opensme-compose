@@ -88,8 +88,8 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      the calrs admin address; the booking account's `booking_email` points at
      a real mailbox (Stalwart auto-provisions principals via the IdP) so host
      notifications land in an actual INBOX. Guest addresses outside the
-     local domain correctly bounce with `550 Relay not allowed` (no external
-     relaying in the demo).
+     local domain correctly bounce with `550 Relay not allowed` — the mail
+     stack is a closed system by design, see [docs/mail.md](../../docs/mail.md).
 
 ## WARNING: this subtree does NOT self-build
 

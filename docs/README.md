@@ -62,6 +62,7 @@ directories:
 | [backup-restore.md](backup-restore.md) | Encrypted (AES-256-CBC) backup sets, S3/rclone upload, restore incl. `--passphrase` |
 | [rotate-backups.md](rotate-backups.md) | Off-site retention policy via `rclone` |
 | [pin-images.md](pin-images.md) | Resolving image tags to sha256 digests → `manifests/pinned-images.env` |
+| [mail.md](mail.md) | Mail scope: closed system by design — why no MX/SPF/DKIM/DMARC are published, what still works, and the checklist for opening it later |
 | [COMPLIANCE.md](COMPLIANCE.md) | Compliance reporting (`make compliance`), report formats, scheduling |
 | [ROADMAP.md](ROADMAP.md) | Current scope, in-flight work, backlog, perf-budget targets |
 

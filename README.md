@@ -1767,6 +1767,7 @@ Start at the [documentation index](docs/README.md). The deep dives:
 | [Backup &amp; restore](docs/backup-restore.md) | operators | Encrypted backups, S3 upload, restore |
 | [Backup rotation](docs/rotate-backups.md) | operators | Off-site retention with rclone |
 | [Image pinning](docs/pin-images.md) | operators | Digest-pinned manifests for reproducible deploys |
+| [Mail scope](docs/mail.md) | operators | Closed mail system by design: no MX/SPF/DKIM/DMARC, what works, how to open it later |
 | [Roadmap](docs/ROADMAP.md) | everyone | Current scope, in-flight work, backlog |
 | [Public Calendar](docs/calendar.md) | operators | calrs booking page + dedicated Radicale CalDAV store — deploy steps, env, privacy contract (free/busy-only public page) |
 | [Test suite](tests/README.md) | contributors | The layered test pyramid, layer by layer |
