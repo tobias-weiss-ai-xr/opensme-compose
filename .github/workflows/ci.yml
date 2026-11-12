@@ -319,8 +319,8 @@ jobs:
         # rights, annotations are readable from the public API.
         run: |
           set -o pipefail
-          python3 tests/05-e2e/stories.py opensme.local 2>&1 | tee /tmp/stories.log
-          rc=${PIPESTATUS[0]}
+          rc=0
+          python3 tests/05-e2e/stories.py opensme.local 2>&1 | tee /tmp/stories.log || rc=$?
           if [ "$rc" -ne 0 ]; then
             tail -60 /tmp/stories.log | sed 's/%/%25/g' | awk '{printf "::error::%s%%0A\n", $0}'
           fi
