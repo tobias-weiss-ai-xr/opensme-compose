@@ -165,8 +165,13 @@ jobs:
           # are overlay topology, not host infrastructure. Same exemption as
           # the Python secret scanner (_compose_static_ips).
           ALLOW=$(mktemp)
-          git grep -hoE 'ipv4_address:[[:space:]]*[0-9.]+' -- '*.yml' '*.yaml' 2>/dev/null \
-            | sed -E 's/.*ipv4_address:[[:space:]]*//' | sort -u > "$ALLOW" || true
+          { git grep -hoE 'ipv4_address:[[:space:]]*[0-9.]+' -- '*.yml' '*.yaml' 2>/dev/null \
+              | sed -E 's/.*ipv4_address:[[:space:]]*//'
+            # …plus the compose network's own ipam subnet (172.19.0.0/16),
+            # which is what makes those static addresses resolvable.
+            git grep -hoE 'subnet:[[:space:]]*[0-9.]+/[0-9]+' -- '*.yml' '*.yaml' 2>/dev/null \
+              | sed -E 's/.*subnet:[[:space:]]*//; s#/[0-9]+$##'
+          } | sort -u > "$ALLOW" || true
           allow_filter() {
             if [ -s "$ALLOW" ]; then grep -vFf "$ALLOW"; else cat; fi
           }

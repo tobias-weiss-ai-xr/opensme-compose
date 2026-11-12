@@ -799,6 +799,15 @@ networks:
   opensme-net:
     name: opensme-net
     driver: bridge
+    # Pinned so the static service addresses resolve: opencloud uses
+    # 172.19.0.17 (CSP frame-src for cloud.*) and the external-Traefik
+    # profile pins calendar-radicale to 172.19.0.250. Without an explicit
+    # subnet Docker picks an arbitrary free range, and `up` then dies with
+    # "no configured subnet contains IP address 172.19.0.17" — which is
+    # exactly what broke the demo/E2E CI boot.
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
 
 volumes:
   traefik-data:

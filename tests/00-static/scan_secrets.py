@@ -164,6 +164,10 @@ def _compose_static_ips(candidates: list[Path]) -> set[str]:
             continue
         for m in re.finditer(r"ipv4_address\s*[:=]\s*([0-9.]+)", txt):
             out.add(m.group(1))
+        # The compose network's own ipam subnet is topology as well: pinning
+        # 172.19.0.0/16 is what makes the static addresses above resolvable.
+        for m in re.finditer(r"subnet\s*[:=]\s*([0-9.]+)/\d+", txt):
+            out.add(m.group(1))
     return out
 
 
