@@ -54,6 +54,15 @@ ROOT = Path(__file__).resolve().parents[2]
 # ─────────────────────────────────────────────────────────────────────────────
 MUTATIONS = [
     {
+        "name": "demo-env-vc-public-ip",
+        "file": "docker-compose.yml",
+        "old": "${VC_PUBLIC_IP:?set VC_PUBLIC_IP}",
+        "new": "${VC_PUBLIC_IP_MUTATED:?set VC_PUBLIC_IP_MUTATED}",
+        "check": "tests/00-static/check_demo_env.py",
+        "why": "E2E boot — a fail-closed ${VAR:?} guard the demo generator does "
+               "not fill aborts `docker compose up` before any container starts",
+    },
+    {
         "name": "interop-profiles-requirepass",
         "file": "profiles/medium.yml",
         "old": "- --requirepass\n      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}",

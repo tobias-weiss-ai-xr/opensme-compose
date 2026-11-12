@@ -162,6 +162,15 @@ LOGIN_SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
 PORTAL_OIDC_CLIENT_ID=$(pw)
 PORTAL_OIDC_CLIENT_SECRET=$(pw)
 
+# Video consultation (vc-livekit, profile "vc" — not started by the demo,
+# but compose interpolates every service regardless of profile). Both are
+# fail-closed required-variable guards, so a missing value aborts the FIRST
+# `docker compose up` before any container starts.
+LIVEKIT_API_SECRET=$(pw)
+# Loopback: the demo edge and browser are on the same host. A public
+# deployment sets the host's public IP here (see docs/vc.md).
+VC_PUBLIC_IP=127.0.0.1
+
 # Traefik dashboard
 TRAEFIK_USERS=${TRAEFIK_HASH_ESC}
 
@@ -238,6 +247,18 @@ fi
 if ! grep -q '^PORTAL_OIDC_CLIENT_ID=' .env; then
   printf '\nPORTAL_OIDC_CLIENT_ID=%s\nPORTAL_OIDC_CLIENT_SECRET=%s\n' "$(pw)" "$(pw)" >> .env
   ok "Appended PORTAL_OIDC_CLIENT_ID/SECRET to existing .env (required placeholders)"
+fi
+
+# Video consultation guards (vc-livekit). Older demo .env files predate the
+# VC service; without these the next `docker compose up` aborts on the
+# ${VAR:?} interpolation before starting anything.
+if ! grep -q '^LIVEKIT_API_SECRET=' .env; then
+  printf 'LIVEKIT_API_SECRET=%s\n' "$(pw)" >> .env
+  ok "Appended LIVEKIT_API_SECRET to existing .env (required by vc-livekit)"
+fi
+if ! grep -q '^VC_PUBLIC_IP=' .env; then
+  printf 'VC_PUBLIC_IP=127.0.0.1\n' >> .env
+  ok "Appended VC_PUBLIC_IP=127.0.0.1 to existing .env (local demo default)"
 fi
 
 # Provision deploy-time Zitadel artifacts via apt (no Docker Hub pulls).
