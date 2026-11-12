@@ -532,12 +532,13 @@ services:
   # ═══════════════════════════════════════════════════════════════
   calendar:
     <<: *service-defaults
-    # local build from the pinned upstream v1.6.0 tag (no registry
-    # image exists; build from the upstream checkout, images/calrs is
-    # the pinned Dockerfile reference + curl delta)
+    # Opt-in profile: calrs ships no registry image and the source tree is
+    # not vendored here, so the image must be built once from the pinned
+    # upstream checkout before this profile can start (see
+    # images/calrs/README.md). Keeping it out of the default profile is what
+    # lets `docker compose up --build` work on a fresh clone and in CI.
+    profiles: ["calendar"]
     image: calrs:${CALRS_IMAGE_TAG:-1.6.0}
-    build:
-      context: ./images/calrs
     container_name: opensme-calendar
     restart: unless-stopped
     environment:
@@ -606,6 +607,9 @@ services:
 
   calendar-radicale:
     <<: *service-defaults
+    # Same opt-in profile as `calendar` — the internal CalDAV store is only
+    # useful together with calrs (scripts/calendar-setup.sh brings both up).
+    profiles: ["calendar"]
     image: tomsquest/docker-radicale:${RADICALE_IMAGE_TAG:-3.9.0.0}
     container_name: opensme-calendar-radicale
     restart: unless-stopped

@@ -64,8 +64,9 @@
 #
 # Adopted into the core stack (2026-11-07): the calendar services
 # (calendar + calendar-radicale) live in the main docker-compose.yml
-# and are always included — no overlay, no --profile needed. This
-# script targets the main compose (COMPOSE_FILE env / --compose-file
+# behind the `calendar` profile (calrs publishes no registry image, so the
+# profile is off by default; naming `calendar` explicitly still starts it).
+# This script targets the main compose (COMPOSE_FILE env / --compose-file
 # override is honored; default docker-compose.yml). A legacy chain that
 # still lists services/calendar.yml parses fine (it's an empty shim).
 #

@@ -90,15 +90,15 @@ COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f profiles/soho.yml
 # make up produced a headless stack, "no port open". Hosts running their own
 # system-Traefik can still opt out with COMPOSE_PROFILES="" on the CLI.
 COMPOSE_PROFILES := --profile standalone
-TIER_SERVICES := core (8 containers: Traefik, PG, Redis, Memcached, Portal, Zitadel + Public Calendar calrs/Radicale)
+TIER_SERVICES := core (6 containers: Traefik, PG, Redis, Memcached, Portal, Zitadel; + calendar via CALENDAR=1)
 else ifeq ($(PROFILE),small)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f services/paperless.yml -f profiles/small.yml
 COMPOSE_PROFILES := --profile standalone --profile paperless
-TIER_SERVICES := core + office + paperless + calendar (14 containers)
+TIER_SERVICES := core + office + paperless (12 containers; + calendar via CALENDAR=1)
 else ifeq ($(PROFILE),medium)
 COMPOSE_FILES := $(CORE_FILES) $(IDM_FILES) -f opencloud/opencloud.yml -f mail/stalwart.yml -f mail/sogo.yml -f services/paperless.yml -f profiles/medium.yml
 COMPOSE_PROFILES := --profile standalone --profile paperless
-TIER_SERVICES := core + office + mail + paperless + calendar (16 containers)
+TIER_SERVICES := core + office + mail + paperless (14 containers; + calendar via CALENDAR=1)
 else ifeq ($(PROFILE),custom)
 COMPOSE_FILES := $(COMPOSE_FILE)
 COMPOSE_PROFILES :=
@@ -106,6 +106,14 @@ TIER_SERVICES := custom (COMPOSE_FILE from env)
 else
 $(error Unknown PROFILE "$(PROFILE)". Use: soho, small, medium, or custom)
 endif
+
+# calrs publishes no registry image and its source tree is not vendored in
+# this repo (images/calrs/README.md). Enable the opt-in `calendar` profile
+# only after building calrs:1.6.0 from the pinned upstream checkout, otherwise
+# `make up` on a fresh clone would fail trying to pull/build a missing image.
+CALENDAR ?= 0
+CALENDAR_PROFILE := $(if $(filter 1,$(CALENDAR)),--profile calendar)
+COMPOSE_PROFILES += $(CALENDAR_PROFILE)
 
 FULL_COMPOSE := $(COMPOSE) $(COMPOSE_FILES) $(COMPOSE_PROFILES)
 
@@ -145,7 +153,7 @@ up-login:
 up-all:
 	@echo -e "$(BLUE)── starting openSME (ALL services) ──$(NC)"
 	@$(FULL_COMPOSE) --env-file $(TEST_ENV) \
-		--profile paperless --profile tika --profile invoice --profile chat --profile element --profile collab --profile notes --profile ticketing --profile cms --profile store --profile ai --profile camunda \
+		--profile paperless --profile tika --profile invoice --profile chat --profile element --profile collab --profile notes --profile ticketing --profile cms --profile store --profile ai --profile camunda $(CALENDAR_PROFILE) \
 		up -d
 	@echo -e "$(GREEN)✓ Stack started with all optional services$(NC)"
 
@@ -543,6 +551,9 @@ help:
 	@echo "      --profile store     RaisFast (e-commerce storefront)"
 	@echo "      --profile ai        llama.cpp (local OpenAI-compatible backend)"
 	@echo "      --profile notes     Notes/Impress (collaborative editing)"
+	@echo "      --profile calendar  calrs booking + Radicale CalDAV (opt-in: CALENDAR=1)"
+	@echo "                          requires calrs:1.6.0 prebuilt from the upstream"
+	@echo "                          checkout — see images/calrs/README.md"
 	@echo ""
 	@echo -e "  $(GREEN)VPS Tiers$(NC)"
 	@echo "    make up PROFILE=soho     4c /  8 GB  (core only)"
