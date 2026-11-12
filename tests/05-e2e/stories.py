@@ -363,6 +363,11 @@ def hardened(resp: requests.Response, result: Result, label: str, hsts: bool = T
         result.fail(f"{label}: X-Content-Type-Options missing ({nosniff!r})")
     if not hsts:
         return
+    if not resp.url.startswith("https://"):
+        # HSTS is meaningless on a plain-http surface (the demo overlay runs
+        # the cloud router on the web entrypoint with tls=false)
+        result.skip(f"{label}: HSTS n/a over http ({resp.url[:40]})")
+        return
     sts = resp.headers.get("strict-transport-security", "")
     if "max-age" in sts:
         result.ok(f"{label}: Strict-Transport-Security {sts}")
