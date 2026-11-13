@@ -1,5 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 # OpenCloud entrypoint — generate config on first run.
+# NOTE: bash, not sh — the text rendering below uses ${var//pat/repl} so the
+# script needs NO sed/awk: the nix-built opencloud image ships coreutils+curl
+# only (no GNU sed), and the debian rolling image must keep working too.
 set -e
 
 # ── Validate required environment variables ──────────────────────────────
@@ -48,8 +51,9 @@ PROXY_EOF
 
 # Convert comma-separated origins to YAML list format
 for origin in $(echo "$PROXY_CORS_ORIGINS" | tr ',' '\n'); do
-  # Trim whitespace
-  origin=$(echo "$origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  # Trim whitespace (pure bash — no sed in the nix image)
+  origin="${origin#"${origin%%[![:space:]]*}"}"
+  origin="${origin%"${origin##*[![:space:]]}"}"
   if [ -n "$origin" ]; then
     echo "    - '$origin'" >> /etc/opencloud/proxy.yaml
   fi
@@ -99,12 +103,14 @@ case "$IDP_ORIGIN" in
     ;;
 esac
 if [ -f /etc/opencloud/csp.tpl.yaml ] && [ -n "$IDP_ORIGIN" ]; then
-  sed "s|__IDP_ORIGIN__|$IDP_ORIGIN|g" \
-      /etc/opencloud/csp.tpl.yaml > /etc/opencloud/csp.yaml
+  tpl=$(cat /etc/opencloud/csp.tpl.yaml)
+  printf '%s\n' "${tpl//__IDP_ORIGIN__/$IDP_ORIGIN}" > /etc/opencloud/csp.yaml
   echo "opencloud-entrypoint: csp.yaml rendered (idp=$IDP_ORIGIN)" >&2
 elif [ -f /etc/opencloud/csp.tpl.yaml ]; then
   # No issuer configured — fall back to the upstream default (no IdP origin).
-  sed "/__IDP_ORIGIN__/d" /etc/opencloud/csp.tpl.yaml > /etc/opencloud/csp.yaml
+  while IFS= read -r line; do
+    case "$line" in *__IDP_ORIGIN__*) ;; *) printf '%s\n' "$line" ;; esac
+  done < /etc/opencloud/csp.tpl.yaml > /etc/opencloud/csp.yaml
   echo "opencloud-entrypoint: csp.yaml rendered without idp origin" >&2
 fi
 

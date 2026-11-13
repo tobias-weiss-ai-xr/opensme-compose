@@ -31,10 +31,10 @@ services:
     # with klauspost/compress v1.20.2 — fixes GO-2026-6865 (panic on two-block
     # frames); upstream 8.0.1/rolling still ships the vulnerable v1.20.1.
     # sha256:19eec92c19a5110b3900bf730be789bdc536c10beeb826b064b160120d7e869e
-    # Compose tracks the public ghcr mirror (same digest); the private alias
-# registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix serves the
-# identical image.
-    image: ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0
+    # ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0 is the same image, but the ghcr
+# package is private — compose tracks the registry.openedusuite.org alias,
+# which pulls anonymously.
+    image: registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix
     container_name: opensme-opencloud
     restart: unless-stopped
     stop_grace_period: 60s
@@ -87,6 +87,20 @@ services:
       OC_LOG_PRETTY: ${LOG_PRETTY:-true}
       OC_ADMIN_USERNAME: ${OC_ADMIN_USERNAME:-admin}
       OC_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      # 8->9: idm/admin LDAP binds must agree on ONE password. 8.x aligned
+      # these implicitly; 9.x generates per-service values when unset, which
+      # broke basic auth (proxy/auth-basic bind rejected by idm, every
+      # basic-auth login 401'd). Pin all binders to the admin password.
+      IDM_ADMIN_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      OC_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      AUTH_BASIC_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      GRAPH_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      USERS_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      GROUPS_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      IDP_LDAP_BIND_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      IDM_SVC_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      IDM_REVASVC_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
+      IDM_IDPSVC_PASSWORD: ${OC_ADMIN_PASSWORD:?OC_ADMIN_PASSWORD must be set in .env}
       OC_DOMAIN: ${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.graphwiz.ai}
       OC_IDP_URL: https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
