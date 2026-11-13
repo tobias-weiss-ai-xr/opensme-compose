@@ -231,20 +231,29 @@ fi
 # first made both dumps silently EMPTY (nothing to connect to). The stack
 # is only stopped below, and only for volume backups.
 if [ "$BACKUP_VOLUMES" = true ]; then
-  echo "🛑 Will stop services for the volume backup (after the dumps)"
+  if [ "$NO_STOP" = true ]; then
+    echo "ℹ --no-stop: services keep running during the volume snapshot"
+  else
+    echo "🛑 Will stop services for the volume backup (after the dumps)"
+  fi
 fi
 
 # ── PostgreSQL dump ───────────────────────────
 echo "   → PostgreSQL..."
 # Dump the RUNNING server (exec). A second container from `compose run` has
 # no server on its socket — it produced a silently EMPTY dump.
+# Write to .tmp first: a failed pg_dumpall would otherwise leave a truncated
+# .sql.gz that looks like a real backup until restore time.
+PG_TMP="${BACKUP_DIR}/postgres_${TIMESTAMP}.sql.gz.tmp"
 if docker compose ps --services --filter status=running 2>/dev/null \
      | grep -q '^postgres$' \
   && docker compose exec -T postgres pg_dumpall -U "${POSTGRES_USER:-opensme}" 2>/dev/null \
-       | gzip > "${BACKUP_DIR}/postgres_${TIMESTAMP}.sql.gz"; then
-  :  # dump written
+       | gzip > "$PG_TMP" \
+  && [ -s "$PG_TMP" ]; then
+  mv "$PG_TMP" "${BACKUP_DIR}/postgres_${TIMESTAMP}.sql.gz"
 else
-  echo "   ⚠ PostgreSQL backup skipped (postgres not running)"
+  rm -f "$PG_TMP"
+  echo "   ⚠ PostgreSQL backup skipped (postgres not running or dump failed)"
 fi
 
 # ── Traefik ACME/SSL ──────────────────────────
@@ -253,12 +262,15 @@ echo "   → Traefik (ACME certs)..."
 # cannot work here: a second traefik instance would collide with the live
 # container's published ports 80/443 (which is why the old approach silently
 # produced no artifact).
+TF_TMP="${BACKUP_DIR}/traefik_${TIMESTAMP}.tar.gz.tmp"
 if docker compose ps --services --filter status=running 2>/dev/null \
      | grep -q '^traefik$' \
   && docker compose exec -T traefik tar czf - -C /etc/traefik . \
-       > "${BACKUP_DIR}/traefik_${TIMESTAMP}.tar.gz" 2>/dev/null; then
-  :  # archive written
+       > "$TF_TMP" 2>/dev/null \
+  && [ -s "$TF_TMP" ]; then
+  mv "$TF_TMP" "${BACKUP_DIR}/traefik_${TIMESTAMP}.tar.gz"
 else
+  rm -f "$TF_TMP"
   echo "   ⚠ Traefik backup skipped (not running or no volume)"
 fi
 
@@ -269,9 +281,13 @@ if [ "$BACKUP_VOLUMES" = true ]; then
   mkdir -p "$PARTIAL_DIR"
 
   # volumes are only consistent while the writers are down
-  echo "🛑 Stopping services for volume backup..."
-  docker compose down --remove-orphans 2>/dev/null || true
-  sleep 5
+  if [ "$NO_STOP" = true ]; then
+    echo "ℹ --no-stop: snapshotting volumes with services running"
+  else
+    echo "🛑 Stopping services for volume backup..."
+    docker compose down --remove-orphans 2>/dev/null || true
+    sleep 5
+  fi
 
   for vol in "${SELECTED_VOLUMES[@]}"; do
     FULL_VOL="${PROJECT_NAME}_${vol}"

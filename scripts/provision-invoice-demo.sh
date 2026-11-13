@@ -58,14 +58,33 @@ if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${FPM}\\(\|$\\)"; t
 Start: docker compose --profile invoice up -d"
 fi
 
-# Helper: execute artisan command inside FPM container
+# Helper: execute artisan command inside FPM container.
+# NOTE: do NOT pass $DRY_RUN/$VERBOSE as docker argv — `false` there is parsed
+# as the container name and every call dies with "No such container: false".
 art() {
-    docker exec $DRY_RUN $VERBOSE $FPM php /var/www/app/artisan "$@" 2>&1
+    if [ "$DRY_RUN" = true ]; then
+        { printf 'docker exec %q php /var/www/app/artisan' "$FPM"
+          printf ' %q' "$@"; printf '\n'; } >&2
+        return 0
+    fi
+    if [ "$VERBOSE" = true ]; then
+        ( set -x; docker exec "$FPM" php /var/www/app/artisan "$@" 2>&1 )
+    else
+        docker exec "$FPM" php /var/www/app/artisan "$@" 2>&1
+    fi
 }
 
 # Helper: run PHP one-liner inside FPM container
 php_exec() {
-    docker exec $DRY_RUN $VERBOSE $FPM php -r "$1" 2>&1
+    if [ "$DRY_RUN" = true ]; then
+        printf 'docker exec %q php -r %q\n' "$FPM" "$1" >&2
+        return 0
+    fi
+    if [ "$VERBOSE" = true ]; then
+        ( set -x; docker exec "$FPM" php -r "$1" 2>&1 )
+    else
+        docker exec "$FPM" php -r "$1" 2>&1
+    fi
 }
 
 # Company constants
@@ -93,6 +112,14 @@ PRODUCTS=(
     "AI Training Workshop|2-day intensive AI training for teams|3500.00"
     "Premium Support|Priority support and maintenance|890.00"
     "E-Book: AI Guide|Comprehensive AI implementation guide|49.00"
+)
+
+# Demo projects (client|name|budget)
+PROJECTS=(
+    "Acme Corporation|AI Readiness Assessment|12000.00"
+    "Acme Corporation|Cloud Migration 2026|48000.00"
+    "Tech Solutions GmbH|Data Platform Build|27500.00"
+    "Data Systems Inc|AI Training Rollout|8500.00"
 )
 
 COLOR_SCHEME="0e578d"
@@ -274,7 +301,7 @@ do_provision() {
         [[ "$cid" == "0" ]] && continue
 
         # Get matching project def
-        for p in "${PROJECTS[@]:-${PROJECTS[0]}}"; do
+        for p in "${PROJECTS[@]}"; do
             local p_client p_name p_budget
             p_client=$(echo "$p" | cut -d'|' -f1)
             p_name=$(echo "$p" | cut -d'|' -f2)

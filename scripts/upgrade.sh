@@ -48,7 +48,9 @@ export COMPOSE_FILE
 
 # COMPOSE may be "docker compose" (two words) or a single binary such as
 # "docker-compose" — never quote it at call sites so word splitting works.
-COMPOSE="${COMPOSE:-docker compose}"
+# Split into an argv array: every call site quotes the command, so a
+# two-word value ("docker compose") must not be treated as one binary name.
+read -r -a COMPOSE_CMD <<< "${COMPOSE:-docker compose}"
 
 # ── Helpers ────────────────────────────────────────────────────────────
 die()  { printf 'upgrade: %s\n' "$*" >&2; exit 1; }
@@ -103,9 +105,9 @@ do_pull() {
   local what="$1"   # "all" or a single service name
   echo "── pulling images (compose: ${COMPOSE_FILE//$NL/ }) ──"
   if [ "$what" = "all" ]; then
-    "$COMPOSE" pull
+    "${COMPOSE_CMD[@]}" pull
   else
-    "$COMPOSE" pull "$what"
+    "${COMPOSE_CMD[@]}" pull "$what"
   fi
   echo "✓ images pulled (${what})"
 }
@@ -115,7 +117,7 @@ wait_for_health() {
   local svc="$1"
   local container status elapsed=0
 
-  container="$("$COMPOSE" ps -q "$svc" 2>/dev/null || true)"
+  container="$("${COMPOSE_CMD[@]}" ps -q "$svc" 2>/dev/null || true)"
   if [ -z "$container" ]; then
     warn "$svc: no running container to inspect — skipping health wait"
     return 0
@@ -144,7 +146,7 @@ do_up() {
   local services=()
 
   if [ "$what" = "all" ]; then
-    mapfile -t services < <("$COMPOSE" config --services)
+    mapfile -t services < <("${COMPOSE_CMD[@]}" config --services)
   else
     services=("$what")
   fi
@@ -156,8 +158,8 @@ do_up() {
   echo "── rolling up ${#services[@]} service(s) ──"
   local svc
   for svc in "${services[@]}"; do
-    echo "   ↻ $COMPOSE up -d --no-deps $svc"
-    "$COMPOSE" up -d --no-deps "$svc"
+    echo "   ↻ ${COMPOSE_CMD[*]} up -d --no-deps $svc"
+    "${COMPOSE_CMD[@]}" up -d --no-deps "$svc"
     if wait_for_health "$svc"; then
       echo "   ✓ $svc healthy"
     else

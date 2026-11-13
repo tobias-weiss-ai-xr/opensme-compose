@@ -103,7 +103,10 @@ if [[ "$FORCE_ENV" == true ]] || [[ ! -f .env ]]; then
 OPENSME_DOMAIN=home.opensme.graphwiz.ai
 PORTAL_DOMAIN=home.opensme.graphwiz.ai
 ZITADEL_DOMAIN=auth.home.opensme.graphwiz.ai
-IDP_URL=https://"$ZITADEL_DOMAIN"
+# Literal on purpose: this heredoc is expanded before .env exists, so a
+# reference to $ZITADEL_DOMAIN would abort under `set -u` (and must not be
+# written into the file as an unexpanded literal either).
+IDP_URL=https://auth.home.opensme.graphwiz.ai
 OPENCLOUD_DOMAIN=cloud.home.opensme.graphwiz.ai
 
 # ── Database ──
