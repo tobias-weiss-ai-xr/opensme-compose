@@ -90,6 +90,11 @@ calrs publishes NO registry image; the project ships a multi-stage Dockerfile
      notifications land in an actual INBOX. Guest addresses outside the
      local domain correctly bounce with `550 Relay not allowed` — the mail
      stack is a closed system by design, see [docs/mail.md](../../docs/mail.md).
+6. `patches/0005-branding-footer.patch` — branding footer on every rendered
+   page (apply AFTER 0004): diffs `templates/base.html` so the default
+   footer becomes "Powered by calrs (https://cal.rs) & openSME
+   (https://github.com/tobias-weiss-ai-xr/opensme-compose)" plus the calrs
+   crab emoji.
 
 ## WARNING: this subtree does NOT self-build
 
@@ -106,6 +111,7 @@ git -C calrs apply images/calrs/patches/0001-oidc-zitadel-compat.patch
 git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
 git -C calrs apply images/calrs/patches/0003-livekit-room-url.patch
 git -C calrs apply images/calrs/patches/0004-smtp-selfsigned-relay.patch
+git -C calrs apply images/calrs/patches/0005-branding-footer.patch
 cd calrs && docker buildx build --network host -t calrs:1.6.0 .
 ```
 

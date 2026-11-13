@@ -232,10 +232,11 @@ but deploying a *fresh* stack still needs the steps below once.
    git -C calrs apply images/calrs/patches/0002-caldav-radicale-resourcetype.patch
    git -C calrs apply images/calrs/patches/0003-livekit-room-url.patch
    git -C calrs apply images/calrs/patches/0004-smtp-selfsigned-relay.patch
+   git -C calrs apply images/calrs/patches/0005-branding-footer.patch
    cd calrs && docker buildx build --network host -t calrs:1.6.0 .
    ```
 
-   Apply the patches **in order 0001 → 0004** (each is a delta against the
+   Apply the patches **in order 0001 → 0005** (each is a delta against the
    previous state). What they cover on top of stock v1.6.0:
 
    - **0001** — OIDC compat for Zitadel (multi-audience ID tokens + userinfo
@@ -256,6 +257,10 @@ but deploying a *fresh* stack still needs the steps below once.
      (accepts the self-signed STARTTLS cert; credentials only when a
      username is set). See “Booking e-mail delivery” and
      [`docs/vc.md`](vc.md).
+   - **0005** — branding footer: the default page footer becomes
+     “Powered by calrs & openSME” (links to https://cal.rs and
+     https://github.com/tobias-weiss-ai-xr/opensme-compose) plus the calrs
+     crab emoji. Pure `templates/base.html` delta — no code, no migrations.
 
    The tag (`calrs:1.6.0`) must match `CALRS_IMAGE_TAG` in `.env`. (The
    live demo image is built as `calrs:1.6.0-livekit` — same patches, the

@@ -1,6 +1,6 @@
 ---
 name: opensme-calrs
-description: CalRS booking system ops for openSME — patch management (0001-0004), SMTP delivery via internal Stalwart relay, per-booking LiveKit room URL {uid} resolution, Radicale CalDAV backend, and build/deploy recipes.
+description: CalRS booking system ops for openSME — patch management (0001-0005), SMTP delivery via internal Stalwart relay, per-booking LiveKit room URL {uid} resolution, Radicale CalDAV backend, and build/deploy recipes.
 ---
 
 # OpenSME CalRS Operations
@@ -9,10 +9,10 @@ Operational knowledge for calrs (olivierlambert/calrs v1.6.0) in openSME-compose
 
 ## Core Contract
 - **Image**: calrs:1.6.0-livekit (digest e25ef57dd548)
-- **Patches**: 0001-0004 in images/calrs/patches/
+- **Patches**: 0001-0005 in images/calrs/patches/
 - **Backend**: Radicale 3.9.0.0 CalDAV, dedicated (not SOGo)
 - **Edge**: calendar.<domain> port 3000, /dav PathPrefix to Radicale
-- **Booking URL**: https://calendar.<domain>/u/<user>/vc
+- **Booking URL**: https://calendar.<domain>/u/demo/vc (verified live; `/u/testuser/vc` returns "Event type not found" — testuser has no event types)
 - **Admin**: https://calendar.<domain>/dashboard (demo@opensme.local)
 - **VC**: https://vc.<domain>/room/{uid} per booking
 
@@ -23,12 +23,13 @@ Operational knowledge for calrs (olivierlambert/calrs v1.6.0) in openSME-compose
 | 0002 | Radicale resourcetype calendar-home-set | 2c3e98d |
 | 0003 | resolve {uid} in guest_reschedule_booking + templates | 68af4d8 |
 | 0004 | accept self-signed certs + no AUTH when username empty | 29e6c5c |
+| 0005 | branding footer "Powered by calrs & openSME" in templates/base.html | 4ae4791 |
 
 ## Build & Deploy
 ```bash
 cd "${CALRS_DIR:-$HOME/build/calrs}"
 git clone https://github.com/olivierlambert/calrs --branch v1.6.0 --depth 1 src
-for p in 0001 0002 0003 0004; do git -C src apply ../patches/${p}-*.patch; done
+for p in 0001 0002 0003 0004 0005; do git -C src apply ../patches/${p}-*.patch; done
 docker buildx build --network host -t calrs:1.6.0-livekit .
 cd /opt/opensme-compose/compose
 docker compose up -d --no-deps --force-recreate calendar
