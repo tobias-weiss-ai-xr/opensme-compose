@@ -149,6 +149,39 @@ MUTATIONS = [
               "JWKS-validating backend (ocis: 'invalid number of segments')",
     },
     {
+        "name": "sso-notes-dialer-pin",
+        "file": "services/notes.yml",
+        "old": "    extra_hosts:\n      - \"${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway\"",
+        "new": "    # extra_hosts pin removed (mutation)",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R10 — a server-side IdP dialer without the host-gateway pin "
+              "dies when a network alias shadows the public FQDN with the "
+              "zitadel container IP (connection refused on :443; notes SSO "
+              "outage 2026-11-13)",
+    },
+    {
+        "name": "sso-notes-jwks-path",
+        "file": "services/notes.yml",
+        "old": 'OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/keys"',
+        "new": 'OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration/jwks"',
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R11 — Zitadel does not implement the OpenID-Connect-"
+              "conventional JWKS path (404 → token validation 500s "
+              "mid-login); only /oauth/v2/keys is real",
+    },
+    {
+        "name": "sso-zitadel-alias-shadow",
+        "file": "idm/zitadel.yml",
+        "old": "        aliases:\n          - auth.opensme.local",
+        "new": "        aliases:\n          - ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R12 — aliasing the PUBLIC IdP hostname makes docker's "
+              "embedded DNS shadow it inside every container with the "
+              "zitadel container IP (plain :8080 only) — connection "
+              "refused on every server-side OIDC call (notes SSO outage "
+              "2026-11-13)",
+    },
+    {
         "name": "webmail-sso-pin-broken",
         "file": "mail/stalwart.yml",
         "old": "    container_name: opensme-stalwart",

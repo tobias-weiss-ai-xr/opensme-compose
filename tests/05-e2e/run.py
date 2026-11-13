@@ -383,6 +383,258 @@ def terminate(session, idp_base, lc_pat, client_uid, sid, stok):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Per-component SSO matrix — the REAL login chain of every OIDC component
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_redirect_uri(authz_url: str) -> tuple:
+    """(redirect_uri, client_id) from an authorize URL's query params."""
+    q = parse_qs(urlparse(authz_url).query)
+    return q.get("redirect_uri", [""])[0], q.get("client_id", [""])[0]
+
+
+def _cb_url(redirect_uri: str, qs: dict) -> str:
+    sep = "&" if "?" in redirect_uri else "?"
+    return redirect_uri + sep + urlencode(qs, doseq=True)
+
+
+def _marker_portal(r, session, base):
+    """Portal callback sets OPENSMEPORTALSESSION; /api/session must say so."""
+    if "OPENSMEPORTALSESSION" not in session.cookies.get_dict():
+        return "no OPENSMEPORTALSESSION cookie after callback"
+    j = session.get(base + "/api/session", timeout=T).json()
+    return None if j.get("authenticated") is True \
+        else f"/api/session not authenticated: {j}"
+
+
+def _marker_notes(r, session, base):
+    """Notes callback must NOT 500 (Django token exchange + user sync)."""
+    if r.status_code >= 500:
+        return f"callback HTTP {r.status_code} (token exchange/JWKS/sync broke)"
+    if not (session.cookies.get_dict()
+            and any(k in ("docs_sessionid", "sessionid", "csrftoken")
+                    for k in session.cookies.get_dict())):
+        return "no session cookie set after callback"
+    return None
+
+
+def _marker_paperless(r, session, base):
+    """Paperless callback lands on /dashboard (login page = failure)."""
+    loc = r.headers.get("Location", "") if r.status_code in REDIRECTS else ""
+    if r.status_code >= 500 or "login" in (loc or "").lower():
+        return f"callback HTTP {r.status_code} Location={loc!r} (expected /dashboard)"
+    return None
+
+
+def _marker_invoices(r, session, base):
+    """Invoice Ninja hands the code to its SPA via /oauth-callback."""
+    loc = r.headers.get("Location", "") if r.status_code in REDIRECTS else ""
+    if r.status_code >= 500:
+        return f"callback HTTP {r.status_code} (Socialite token exchange broke)"
+    if "oauth-callback" not in (loc or "") and r.status_code not in (200,):
+        return f"callback HTTP {r.status_code} Location={loc!r} (expected /oauth-callback)"
+    return None
+
+
+def _marker_calendar(r, session, base):
+    """calrs issues its own session cookie and lands on /dashboard."""
+    if r.status_code >= 500:
+        return f"callback HTTP {r.status_code} (calrs token exchange broke)"
+    if not any("calrs" in k.lower() or "session" in k.lower()
+               for k in session.cookies.get_dict()):
+        return "no calrs session cookie after callback"
+    return None
+
+
+def _marker_bpm(r, session, base):
+    """Operaton redirects to /login?error when the code exchange fails."""
+    final = session.get(r.headers.get("Location", base), timeout=T, \
+                        allow_redirects=True) if r.status_code in REDIRECTS else r
+    url = getattr(final, "url", "")
+    if "/login?error" in url or final.status_code >= 500:
+        return f"landed on {url!r} HTTP {final.status_code} (code exchange failed)"
+    return None
+
+
+def _marker_matrix(r, session, base):
+    """Synapse answers the callback 200 (redirects on to the client)."""
+    if r.status_code >= 500:
+        return f"callback HTTP {r.status_code} (synapse code exchange broke)"
+    return None
+
+
+def _marker_webmail(r, session, base):
+    """SOGo trades the code for its own session (302 /auth/callback#token=)."""
+    if r.status_code >= 500:
+        return f"callback HTTP {r.status_code} (SOGo token exchange broke)"
+    loc = r.headers.get("Location", "")
+    cookies = session.cookies.get_dict()
+    if not (r.status_code in REDIRECTS and "/auth/callback" in loc) \
+            and not cookies:
+        return f"callback HTTP {r.status_code} Location={loc!r} — no session"
+    return None
+
+
+def _marker_cloud(r, session, base):
+    """ocis callback is the SPA page — it must at least serve it."""
+    return None if r.status_code == 200 else f"callback HTTP {r.status_code}"
+
+
+def section_sso_matrix(result: Result, session, disc: dict, idp_base: str,
+                       lc_pat: str, client_uid: str, uid: str, pw: str,
+                       login_name: str, domain: str, portal_base: str,
+                       cloud_base: str, webmail_base: str, matrix_base: str,
+                       notes_base: str, paperless_base: str):
+    """Drive every OIDC component's REAL login chain, end to end.
+
+    For each component: hit the component's own login start URL (the one a
+    browser hits), require it to redirect to the IdP authorize endpoint with
+    the expected registered client, log the user in via the v2 Session API,
+    then GET the component's callback URL (redirect_uri from the authorize
+    URL + the issued code) in the SAME session and assert the component
+    actually established a login.
+
+    This is the test that catches 'authorize works but the component's
+    server-side token exchange 500s' — the notes outage of 2026-11-13
+    (network alias shadowing the IdP FQDN → ConnectionRefused → callback
+    500) passed every redirect-level check and only failed here.
+    """
+    dotenv = load_env_file()
+
+    def cfg(key, default=""):
+        return os.environ.get(key) or dotenv.get(key) or default
+
+    sch = "https://"
+    comps = [
+        # name, start URL builder, client-id env key, marker
+        ("portal",
+         lambda: session.get(portal_base + "/api/auth/login",
+                             allow_redirects=False, timeout=T
+                             ).headers.get("Location", ""),
+         "PORTAL_OIDC_CLIENT_ID", _marker_portal),
+        ("notes",
+         lambda: session.get(notes_base + "/api/v1.0/authenticate/",
+                             allow_redirects=False, timeout=T).headers.get("Location", ""),
+         "NOTES_OIDC_CLIENT_ID", _marker_notes),
+        ("paperless",
+         lambda: _paperless_start(session, paperless_base),
+         "PAPERLESS_OIDC_CLIENT_ID", _marker_paperless),
+        ("invoices",
+         lambda: session.get(f"{sch}invoices.{domain}/auth/oidc",
+                             allow_redirects=False, timeout=T).headers.get("Location", ""),
+         "INVOICENINJA_OIDC_CLIENT_ID", _marker_invoices),
+        ("calendar",
+         lambda: session.get(f"{sch}calendar.{domain}/auth/oidc/login",
+                             allow_redirects=False, timeout=T).headers.get("Location", ""),
+         "CALRS_OIDC_CLIENT_ID", _marker_calendar),
+        ("bpm",
+         lambda: session.get(f"{sch}bpm.{domain}/oauth2/authorization/operaton",
+                             allow_redirects=False, timeout=T).headers.get("Location", ""),
+         "OPERATON_OIDC_CLIENT_ID", _marker_bpm),
+        ("matrix",
+         lambda: session.get(
+             f"{sch}matrix.{domain}/_matrix/client/v3/login/sso/redirect/oidc-zitadel"
+             f"?redirectUrl={sch}chat.{domain}%2F",
+             allow_redirects=False, timeout=T).headers.get("Location", ""),
+         "SYNAPSE_OIDC_CLIENT_ID", _marker_matrix),
+        ("webmail",
+         lambda: _webmail_start(session, webmail_base, login_name.split("@")[0]),
+         "SOGO_OIDC_CLIENT_ID", _marker_webmail),
+        ("cloud", None, "OC_OIDC_CLIENT_ID", _marker_cloud),
+    ]
+
+    result.header(
+        "SSO matrix — full login chain per OIDC component "
+        "(start → authorize → session login → component callback)"
+    )
+
+    for name, start, id_key, marker in comps:
+        client_id = cfg(id_key)
+        if not client_id or client_id.startswith("CHANGEME"):
+            result.skip(f"{name}: no {id_key} configured — SSO not wired")
+            continue
+        try:
+            if name == "cloud":
+                # ocis starts client-side (PKCE SPA) — mint the authorize
+                # request for its registered SPA callback page
+                cb_page = cloud_base + "/oidc-callback.html"
+                authz, _v, _s, _n = authorize_url(disc, client_id, cb_page)
+                redirect_uri, got_client = cb_page, client_id
+            else:
+                authz = start()
+                if not authz:
+                    raise E2EError("start hop gave no authorize redirect "
+                                   "(component down, or misconfigured login "
+                                   "route — check the Traefik router/backend)")
+                redirect_uri, got_client = _extract_redirect_uri(authz)
+                if name == "portal":
+                    # portal start already redirected; the Location IS authorize
+                    pass
+            if not redirect_uri:
+                raise E2EError("authorize URL carries no redirect_uri")
+            if got_client != client_id:
+                raise E2EError(
+                    f"authorize uses client {got_client!r}, expected the "
+                    f"registered {client_id!r} ({id_key} — .env/IdP drift)")
+            if "/oauth/v2/authorize" not in authz:
+                raise E2EError(f"start does not target the authorize endpoint: {authz[:90]}")
+
+            qs, _sess = api_login(session, idp_base, lc_pat, client_uid,
+                                  authz, uid, pw)
+            r = session.get(_cb_url(redirect_uri, qs), allow_redirects=False,
+                            timeout=T)
+            u = urlparse(redirect_uri)
+            problem = marker(r, session, f"{u.scheme}://{u.netloc}")
+            if problem:
+                raise E2EError(f"callback failed: {problem}")
+        except E2EError as e:
+            result.fail(f"{name}: {e}")
+            continue
+        except requests.RequestException as e:
+            result.fail(f"{name}: transport — {e.__class__.__name__}: {e}")
+            continue
+        result.ok(f"{name}: full SSO login — session established")
+
+
+def _paperless_start(session, base):
+    """allauth interstitial: GET renders a 'Continue' form; POST it (CSRF +
+    Referer) to receive the authorize redirect."""
+    start = base + "/accounts/oidc/zitadel/login/"
+    r = session.get(start, allow_redirects=False, timeout=T)
+    if r.status_code != 200:
+        raise E2EError(f"interstitial GET: HTTP {r.status_code}")
+    m = re.search(r'name="csrfmiddlewaretoken"\s+value="([^"]+)"', r.text)
+    if not m:
+        raise E2EError("interstitial page has no csrfmiddlewaretoken")
+    r2 = session.post(start, data={"csrfmiddlewaretoken": m.group(1)},
+                      headers={"Referer": start},
+                      allow_redirects=False, timeout=T)
+    if r2.status_code not in REDIRECTS:
+        raise E2EError(f"interstitial POST: HTTP {r2.status_code} "
+                       "(expected the authorize redirect)")
+    return r2.headers.get("Location", "")
+
+
+def _webmail_start(session, webmail_base, uid):
+    """sogo6 publishes its login mode as JSON; SSO users get the authorize
+    location for <uid>@<tenant> (tenant = parent domain of the webmail host)."""
+    host = urlparse(webmail_base).hostname or ""
+    # SOGo derives the tenant from the USER's login domain, which for this
+    # stack is the parent domain of the webmail host (webmail.home.x → home.x)
+    tenant = host.split(".", 1)[1] if host.count(".") >= 2 else domain
+    r = session.get(
+        webmail_base + "/api/user/v1/auth/mode",
+        params={"username": f"{uid}@{tenant}"},
+        timeout=T,
+    )
+    if r.status_code != 200:
+        raise E2EError(f"auth/mode: HTTP {r.status_code}")
+    j = r.json().get("data", r.json())  # sogo6 wraps the payload in "data"
+    if j.get("kind") != "sso" or not j.get("location"):
+        raise E2EError(f"auth/mode says {j.get('kind')!r} — SSO not offered")
+    return j["location"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Portal login (intercom/polls are authenticated surfaces)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1565,6 +1817,18 @@ def main() -> bool:
     if not args.skip_apps:
         section_opencloud(result, session, cloud_base, idp_base,
                           client_id=cfg("OC_OIDC_CLIENT_ID", "opencloud"))
+
+    # 9) Per-component SSO matrix: the REAL login chain of every OIDC
+    #    component (redirect-level checks above miss server-side callback
+    #    breakage — the notes 500 outage of 2026-11-13 passed those).
+    if flows_ok and not args.skip_apps:
+        try:
+            section_sso_matrix(result, session, disc, idp_base, lc_pat,
+                               client_uid, login_uid, pw, login_name, domain,
+                               portal_base, cloud_base, webmail_base,
+                               matrix_base, notes_base, paperless_base)
+        except E2EError as e:
+            result.fail(f"sso matrix: {e}")
 
     return result.summary()
 

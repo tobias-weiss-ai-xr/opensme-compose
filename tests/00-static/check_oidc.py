@@ -60,6 +60,25 @@ exists, but the stack must still complete a real login):
        (or the SOGO_OIDC_DOMAIN override) and register BOTH the bare form
        and the tenant-suffixed form.
 
+  R10 — IdP dialer pin: every compose service that dials
+       https://${ZITADEL_DOMAIN} SERVER-SIDE (OIDC token/userinfo/JWKS,
+       issuer URIs) must pin the hostname to host-gateway via extra_hosts.
+       Inside the compose network a network alias on the zitadel service
+       can shadow the public FQDN with the zitadel container IP, where
+       only plain :8080 listens — server-side TLS calls then die with
+       connection refused and the login 500s after the browser callback
+       (live notes SSO outage 2026-11-13). Browser-facing URL vars
+       (IDP_URL/OC_IDP_URL) are exempt — the user's browser resolves the
+       public FQDN via public DNS — as are services that backchannel to
+       the internal http://zitadel:8080 listener (portal).
+  R11 — JWKS path: OIDC_OP_JWKS_ENDPOINT must use Zitadel's real key path
+       /oauth/v2/keys — the OpenID-Connect-conventional
+       /.well-known/openid-configuration/jwks 404s on Zitadel and kills
+       the callback with a 500 during token validation.
+  R12 — alias shadow guard: the zitadel service network alias must NEVER
+       be ${ZITADEL_DOMAIN} — see R10. The alias is reserved for the
+       non-public auth.opensme.local direct-connect name.
+
 Pure file inspection — no docker, runs on any fresh checkout.
 
 Usage: python3 tests/00-static/check_oidc.py
@@ -72,9 +91,10 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import Result, ROOT
+from conftest import ComposeLoader, Result, ROOT
 
 ZITADEL_CLIENT_SH = ROOT / "scripts" / "zitadel-client.sh"
+SYNAPSE_SETUP_SH = ROOT / "services" / "synapse-setup.sh"
 ENV_EXAMPLE = ROOT / ".env.example"
 OPENCLOUD_YML = ROOT / "opencloud" / "opencloud.yml"
 ELEMENT_YML = ROOT / "services" / "element.yml"
@@ -422,6 +442,183 @@ def check_sogo_redirect_allowlist(result: Result) -> None:
         )
 
 
+# ── Runtime SSO invariants (R10–R12) ───────────────────────────
+
+DIAL_URL_RE = re.compile(r"https://\$\{ZITADEL_DOMAIN[^}]*\}")
+# baked into SPA/nginx for the USER's browser only (public DNS resolves it)
+BROWSER_ONLY_VARS = {"IDP_URL", "OC_IDP_URL"}
+# services that dial the IdP server-side but whose issuer URL arrives from
+# .env (no static ${ZITADEL_DOMAIN} literal in compose to scan): enforce the
+# pin via the netns-owning service (network_mode: service:X shares it)
+KNOWN_NETNS_DIALERS = {"invoiceninja": "invoiceninja-web"}
+
+
+def _pinned(svc: dict) -> bool:
+    """True if svc pins the IdP hostname to host-gateway via extra_hosts."""
+    hosts = svc.get("extra_hosts") or []
+    entries = hosts.values() if isinstance(hosts, dict) else hosts
+    for e in entries:
+        if not isinstance(e, str) or not e.endswith(":host-gateway"):
+            continue
+        host = e.rsplit(":", 1)[0]
+        if "${ZITADEL_DOMAIN" in host or host.startswith("auth."):
+            return True
+    return False
+
+
+def _env(svc: dict) -> dict:
+    """Flattened service environment ({} when absent)."""
+    env = svc.get("environment") or {}
+    if isinstance(env, dict):
+        return dict(env)
+    out = {}
+    for item in env:
+        if isinstance(item, str) and "=" in item:
+            k, _, v = item.partition("=")
+            out[k] = v
+    return out
+
+
+def check_idp_dialer_pins(result: Result) -> None:
+    """R10 — every server-side dialer of https://${ZITADEL_DOMAIN} needs the
+    extra_hosts host-gateway pin (directly, or on its netns owner)."""
+    loader = ComposeLoader(ROOT)
+    loader.load()
+    services = loader.services
+
+    dialers: dict[str, str] = {}
+    for name, entry in services.items():
+        env = _env(entry["data"])
+        if any(
+            var not in BROWSER_ONLY_VARS
+            and isinstance(val, str)
+            and DIAL_URL_RE.search(val)
+            for var, val in env.items()
+        ):
+            dialers[name] = "env"
+    # synapse's issuer lives in the generated homeserver.yaml, not in compose
+    if SYNAPSE_SETUP_SH.is_file() and DIAL_URL_RE.search(SYNAPSE_SETUP_SH.read_text()):
+        dialers.setdefault("synapse", "services/synapse-setup.sh oidc_providers issuer")
+
+    for name, src in sorted(dialers.items()):
+        entry = services.get(name) or {}
+        svc = entry.get("data") or {}
+        env = _env(svc)
+        netmode = svc.get("network_mode") or ""
+        if isinstance(netmode, str) and netmode.startswith("service:"):
+            owner = netmode.split("service:", 1)[1].strip()
+            owner_svc = (services.get(owner) or {}).get("data") or {}
+            if _pinned(owner_svc):
+                result.ok(
+                    f"{name}: IdP dialer — netns owner '{owner}' pinned "
+                    "to host-gateway (extra_hosts)"
+                )
+            else:
+                result.fail(
+                    f"{name} dials https://${{ZITADEL_DOMAIN}} server-side "
+                    f"({src}) through the netns of '{owner}', but '{owner}' "
+                    "has no extra_hosts '<idp>:host-gateway' pin — inside "
+                    "the compose network the IdP hostname can resolve to "
+                    "the zitadel container IP where :443 is not listening; "
+                    "the OIDC callback 500s on token exchange "
+                    "(notes SSO outage 2026-11-13)"
+                )
+        elif _pinned(svc):
+            result.ok(f"{name}: IdP dialer pinned to host-gateway (extra_hosts)")
+        elif any(INTERNAL := ("http://zitadel" in v for v in env.values())):
+            result.ok(
+                f"{name}: dials the internal http://zitadel:8080 listener "
+                "(no TLS pin needed)"
+            )
+        else:
+            result.fail(
+                f"{name} dials https://${{ZITADEL_DOMAIN}} server-side ({src}) "
+                "but has no extra_hosts '<idp>:host-gateway' pin — inside "
+                "the compose network the IdP hostname can resolve to the "
+                "zitadel container IP where :443 is not listening; the OIDC "
+                "callback 500s on token exchange (notes SSO outage 2026-11-13)"
+            )
+
+    # issuer-from-.env dialers: pin enforced on the netns owner
+    for name, owner in sorted(KNOWN_NETNS_DIALERS.items()):
+        if name not in services:
+            continue  # optional stack not present in this checkout
+        owner_svc = (services.get(owner) or {}).get("data") or {}
+        if _pinned(owner_svc):
+            result.ok(
+                f"{name}: IdP dialer (issuer from .env) — netns owner "
+                f"'{owner}' pinned to host-gateway"
+            )
+        else:
+            result.fail(
+                f"{name} exchanges OIDC tokens against https://"
+                "${ZITADEL_DOMAIN} (issuer from .env) through the netns of "
+                f"'{owner}', but '{owner}' has no extra_hosts "
+                "'<idp>:host-gateway' pin (notes SSO outage 2026-11-13)"
+            )
+
+    if not dialers and not KNOWN_NETNS_DIALERS:
+        result.fail("no IdP dialers found — is the compose set stale?")
+
+
+def check_jwks_endpoint(result: Result) -> None:
+    """R11 — JWKS endpoint vars must use Zitadel's real key path."""
+    loader = ComposeLoader(ROOT)
+    loader.load()
+    checked = 0
+    for name, entry in sorted(loader.services.items()):
+        for var, val in sorted(_env(entry["data"]).items()):
+            if "JWKS" not in var.upper() or not isinstance(val, str) or not val:
+                continue
+            if "${" in val and ":-" in val and "/oauth" not in val                     and "/.well-known" not in val:
+                continue  # fully delegated to .env, nothing to verify
+            checked += 1
+            if "/.well-known" in val:
+                result.fail(
+                    f"{name}: {var} uses the OpenID-Connect-conventional "
+                    "/.well-known path — Zitadel does not implement it "
+                    "(404 → token validation 500s mid-login); use "
+                    "/oauth/v2/keys (the jwks_uri Zitadel publishes)"
+                )
+            elif "/oauth/v2/keys" in val:
+                result.ok(f"{name}: {var} uses Zitadel's real JWKS path")
+            else:
+                result.fail(
+                    f"{name}: {var} is neither /oauth/v2/keys nor clearly "
+                    "delegated to .env — cannot verify the JWKS path"
+                )
+    if not checked:
+        result.fail("no JWKS endpoint var found in compose — contract drifted?")
+
+
+def check_zitadel_alias_shadow(result: Result) -> None:
+    """R12 — the zitadel network alias must not shadow the public FQDN."""
+    data = yaml.safe_load(ZITADEL_YML.read_text()) or {}
+    svc = (data.get("services") or {}).get("zitadel") or {}
+    nets = svc.get("networks") or {}
+    net = nets.get("opensme-net") if isinstance(nets, dict) else None
+    aliases = net.get("aliases") if isinstance(net, dict) else None
+    aliases = aliases or []
+    shadow = [
+        a for a in aliases
+        if isinstance(a, str) and "${ZITADEL_DOMAIN" in a
+    ]
+    if shadow:
+        result.fail(
+            f"idm/zitadel.yml: zitadel network alias {shadow!r} shadows the "
+            "PUBLIC IdP hostname: docker's embedded DNS then resolves it to "
+            "the zitadel container IP for EVERY container on opensme-net, "
+            "where only plain :8080 listens — server-side OIDC calls to "
+            "https://auth.<domain> die with connection refused (notes SSO "
+            "outage 2026-11-13). Alias the non-public auth.opensme.local "
+            "instead; public-hostname dialers pin via extra_hosts (R10)"
+        )
+    else:
+        result.ok(
+            "zitadel network alias does not shadow the public IdP FQDN"
+        )
+
+
 # ── Checks ─────────────────────────────────────────────────────
 
 def main() -> bool:
@@ -509,6 +706,15 @@ def main() -> bool:
 
     # ── R9: sogo6 webmail callback allowlist (tenant-domain mismatch) ──
     check_sogo_redirect_allowlist(result)
+
+    # ── R10: server-side IdP dialers must pin the hostname (alias shadow) ──
+    check_idp_dialer_pins(result)
+
+    # ── R11: JWKS endpoint must be Zitadel's real key path ──
+    check_jwks_endpoint(result)
+
+    # ── R12: zitadel network alias must not shadow the public FQDN ──
+    check_zitadel_alias_shadow(result)
 
     return result.summary()
 
