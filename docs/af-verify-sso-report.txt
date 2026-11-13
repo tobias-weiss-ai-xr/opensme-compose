@@ -1,0 +1,55 @@
+Verify-SSO report — task T4-verify-sso
+========================================
+Date: 2026-11-13  Branch: tf/T4-verify-sso  Worktree: T4-verify-sso
+
+Smoke runs (scripts/provisioned-sso-smoke.sh, components portal/notes/webmail):
+  tweiss     -> PASS portal, PASS notes, PASS webmail  (SSO-SMOKE-OK, exit 0)
+  dummy.user -> PASS portal, PASS notes, PASS webmail  (SSO-SMOKE-OK, exit 0)
+  First-try passes on both users; no single-component provisioning
+  (provision-demo-users.sh --component <c> --domain ...) was needed.
+
+Regression matrix (python3 tests/05-e2e/run.py home.opensme.graphwiz.ai):
+  Invocation (recipe from the task text):
+    sudo -n env E2E_ZITADEL_PAT=<from /tmp/opencode/machine-pat>
+      E2E_ZITADEL_LOGINCLIENT_PAT=<from /tmp/opencode/lc-pat>
+      E2E_ZITADEL_LOGIN_NAME=testuser ZITADEL_ADMIN_PASSWORD=...
+      + OIDC client-id and deployment-domain variables read from
+        /opt/opensme-compose/compose/.env (PORTAL_/NOTES_/PAPERLESS_/
+        INVOICENINJA_/CALRS_/OPERATON_/SYNAPSE_/SOGO_/OC_ OIDC_CLIENT_ID,
+        PORTAL_DOMAIN, SOGO_DOMAIN, OPENCLOUD_DOMAIN, ZITADEL_DOMAIN,
+        OPENSME_DOMAIN, NOTES_DOMAIN) python3 tests/05-e2e/run.py ...
+    Secret values were never printed.
+  First attempt without the .env domain overrides: the suite derives
+    portal.<domain> as the portal base, but this deployment serves the
+    portal at PORTAL_DOMAIN=home.opensme.graphwiz.ai — portal.home.* is
+    unrouted (Traefik default cert), so the portal row failed TLS
+    verification and the sogo6 tenant probe had no SOGO_DOMAIN. Not a
+    code defect: the hostnames live in the compose .env; once passed
+    through, everything is green (TLS verification stayed ON: verify=True).
+  Final run:
+    SSO matrix: 9 components (portal, notes, paperless, invoices,
+      calendar, bpm, matrix, webmail, cloud) — 9/9 PASS, each the full
+      login chain start -> authorize -> session login -> component callback.
+    Total: 50 passed, 0 failed, 0 warnings, 3 skipped (53 checks) — PASS.
+    Skips: ticketing not running, cms not running, store not running —
+      the previously known skips (optional stacks not deployed).
+    Notable passes: portal landing + security headers + /health; throw-away
+      OIDC app bootstrap → PKCE login as testuser → token/userinfo/id_token
+      claims; single sign-on across two apps; logout terminates the IdP
+      session; freshly provisioned identity completes SSO and is then
+      deleted/rejected; sogo6 SSO redirect targets its registered client.
+
+Acceptance gate (verbatim):
+  bash scripts/provisioned-sso-smoke.sh tweiss >/dev/null 2>&1 && \
+  bash scripts/provisioned-sso-smoke.sh dummy.user >/dev/null 2>&1 && \
+  echo GATE-T4-OK
+  -> GATE-T4-OK
+
+No code changes were required — smoke script and regression matrix pass
+as-is; this report is the only change on the branch.
+
+Scope note: the task text names .af-verify-sso-report.txt in the repo
+root, but the enforced change scope is scripts/, tests/, docs/ and a
+repo-root write was mechanically rejected (T4 attempt 1, same for the
+T3 first attempt). Per the successful T3 pattern this tracked summary
+lives at docs/af-verify-sso-report.txt and no repo-root file is created.
