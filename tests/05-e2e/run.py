@@ -1208,14 +1208,18 @@ def section_user_lifecycle(result: Result, session, disc: dict, client_id: str,
             result.fail("provisioned user login produced no code")
 
         # 3) deletion → the dead identity must be rejected while the app is
-        #    still alive (isolate the user-lifecycle assertion)
+        #    still alive (isolate the user-lifecycle assertion).
+        #    Mint a FRESH authorization request: `authz` above was already
+        #    consumed by the successful login, so replaying it would fail for
+        #    the wrong reason (single-use code) and mask a live identity.
+        authz2, _v2, _s2, _n2 = authorize_url(disc, client_id, callback)
         r = session.delete(idp_base + f"/v2/users/{uid}", headers=H, timeout=T)
         if r.status_code >= 300:
             result.fail(f"user deletion failed: HTTP {r.status_code}")
             return
         result.ok("deleted identity")
         try:
-            api_login(session, idp_base, lc_pat, client_uid, authz, uid, pw)
+            api_login(session, idp_base, lc_pat, client_uid, authz2, uid, pw)
             result.fail("deleted identity was still able to log in")
         except E2EError:
             result.ok("deleted identity is rejected by the IdP")

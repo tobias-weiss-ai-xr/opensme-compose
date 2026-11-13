@@ -31,9 +31,12 @@ from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conftest import Result
 
-# Mock LLM server: binds to host.docker.internal so the bot container can reach it
+# Mock LLM server: binds on all interfaces so the bot container can reach it
+# via host.docker.internal (a loopback bind would be unreachable from the container)
 MOCK_LLM_PORT = 11808
-MOCK_LLM_HOST = "localhost"
+MOCK_LLM_HOST = "0.0.0.0"
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 CAPTURED_REQUESTS = []
 CAPTURE_LOCK = threading.Lock()
 
@@ -121,7 +124,8 @@ def docker(*args, **kw):
 
 def start_bot(mock_llm_url: str) -> bool:
     """Start serve-mode dev-agent container wired to our mock LLM."""
-    state_dir = Path("tests/tmp/outbound-state")
+    # Docker requires an absolute source path for bind mounts
+    state_dir = (REPO_ROOT / "tests/tmp/outbound-state").resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
 
     env = {
@@ -220,7 +224,7 @@ def check_llm_outbound_hygiene(result: Result) -> None:
 
         # Trigger reconcile → bot will call our mock LLM
         if trigger_reconcile() != 0:
-            result.value("warn", "reconcile trigger non-zero (bot has no compose are to check)")
+            result.warn("reconcile trigger non-zero (bot has no compose area to check)")
 
         # Give the LLM call a moment to land
         time.sleep(3)
@@ -229,8 +233,16 @@ def check_llm_outbound_hygiene(result: Result) -> None:
         if violations:
             for v in violations:
                 result.fail(v)
+        elif not CAPTURED_REQUESTS:
+            # Fail closed: if the bot never reached the mock LLM we have
+            # proved nothing about outbound payload contents.
+            result.fail(
+                "AE1: no outbound LLM request captured — cannot verify "
+                "payload hygiene (bot did not call the mock backend)")
         else:
-            result.ok("AE1: no sensitive data leaks in outbound LLM payloads")
+            result.ok(
+                f"AE1: no sensitive data leaks in {len(CAPTURED_REQUESTS)} "
+                "outbound LLM payload(s)")
     except KeyboardInterrupt:
         result.fail("interrupted")
     except Exception as e:

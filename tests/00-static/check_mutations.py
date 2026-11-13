@@ -268,8 +268,9 @@ MUTATIONS = [
         "file": "tests/06-security/llm_outbound.py",
         "old": 'r"(?:password|passwd',
         "new": 'r"(?:NEVER_MATCH',
-        "check": "python3 -m py_compile tests/06-security/llm_outbound.py",
-        "why": "AE1: llm_outbound secrets regex must parse; weakening it should fail py_compile (syntax)"
+        "check": "tests/00-static/check_outbound_patterns.py",
+        "why": "AE1: the outbound-payload catalog must still detect secrets; "
+              "weakening a pattern must fail check_outbound_patterns.py"
     },
     {
         "name": "boot-core-image-pinned",

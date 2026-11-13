@@ -213,7 +213,12 @@ def main():
         for vol in data.get("volumes") or []:
             if not isinstance(vol, str) or ":" not in vol:
                 continue
-            src, dst = (p.strip() for p in vol.rsplit(":", 1)[:2])
+            # src:dst[:mode] — parse left-to-right so a trailing :ro/:rw
+            # does not become the destination
+            parts = [p.strip() for p in vol.split(":")]
+            if len(parts) < 2:
+                continue
+            src, dst = parts[0], parts[1]
             dst_target = dst.split(":")[0].lstrip("/")
             if not dst_target.endswith(".sh"):
                 continue

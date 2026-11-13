@@ -76,6 +76,7 @@ CI step or on its documented allowlist.
 - [x] `check_mail_backend.py` — mail backend switch (XOR)
 - [x] `check_mutations.py` — every wired check has teeth (mutation-flipped red) or a documented shadow-incompat reason; prints `mutation-coverage: N/M` and fails on any uncovered wired check
 - [x] `check_oidc.py` — Zitadel OIDC client registration
+- [x] `check_outbound_patterns.py` — outbound LLM payload pattern catalog still detects secrets/IPs/paths/hosts (teeth for AE1)
 - [x] `check_webmail_sso.py` — stalwart webmail-SSO backchannel: oidc directory, idpplain userinfo hop (:8081, external Host), no hardcoded-IP pin in the shared compose (fleet overlay injects host-gateway)
 - [x] `check_perf.py` — budgets, limits, log caps, healthchecks
 - [x] `check_platform.py` — platform versions (k3s/docker)
