@@ -26,6 +26,14 @@ services:
     container_name: opensme-sogo
     restart: unless-stopped
     stop_grace_period: 60s
+    extra_hosts:
+      # SOGo dials the public IdP hostname server-side (ZITADEL_OIDC_URL
+      # discovery + token/userinfo backchannel). Pin it to host-gateway so
+      # a docker network alias on the zitadel service can never shadow the
+      # FQDN with the zitadel container IP (where only plain :8080 listens
+      # — connection refused on :443, exactly the notes SSO outage of
+      # 2026-11-13). Same contract as paperless/notes/opencloud.
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     tmpfs:
       - /tmp
     depends_on:

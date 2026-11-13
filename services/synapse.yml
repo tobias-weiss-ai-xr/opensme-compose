@@ -29,6 +29,15 @@ services:
     container_name: opensme-synapse
     restart: unless-stopped
     profiles: ["chat"]
+    extra_hosts:
+      # synapse dials the public IdP hostname server-side (oidc_providers
+      # issuer in services/synapse-setup.sh — discovery + code exchange +
+      # userinfo). Pin it to host-gateway so a docker network alias on the
+      # zitadel service can never shadow the FQDN with the zitadel
+      # container IP (plain :8080 only → connection refused on :443; the
+      # notes SSO outage pattern of 2026-11-13). Same contract as
+      # paperless/notes/opencloud/sogo.
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     environment:
       DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
       SYNAPSE_SERVER_NAME: "matrix.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"

@@ -246,6 +246,15 @@ services:
     container_name: opensme-invoiceninja-web
     restart: unless-stopped
     profiles: ["invoice"]
+    # The invoiceninja FPM container shares THIS network namespace
+    # (network_mode: service:invoiceninja-web), so Laravel Socialite's
+    # server-side calls to the OIDC issuer (https://${ZITADEL_DOMAIN})
+    # resolve through these hosts. Docker DNS maps that FQDN to the zitadel
+    # container where :443 blackholes — the /auth/oidc callback hangs until
+    # timeout (seen live 2026-11-13). Pin the FQDN to the compose gateway so
+    # TLS terminates at traefik (same pattern as notes/paperless/camunda).
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.home.opensme.graphwiz.ai}:host-gateway"
     volumes:
       - ./services/invoice-ninja/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - invoiceninja-public:/var/www/app/public:ro

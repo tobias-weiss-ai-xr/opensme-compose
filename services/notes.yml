@@ -28,6 +28,17 @@ services:
     image: lasuite/impress-backend:latest
     container_name: opensme-notes-backend
     restart: unless-stopped
+    # mozilla-django-oidc exchanges the callback code against
+    # https://${ZITADEL_DOMAIN}/oauth/v2/token. The zitadel service carries
+    # that FQDN as a docker network alias, so embedded DNS maps it to the
+    # zitadel container — where only :8080/http listens and the https:443
+    # token exchange dies with Connection refused (seen live 2026-11-13:
+    # every /api/v1.0/callback/?code=… 500'd). Pin the FQDN to the compose
+    # gateway: traefik (host network, :443) terminates TLS and routes by
+    # Host header back to zitadel (same pattern as paperless/camunda/
+    # opencloud/calendar).
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
     profiles: ["notes"]
     environment:
       # DO NOT set DJANGO_SETTINGS_MODULE — the lasuite/impress-backend image
@@ -49,7 +60,11 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/1
       OIDC_RP_CLIENT_ID: ${NOTES_OIDC_CLIENT_ID:-opensme-notes}
       OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:?NOTES_OIDC_CLIENT_SECRET must be set in .env}
-      OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/.well-known/openid-configuration/jwks"
+      # Zitadel serves JWKS at /oauth/v2/keys (its discovery jwks_uri) — the
+      # conventional /.well-known/openid-configuration/jwks path is NOT
+      # implemented and 404s, which 500s every callback during ID-token
+      # validation (seen live 2026-11-13).
+      OIDC_OP_JWKS_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/keys"
       OIDC_OP_AUTHORIZATION_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/authorize"
       OIDC_OP_TOKEN_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oauth/v2/token"
       OIDC_OP_USER_ENDPOINT: "https://${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}/oidc/v1/userinfo"
@@ -68,6 +83,11 @@ services:
       AWS_S3_ACCESS_KEY_ID: ${OC_S3_ACCESS_KEY:-minio}
       AWS_S3_SECRET_ACCESS_KEY: ${OC_S3_SECRET_KEY:?OC_S3_SECRET_KEY must be set in .env}
       AWS_STORAGE_BUCKET_NAME: notes-media
+    # The image entrypoint does NOT run migrations (it execs the CMD
+    # directly). A fresh database then 500s every OIDC callback with
+    # `relation "impress_user" does not exist` (seen live 2026-11-13),
+    # so migrate before serving. `exec` keeps uvicorn as PID 1 for signals.
+    command: ["sh", "-c", "python manage.py migrate --noinput && exec uvicorn --app-dir=/app --host=0.0.0.0 --timeout-graceful-shutdown=300 --limit-max-requests=20000 --lifespan=off impress.asgi:application"]
     volumes:
       - notes-data:/data
     networks:

@@ -130,8 +130,16 @@ services:
         # Alias so SOGo (and other internal services) can reach Zitadel as
         # auth.opensme.local without Traefik. Required when ZITADEL_OIDC_URL
         # points to http://auth.opensme.local:8080 (direct, no TLS terminator).
+        # NEVER alias the PUBLIC ${ZITADEL_DOMAIN} here: docker's embedded DNS
+        # would shadow the public IdP hostname inside EVERY container on this
+        # network and point it at the zitadel container, where only plain
+        # :8080 listens — every server-side OIDC call to https://auth.<domain>
+        # then dies with connection refused (live outage: notes SSO 500,
+        # 2026-11-13). Server-side dialers pin the hostname to host-gateway
+        # via extra_hosts instead; this alias stays reserved for the
+        # non-public .local name.
         aliases:
-          - ${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}
+          - auth.opensme.local
     labels:
       - "traefik.enable=true"
       - "com.centurylinklabs.watchtower.enable=false"
