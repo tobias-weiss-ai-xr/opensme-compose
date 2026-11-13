@@ -4,6 +4,12 @@
 
 services:
   opencloud:
+    # TODO(2026-11-13): upgrade to our patched 9.1.0 image — built from source
+    # with klauspost/compress v1.20.2 (fixes GO-2026-6865, panic on two-block
+    # frames; upstream 8.0.1/rolling still ships v1.20.1):
+    #   registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix
+    #   ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0   (both sha256:19eec92c19a5110b3900bf730be789bdc536c10beeb826b064b160120d7e869e)
+    # Verify OIDC + S3 config against 9.1.0 before flipping (major bump 8→9).
     image: opencloudeu/opencloud-rolling:8.0.1
     compose_file: opencloud/opencloud.yml
     required: false
