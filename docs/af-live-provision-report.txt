@@ -1,0 +1,51 @@
+Live provisioning report — task T3-live-provision
+====================================================
+Host: bare host, user weiss (docker group); Zitadel reached via Traefik edge
+Connection mode: edge (opensme-zitadel DNS unresolvable from host) ->
+  https://auth.home.opensme.graphwiz.ai with machine PAT from env
+  ZITADEL_PAT (curl --resolve auth.home.opensme.graphwiz.ai:443:127.0.0.1)
+Commands:
+  export ZITADEL_PAT=$(cat /tmp/opencode/machine-pat)   # value never printed
+  export ZITADEL_singleSignOnDomain=home.opensme.graphwiz.ai
+  export ZITADEL_EXTERNAL=auth.home.opensme.graphwiz.ai
+  bash scripts/provision-demo-users.sh --component all --domain home.opensme.graphwiz.ai   (run 1)
+  bash scripts/provision-demo-users.sh --component all --domain home.opensme.graphwiz.ai   (run 2, unchanged)
+  bash scripts/provision-admin.sh
+  bash scripts/provision-admin.sh --check
+
+PAT validation: POST {} /management/v1/projects/_search -> HTTP 200
+
+Zitadel user counts (POST {} /management/v1/users/_search, jq '.result | length'):
+  before run 1: 18
+  after  run 1: 18
+  after  run 2: 18
+Idempotency: identical across the two runs (18 == 18) — no duplicates created.
+Count note: task expected 13/14; the live stack legitimately carries 18 users =
+  14 demo users (bootstrap/demo-users.json, incl. testuser + dummy.user) plus
+  4 service accounts (zitadel-admin@*, opensme-login-client, opensme-automation,
+  testuer@opensme.auth.home.opensme.graphwiz.ai left over from an SSO test).
+
+Run results (both runs):
+  zitadel   14/14 active demo users, all ✓ (skip/update path on 2nd run)
+  operaton  groups ok; "done: 0 created, 14 skipped"
+  synapse   all 14 users already exist
+  paperless all 14 users already exist
+  stalwart  14 SOGo rows; Stalwart principals auto-provision on first login
+  sogo6     14 webmail users in opensme-sogo6-postgres (sogo.users)
+No component failures; no container-log debugging needed; no retries.
+
+Admin coverage (tweiss):
+  zitadel   already org member (ORG_OWNER covered by prior membership)
+  paperless already superuser+staff (verify pass confirms)
+  operaton  opensme-management group not present on this engine; tweiss is
+            engine admin (camunda-admin) — accepted by the script's check
+  synapse   already admin=1 in the user directory
+  bash scripts/provision-admin.sh --check -> ADMIN-COVERAGE-OK
+
+Acceptance gate (verbatim):
+  bash scripts/provision-admin.sh --check 2>&1 | grep -q ADMIN-COVERAGE-OK && echo GATE-T3-OK
+  -> GATE-T3-OK
+
+Scope note: this report lives in docs/ (allowed paths: scripts/, bootstrap/,
+docs/). A previous attempt wrote .af-live-provision-report.txt to the repo
+root and was rejected as out of scope; the counts are recorded here instead.
