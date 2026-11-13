@@ -31,8 +31,10 @@ services:
     # with klauspost/compress v1.20.2 — fixes GO-2026-6865 (panic on two-block
     # frames); upstream 8.0.1/rolling still ships the vulnerable v1.20.1.
     # sha256:19eec92c19a5110b3900bf730be789bdc536c10beeb826b064b160120d7e869e
-    # Same image also at ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0 (and :latest).
-    image: registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix
+    # Compose tracks the public ghcr mirror (same digest); the private alias
+# registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix serves the
+# identical image.
+    image: ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0
     container_name: opensme-opencloud
     restart: unless-stopped
     stop_grace_period: 60s
