@@ -145,6 +145,17 @@
       "password": "DemoPass123!",
       "roles": ["devOps"],
       "department": "Engineering"
+    },
+    {
+      "id": "dummy.user",
+      "username": "dummy.user",
+      "firstName": "Dummy",
+      "lastName": "User",
+      "displayName": "Dummy User",
+      "email": "dummy.user@home.opensme.graphwiz.ai",
+      "password": "DemoPass123!",
+      "roles": ["support"],
+      "department": "Support"
     }
   ],
   "roles": {
