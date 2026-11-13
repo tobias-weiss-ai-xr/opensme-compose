@@ -152,7 +152,7 @@
       "firstName": "Dummy",
       "lastName": "User",
       "displayName": "Dummy User",
-      "email": "dummy.user@home.opensme.graphwiz.ai",
+      "email": "dummy.user@opensme.local",
       "password": "DemoPass123!",
       "roles": ["support"],
       "department": "Support"
