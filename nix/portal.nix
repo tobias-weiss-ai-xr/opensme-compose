@@ -37,9 +37,12 @@
   '';
 
   # busybox applets on /bin (the Dockerfile ships busybox next to the
-  # distroless runtime for operational/debug access).
+  # distroless runtime for operational/debug access) PLUS the binary at
+  # the Dockerfile's exact /busybox path — the compose healthcheck runs
+  # ["/busybox","wget",…,"http://127.0.0.1:8080/health"].
   shkit = pkgs.runCommand "portal-shkit" {} ''
     mkdir -p $out/bin
+    install -m 0555 ${pkgs.busybox}/bin/busybox $out/busybox
     for app in sh env ls cp mv rm mkdir chmod id uname sleep date head tail \
                grep find wc touch dirname basename readlink cat echo printf; do
       ln -s ${pkgs.busybox}/bin/busybox $out/bin/$app

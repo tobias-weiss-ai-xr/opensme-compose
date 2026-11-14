@@ -52,6 +52,20 @@ stable `nixos-25.05` input.
 - **No setuid/setgid binaries** in any of the three owned images (verified by
   `docker export | tar -tv` scans) — matches the compose `cap_drop: ALL`
   posture.
+- **docker >= 29 openat2 caveat**: `docker exec` and compose healthchecks
+  walk `/etc/passwd` + `/etc/group` with `RESOLVE_BENEATH` and fail across
+  the layer boundary when those are symlinks into `/nix/store`
+  (*"openat etc/group: path escapes from parent"*). calrs therefore
+  materializes them as REAL files in `fakeRootCommands` (same workaround
+  as `opencloud.nix`); `portal` and `vc-room` ship no etc files, which the
+  same walker tolerates.
+- **Compose healthcheck parity**: the healthchecks in
+  `docker-compose.yml` run in-image binaries — portal's
+  `["CMD","/busybox","wget",…]` needs the busybox binary at the Dockerfile's
+  exact `/busybox` path (shipped by `portal.nix`), and vc-room's
+  `["CMD","python","-c",…]` needs `python` on `/bin` (symlinked by
+  `vc-room.nix`). calrs already had `curl` on `/usr/local/bin`. All three
+  healthchecks verified `healthy` on 2026-11-14.
 - **calrs migration note**: the previously deployed calrs container ran as
   uid **999**; the flake image runs uid **1000** (`images/calrs/Dockerfile`
   creates the `calrs` user dynamically). When adopting
@@ -134,11 +148,13 @@ templates at `/opt/calrs/templates` (`WorkingDir /opt/calrs`), `/etc/passwd`
 healthcheck), `CALRS_DATA_DIR=/var/lib/calrs` pre-created writable, port
 3000, `ENTRYPOINT [calrs]` + `CMD [serve --host 0.0.0.0 --port 3000]`.
 
-Smoke-verified (2026-11-14): vc-room serves `/healthz` and the vendored SDK
-(610302 bytes), portal serves `/` with `/data` owned 1000:1000, calrs applies
-all 45 DB migrations and answers `/` with the login redirect (303). All
-three loaded and tagged `ghcr.io/tobias-weiss-ai-xr/<name>:<version>` —
-not pushed (no registry credentials on this host).
+Smoke-verified (2026-11-14): vc-room serves `/healthz` (`ok`) and the
+vendored SDK (610302 bytes), portal serves `/` and `/health` (200), calrs
+applies all 45 DB migrations and answers `/` with the login redirect (303).
+All three loaded and tagged `ghcr.io/tobias-weiss-ai-xr/<name>:<version>`
+(vc-room 7061b0c75112, portal 3f813bad7518, calrs fc0f5ac88cca) with their
+compose healthchecks reporting `healthy` — not pushed (no registry
+credentials on this host).
 
 ## Not yet nixified (deliberate TODOs)
 

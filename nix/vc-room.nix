@@ -47,9 +47,11 @@
 
   # /bin/sh + a small applet set (busybox multi-call binary — no setuid
   # bits; python:3.12-slim ships a shell, so the posture mirror includes
-  # one for docker-exec operations).
+  # one for docker-exec operations) PLUS python on the standard PATH:
+  # the compose healthcheck runs ["CMD","python","-c",… urllib /healthz].
   shkit = pkgs.runCommand "vc-room-shkit" {} ''
     mkdir -p $out/bin
+    ln -s ${pythonEnv}/bin/python $out/bin/python
     for app in sh env ls mkdir id uname sleep date head tail grep cat echo \
                printf wc touch dirname basename readlink; do
       ln -s ${pkgs.busybox}/bin/busybox $out/bin/$app

@@ -125,10 +125,19 @@ pkgs.dockerTools.streamLayeredImage {
   };
 
   # Writable state dir owned by the runtime user (compose mounts the
-  # calrs-data named volume over it).
+  # calrs-data named volume over it). NOTE: docker >= 29 (exec AND
+  # healthcheck) walks /etc/passwd + /etc/group with openat2 RESOLVE_BENEATH
+  # and fails across the layer boundary when they are symlinks into
+  # /nix/store ("openat etc/group: path escapes from parent") — materialize
+  # them as REAL files (enableFakechroot makes the etcFiles content
+  # readable here).
   fakeRootCommands = ''
     mkdir -p var/lib/calrs
     chown 1000:1000 var/lib/calrs
+    cat etc/passwd > etc/passwd.tmp && rm -f etc/passwd \
+      && mv etc/passwd.tmp etc/passwd && chmod 0444 etc/passwd
+    cat etc/group > etc/group.tmp && rm -f etc/group \
+      && mv etc/group.tmp etc/group && chmod 0444 etc/group
   '';
   enableFakechroot = true;
 
