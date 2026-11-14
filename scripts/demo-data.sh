@@ -172,6 +172,67 @@ run() {
 
 running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
 
+# ── env-quote hardening (incident: 'Source: command not found') ────────────
+# brand.sh once wrote an UNQUOTED multi-word value (PORTAL_TAGLINE=open
+# Source Managed Enterprise) into .env; `source` then assigned
+# PORTAL_TAGLINE=open and tried to EXECUTE the word `Source`, aborting the
+# script. Every dotenv load below scrubs unquoted multi-word values FIRST:
+# offending lines are rewritten double-quoted in place (with a .bak-<date>
+# backup and a loud warning naming file+line) before the `source`, and the
+# loader can never die on such a line. Idempotent: quoted lines never match
+# the detector. This block is kept byte-identical in calendar-setup.sh and
+# demo-data.sh — tests/00-static/check_env_quote.py extracts it between the
+# markers below and exercises it on a fixture env file.
+# env-quote-hardening:BEGIN
+env_quote_warn() { printf '[env-quote] WARNING: %s\n' "$*" >&2; }
+env_quote_scrub() {
+  # usage: env_quote_scrub <env-file> [display-label]
+  local file="$1" label="${2:-$1}" re bad bak tmp line key val changed=0
+  [[ -f "$file" ]] || return 0
+  re="^[A-Za-z_][A-Za-z0-9_]*=[^\"'].*[[:space:]]"
+  bad="$(grep -nE "$re" "$file" 2>/dev/null || true)"
+  [[ -z "$bad" ]] && return 0
+  while IFS= read -r line; do
+    env_quote_warn "unquoted multi-word env value would tokenize on source: ${label}:${line%%:*}"
+  done <<< "$bad"
+  bak="${file}.bak-$(date +%Y%m%d-%H%M%S)"
+  if ! cp -p "$file" "$bak" 2>/dev/null; then
+    env_quote_warn "cannot back up ${label} — leaving the file untouched, load continues"
+    return 0
+  fi
+  tmp="$(mktemp "${file}.scrub.XXXXXX" 2>/dev/null)" || {
+    env_quote_warn "no scratch file for ${label} — leaving the file untouched, load continues"
+    return 0
+  }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ $re ]]; then
+      key="${line%%=*}"
+      val="${line#*=}"
+      val="${val%$'\r'}"
+      val="${val//\"/\\\"}"
+      printf '%s="%s"\n' "$key" "$val" >>"$tmp"
+      changed=$((changed + 1))
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+  if ! mv "$tmp" "$file" 2>/dev/null; then
+    env_quote_warn "cannot rewrite ${label} — load continues with the original file"
+    rm -f "$tmp"
+    return 0
+  fi
+  env_quote_warn "quoted ${changed} env value(s) in ${label} (backup: ${bak})"
+  return 0
+}
+env_quote_load() {
+  # usage: env_quote_load <env-file> [display-label]
+  # scrub, then source; NEVER dies on an unquoted multi-word line.
+  env_quote_scrub "$1" "${2:-$1}" || true
+  # shellcheck disable=SC1090
+  source "$1"
+}
+# env-quote-hardening:END
+
 # ── optional audit log ───────────────────────────────────────────────────
 if [[ -n "$LOG_FILE" ]]; then
   mkdir -p "$(dirname "$LOG_FILE")"
@@ -183,10 +244,18 @@ fi
 DEPLOYED_ENV="/opt/opensme-compose/compose/.env"
 if sudo -n test -r "$DEPLOYED_ENV" 2>/dev/null; then
   set +e
-  set -a
-  # shellcheck disable=SC1090
-  source <(sudo -n cat "$DEPLOYED_ENV" 2>/dev/null)
-  set +a
+  # stage a private copy: the deployed file is root-owned, so the loader
+  # scrubs+sources the copy (warning names the real file via the label)
+  # instead of rewriting /opt in place behind the operator's back.
+  _env_copy="$(mktemp 2>/dev/null)" && sudo -n cat "$DEPLOYED_ENV" 2>/dev/null | cat > "$_env_copy"
+  if [[ -s "${_env_copy:-}" ]]; then
+    set -a
+    env_quote_load "$_env_copy" "$DEPLOYED_ENV"
+    set +a
+  else
+    warn "cannot stage ${DEPLOYED_ENV} for a safe source — continuing without component creds"
+  fi
+  [[ -n "${_env_copy:-}" ]] && rm -f "$_env_copy" "$_env_copy".bak-*
   set -e
 fi
 

@@ -361,6 +361,17 @@ MUTATIONS = [
               "(django-configurations ignores the bare name); renaming it "
               "must fail check_notes_broker.py",
     },
+    {
+        "name": "env-quote-brand-printf",
+        "file": "scripts/brand.sh",
+        "old": "printf '%s=\"%s\"\\n' \"$key\" \"$val\"",
+        "new": "printf '%s=%s\\n' \"$key\" \"$val\"",
+        "check": "tests/00-static/check_env_quote.py",
+        "why": "env-quote hardening — brand.sh must emit double-quoted env "
+              "values; the unquoted PORTAL_TAGLINE emission made `source "
+              ".env` assign PORTAL_TAGLINE=open and EXECUTE the word "
+              "`Source` ('Source: command not found' aborted calendar-setup)",
+    },
 ]
 
 
