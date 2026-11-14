@@ -1,0 +1,164 @@
+T5 — Umfragen-Tile: LimeSurvey-Integration (polls/limesurvey)
+=============================================================
+
+Status: IMPLEMENTIERT (Branch tf/T5-polls-limesurvey)
+Scope: portal/web/src/, scripts/, docs/ (keine Compose-Änderungen)
+
+
+1) Was gebaut wurde
+-------------------
+Die Umfragen-Kachel des Portals zeigt jetzt echte LimeSurvey-Daten statt
+nur Team-Polls. Die bestehende Team-Poll-Funktionalität bleibt voll
+erhalten (Abstimmungen, Anlegen, Upload, 409-Schutz — alle 13
+PollsPanel-Tests laufen unverändert weiter).
+
+Neue Dateien:
+- portal/web/src/lib/limesurvey.ts
+    Server-seitiger Client für den LimeSurvey-6-RemoteControl-JSON-RPC
+    (POST {method,params,id} an <SURVEYS_URL>/admin/remotecontrol).
+    Session-Key-Caching (Single-Flight, ein Re-Auth-Retry bei
+    "Invalid session key"), Methoden listSurveys/getSummary/
+    listSurveysWithParticipants/releaseSessionKey, Env-Wiring
+    (getLimesurveyClient/surveysConfigured/resolveRpcUrl/surveysUrl).
+- portal/web/src/app/api/polls/route.ts
+    Setzt sich vor den [[...path]]-Catch-All (konkrete Route gewinnt).
+    GET: Mode 1 (SURVEYS_ADMIN_PASSWORD gesetzt) → session-gated,
+    normalisierte Liste {source:"limesurvey", surveys_url,
+    surveys:[{id,title,status,participants}]}, 401 anonym, 502 bei
+    RPC-Fehler. Mode 2 (keine Credentials, hermetisch für dev/test):
+    zuerst echter Backend-Poll-Liste forwarden; nur wenn das Backend
+    nichts liefert (404/down) deutsche Mock-Umfragen
+    {source:"mock",...}. POST: wird 1:1 an das Rust-Backend
+    weitergeleitet (Route-Shadowing-Kompensation) — Team-Poll-Anlegen
+    funktioniert weiter.
+- portal/web/src/lib/limesurvey.test.ts
+    9 Unit-Tests mit injiziertem fetchImpl (keine globalen Stubs):
+    Auth-Flow, JSON-codierte list_surveys-Strings (ältere LS),
+    Teilnehmer-Normalisierung (completed_responses → token_count → 0),
+    falsche Credentials ("Invalid user name or password" als
+    result.status), Re-Auth nach abgelaufenem Key, Single-Flight,
+    Degradierung bei kaputter Einzel-Summary, Env-Helper.
+- scripts/limesurvey-rpc.sh
+    Ops-CLI für denselben RPC: check, session, list-surveys,
+    summary <sid>, questions <sid>, release, call <method> <params>,
+    enable-rpc [--restart]. Credentials: LS_*-Env > SURVEYS_*-Env >
+    /opt/opensme-compose/compose/.env (root-only → sudo -n Fallback).
+    Gibt niemals Secrets oder Session-Keys aus; bash -n geprüft.
+- docs/af-int-T5-polls.txt (dieses Dokument)
+
+Geändert:
+- portal/web/src/lib/types.ts — SurveySummary + SurveysListResponse.
+- portal/web/src/components/PollsPanel.tsx — Dual-Mode: Antwort mit
+  `surveys` → LimeSurvey-/Mock-Liste (Status-Badges "Aktiv/Beendet",
+  "N Teilnehmende", Link "Im Umfragen-Tool öffnen" → SURVEYS_URL);
+  Antwort mit `polls` → unverändertes Team-Poll-UI. 401/Loading/Catch-
+  Pfade bleiben kompatibel (alle existierenden Tests unverändert grün).
+
+
+2) Nachweis-Format der normalisierten Umfragen
+----------------------------------------------
+GET /api/polls (wired mode, angemeldet):
+{
+  "source": "limesurvey",
+  "surveys_url": "https://surveys.<domain>",
+  "surveys": [
+    {"id": 100000, "title": "Beispiel: Datei-Upload (openSME)",
+     "status": "active" | "closed", "participants": <int>}
+  ]
+}
+- status: LS-Feld `active === "Y"` → "active", sonst "closed".
+- participants: get_summary → completed_responses, sonst token_count,
+  sonst token_completed, sonst 0 ([]-Summary = keine Antworten/Token-
+  Tabellen → 0). Eine kaputte Einzel-Summary degradiert nur diese
+  Umfrage (participants 0), nicht die ganze Kachel.
+
+
+3) LimeSurvey-RPC — Betrieb und Fallstricke (verifiziert am Live-System)
+-----------------------------------------------------------------------
+a) RPC-Interface einschalten (EINMALIG, nach Container-Neuanlage erneut):
+   Die LS6-Installation antwortet auf /admin/remotecontrol nur mit JSON,
+   wenn config 'RPCInterface' == 'json' ist (Default 'off').
+   Achtung: top-level `$config['RPCInterface'] = 'json';` in config.php
+   wird von LimeSurvey VERWORFEN (config.php endet mit `return array(...)`)
+   — die Zuweisung muss INNERHALB des zurückgegebenen Arrays in den
+   Block `'config'=>array(...)` (bei uns Zeile 26).
+   Einschalten idempotent:  scripts/limesurvey-rpc.sh enable-rpc
+   (--restart optional). Nach Container-NEUANLAGE (nicht Restart) ist
+   config.php weg → enable-rpc erneut ausführen. Restart überlebt es.
+
+b) Fehlersignaturen (alle mit HTTP 200!):
+   - Leerer Body (200, text/html, 0 Bytes): der LS-Controller stirbt
+     VOR der JSON-Ausgabe — bei get_session_key fast immer falsche
+     Anmeldedaten (oder RPCInterface 'off', dann bei ALLEN Calls).
+     Client verhält sich korrekt: "ungültige Antwort (leer oder kein
+     JSON — bei der Anmeldung meist falsche Anmeldedaten)".
+   - result:{status:"Invalid user name or password"}: falsche
+     Credentials mit JSON-Antwort (älteres LS-Verhalten).
+   - result:{status:"Invalid session key"}: Key abgelaufen → Client
+     macht genau EINEN Re-Auth und wiederholt den Call.
+   - result:{status:"Invalid surveyid"}: falsche SID im get_summary.
+   - Login-Lockout: zu viele Fehlversuche → result:{status:"You have
+     exceeded the number of maximum login attempts. Please wait 10
+     minutes before trying again."}. Der Zähler ist (u.a.) IP-bezogen!
+     Deshalb: KEINE wiederholten Fehlversuche aus dem portal-web-
+     Container (sonst sperrt sich das Portal selbst für 10 min). Das
+     Session-Key-Caching des Clients authentifiziert nur 1x pro
+     Prozess — im Normalbetrieb unproblematisch.
+   - list_surveys kann als Array (LS6) ODER JSON-codierter String
+     (ältere LS) kommen — beides wird geparst.
+
+c) Nach Container-Restart antwortet Traefik für ~20-60 s mit
+   "404 page not found" / fehlendem Service (Router-Discovery-Verzögerung,
+   Log: 'the service "surveys@docker" does not exist ... surveys-sec@file').
+   Transient — nicht ein "kaputtes" RPC debuggen, solange das gerade
+   läuft (internal check: docker exec opensme-limesurvey curl -sS
+   -X POST -H 'Content-Type: application/json' --data '{"method":...}'
+   http://localhost:8080/admin/remotecontrol).
+
+d) Verifizierte Live-Daten (Stand 2026-11-14):
+   Container opensme-limesurvey (martialblog/limesurvey:6-apache),
+   DB-Session (sessions-Tabelle), admin-Password-Hash in lime_users
+   stimmt mit SURVEYS_ADMIN_PASSWORD aus /opt/opensme-compose/compose/.env
+   überein (bcrypt password_verify = MATCH). 1 Umfrage sichtbar
+   (sid 100000, aktiv). RPC-Pfade /admin/remotecontrol und
+   /index.php/admin/remotecontrol funktionieren beide.
+
+
+4) Ops-Verkabelung (Compose liegt außerhalb des Task-Scopes)
+------------------------------------------------------------
+Das portal-web-Container-Env bekommt heute SURVEYS_URL, aber KEINE
+LS-Credentials → die Kachel fällt automatisch in den hermetischen
+Mock-Modus (bzw. zeigt echte Team-Polls, solange das Rust-Backend sie
+liefert). Um echte LimeSurvey-Daten zu aktivieren:
+
+1. Im compose-Service portal (portal-web) ergänzen:
+     environment:
+       - SURVEYS_ADMIN_USER=${SURVEYS_ADMIN_USER}
+       - SURVEYS_ADMIN_PASSWORD=${SURVEYS_ADMIN_PASSWORD}
+   (Werte stehen bereits in /opt/opensme-compose/compose/.env —
+   Zeilen SURVEYS_ADMIN_USER/SURVEYS_ADMIN_PASSWORD/SURVEYS_URL.)
+2. RPC freischalten:  scripts/limesurvey-rpc.sh enable-rpc
+3. Verifizieren:      scripts/limesurvey-rpc.sh check
+4. Portal-Container neu erzeugen (env-Änderung braucht recreate, kein
+   restart) — danach liefert GET /api/polls {source:"limesurvey",...}.
+
+Ohne Schritt 1 bleibt die Kachel hermetisch/dev-freundlich: im Deployment
+solange das Rust-Backend Team-Polls ausliefert deren Liste, sonst die
+deutschen Mock-Umfragen (dieselben wie im Dev-Betrieb ohne Backend).
+
+
+5) Verifikation (im Worktree, äquivalent zum Gate)
+---------------------------------------------------
+cd portal/web
+  ./node_modules/.bin/vitest run   → 22 Dateien / 156 Tests OK
+                                     (inkl. 13 PollsPanel-Tests UNVERÄNDERT)
+  ./node_modules/.bin/tsc --noEmit → OK
+bash -n scripts/limesurvey-rpc.sh  → OK
+Live-Smoke gegen https://surveys.home.opensme.graphwiz.ai: interne
+RPC-Auth mit .env-Credentials = OK (get_session_key → 32-Zeichen-Key);
+extern war während der Messung zeitweise (a) Traefik-Flap nach Restart
+und (b) der o.g. 10-Minuten-Login-Lockout durch eigene Fehlversuche
+aktiv — beide Effekte sind dokumentiert und temporär.
+
+Hinweis: Worktree portal/web/node_modules ist ein Symlink auf den
+Main-Checkout (node_modules ist git-ignored, nicht Teil des Commits).

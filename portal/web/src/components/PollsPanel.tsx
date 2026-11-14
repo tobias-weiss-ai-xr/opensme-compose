@@ -3,14 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { humanSize, markVoted, votedSet } from "@/lib/format";
 import LoginRequired from "@/components/LoginRequired";
-import type { Poll } from "@/lib/types";
+import type { Poll, SurveySummary, SurveysListResponse } from "@/lib/types";
 
 /**
- * Team-polls panel (Umfragen — optional card, only shown when the Rust
- * backend has polls enabled: /api/polls returns 404 otherwise).
+ * Umfragen panel — dual mode:
+ * - Response carries `surveys` (LimeSurvey/mock, served by api/polls route):
+ *   read-only list with status badges + participant counts + link to the
+ *   Umfragen-Service.
+ * - Response carries `polls` (Rust team polls): interactive vote/create UI.
  */
 export default function PollsPanel() {
   const [polls, setPolls] = useState<Poll[] | null>(null);
+  const [surveys, setSurveys] = useState<SurveySummary[] | null>(null);
+  const [surveysUrl, setSurveysUrl] = useState("");
+  const [surveysNotice, setSurveysNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
@@ -27,8 +33,28 @@ export default function PollsPanel() {
         setAuthRequired(true);
         return;
       }
+      if (res.status === 502) {
+        // Umfragen-Service wired but unreachable — surveys view with notice.
+        setSurveys([]);
+        setSurveysNotice(
+          "Umfragen-Service nicht erreichbar — bitte später erneut versuchen.",
+        );
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
-      setPolls((await res.json()).polls as Poll[]);
+      const data = (await res.json()) as Partial<
+        SurveysListResponse & { polls: Poll[] }
+      >;
+      if (Array.isArray(data.surveys)) {
+        // LimeSurvey/mock mode — normalized survey list from the RPC client.
+        setSurveys(data.surveys);
+        setSurveysUrl(
+          typeof data.surveys_url === "string" ? data.surveys_url : "",
+        );
+        setSurveysNotice(null);
+        return;
+      }
+      setPolls(Array.isArray(data.polls) ? data.polls : []);
     } catch {
       setPolls([]); // feature disabled or unreachable — render placeholder
     }
@@ -44,6 +70,60 @@ export default function PollsPanel() {
       <section className="tab-panel" aria-label="Umfragen">
         <h2 className="mb-3 text-lg font-bold">Umfragen</h2>
         <LoginRequired label="Umfragen sind angemeldeten Nutzer:innen vorbehalten" />
+      </section>
+    );
+  }
+
+  if (surveys !== null) {
+    return (
+      <section className="tab-panel" aria-label="Umfragen">
+        <h2 className="mb-3 text-lg font-bold">Umfragen</h2>
+        <div className="func-grid single" style={{ gridTemplateColumns: "minmax(220px, 420px)" }}>
+          <div className="rounded-[10px] border border-border bg-card p-4 shadow-sm">
+            <span className="func-icon" aria-hidden="true">
+              📊
+            </span>
+            <h3 className="font-semibold">Umfragen</h3>
+            <p className="mb-2 text-sm text-dim">
+              Aktuelle Fragebögen aus dem Umfragen-Service
+            </p>
+            <ul className="pl-list" aria-live="polite">
+              {surveys.length === 0 && (
+                <li className="ic-empty">
+                  {surveysNotice ?? "Keine Umfragen im Umfragen-Service vorhanden."}
+                </li>
+              )}
+              {surveys.map((s) => (
+                <li key={s.id} className="poll">
+                  <div className="poll-q font-medium">{s.title}</div>
+                  <div className="mt-1 flex items-center gap-2 text-xs">
+                    <span
+                      className={`rounded-full border border-border px-2 py-0.5 ${
+                        s.status === "active" ? "text-accent" : "text-dim"
+                      }`}
+                    >
+                      {s.status === "active" ? "Aktiv" : "Beendet"}
+                    </span>
+                    <span className="text-dim">
+                      {s.participants}{" "}
+                      {s.participants === 1 ? "Teilnehmende:r" : "Teilnehmende"}
+                    </span>
+                  </div>
+                  {surveysUrl && (
+                    <a
+                      className="poll-att"
+                      href={surveysUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ↗ Im Umfragen-Tool öffnen
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </section>
     );
   }

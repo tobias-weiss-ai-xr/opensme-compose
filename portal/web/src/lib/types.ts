@@ -80,6 +80,26 @@ export interface PollListResponse {
   polls: Poll[];
 }
 
+/**
+ * Umfragen-Service tile payload — normalized from the LimeSurvey 6
+ * RemoteControl JSON-RPC (`list_surveys` + `get_summary`). The
+ * `/api/polls` route answers with this shape (key `surveys`) when the
+ * service is wired; with key `polls` it is the Rust team-poll list.
+ */
+export interface SurveySummary {
+  id: number;
+  title: string;
+  status: "active" | "closed";
+  participants: number;
+}
+
+export interface SurveysListResponse {
+  source: "limesurvey" | "mock";
+  /** Public Umfragen-Service URL (SURVEYS_URL) — panel links point here. */
+  surveys_url: string;
+  surveys: SurveySummary[];
+}
+
 export interface AiChatRequest {
   question: string;
 }
