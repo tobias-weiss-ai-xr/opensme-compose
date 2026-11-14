@@ -28,6 +28,18 @@ vi.mock("@/lib/api", () => ({
   AuthError: MockAuthError,
 }));
 
+/**
+ * T6: the panel probes the AI gate on mount (@/lib/ai.aiEnabledProbe).
+ * Without this mock the real probe would hit the tests' global fetch
+ * stubs (e.g. the cloud-picker list Response) and race their bodies.
+ * Disabled by default → the AI row stays out of every legacy assertion.
+ */
+vi.mock("@/lib/ai", () => ({
+  aiEnabledProbe: vi.fn(async () => false),
+  summarizeThread: vi.fn(),
+  draftReply: vi.fn(),
+}));
+
 const AuthError = MockAuthError;
 const mockedFetch = vi.mocked(fetchIntercom);
 const mockedPost = vi.mocked(postIntercom);

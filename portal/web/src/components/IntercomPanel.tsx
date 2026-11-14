@@ -13,6 +13,7 @@ import {
 import LoginRequired from "@/components/LoginRequired";
 import CloudFilePicker from "@/components/CloudFilePicker";
 import type { CloudFileEntry } from "@/components/CloudFilePicker";
+import { aiEnabledProbe, draftReply, summarizeThread } from "@/lib/ai";
 import type { IntercomMessage } from "@/lib/types";
 
 /** Delta-poll cadence (ms) — pauses entirely while the tab is hidden. */
@@ -52,6 +53,9 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
   const [authRequired, setAuthRequired] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [cloudPick, setCloudPick] = useState<CloudFileEntry | null>(null);
+  const [aiReady, setAiReady] = useState(false);
+  const [aiBusy, setAiBusy] = useState<null | "summary" | "draft">(null);
+  const [aiOut, setAiOut] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const latestRef = useRef(0);
   const authRef = useRef(false);
@@ -127,6 +131,22 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [pollDelta]);
+
+  // AI opt-in probe (OLLAMA_URL gate): one GET /api/ai/summarize on mount.
+  // Any failure resolves false — buttons stay hidden, no error spam.
+  useEffect(() => {
+    let alive = true;
+    aiEnabledProbe()
+      .then((ok) => {
+        if (alive) setAiReady(ok);
+      })
+      .catch(() => {
+        /* probe contract: never rejects — belt-and-braces against mocks */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   function onFileChange(f: File | null) {
     setFile(f);
@@ -235,6 +255,33 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
     }
   }
 
+  /**
+   * AI helper (T6): summarize the thread / suggest a reply to the newest
+   * note via the mocked-LLM backend routes. German status line like the
+   * broadcast box; 401 falls back to the existing login CTA.
+   */
+  async function runAi(kind: "summary" | "draft") {
+    const target = messages[0]?.id; // newest note anchors the thread
+    if (!target) {
+      setAiOut("Keine Notizen vorhanden — erst etwas notieren.");
+      return;
+    }
+    setAiBusy(kind);
+    setAiOut("…");
+    try {
+      setAiOut(
+        kind === "summary"
+          ? (await summarizeThread(target)).summary
+          : (await draftReply(target)).draft,
+      );
+    } catch (err) {
+      setAiOut(`KI-Fehler: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof AuthError) markAuthRequired();
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
   if (authRequired) {
     return (
       <section className="tab-panel" aria-label="Notizen">
@@ -326,6 +373,33 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
               </li>
             ))}
           </ul>
+          {aiReady && (
+            <div className="ai-row mt-2">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="ai-summarize text-sm text-accent"
+                  disabled={aiBusy !== null}
+                  onClick={() => void runAi("summary")}
+                >
+                  ✨ Zusammenfassen
+                </button>
+                <button
+                  type="button"
+                  className="ai-draft text-sm text-accent"
+                  disabled={aiBusy !== null}
+                  onClick={() => void runAi("draft")}
+                >
+                  ✏ Antwort vorschlagen
+                </button>
+              </div>
+              {aiOut && (
+                <p className="ai-out mt-2 text-sm text-dim" role="status">
+                  {aiOut}
+                </p>
+              )}
+            </div>
+          )}
           <div className="pt-2">
             <label className="sr-only" htmlFor="ic-text">
               Nachricht

@@ -1,0 +1,191 @@
+AF T6-ai-surfaces — report (2026-11-15)
+
+FILES
+  portal/web/src/lib/llm.ts                 server-side LLM abstraction
+                                            (framework-free, fetch-stubbed
+                                            tests): aiEnabled() (OLLAMA_URL
+                                            opt-in gate), ollamaUrl()
+                                            ({OLLAMA_URL:-http://ai:11434},
+                                            trailing slashes stripped),
+                                            aiModel() (AI_MODEL →
+                                            OLLAMA_MODEL → llama3.1),
+                                            aiTimeoutMs() (AI_TIMEOUT_MS,
+                                            default 120 s), ollamaChat()
+                                            (POST /api/chat, {model,
+                                            messages, stream:false},
+                                            AbortSignal.timeout; every
+                                            failure normalized to a
+                                            graceful LlmError: timeout,
+                                            unreachable, HTTP error,
+                                            non-JSON, empty answer),
+                                            fetchIntercomThread() (caller
+                                            cookie → backend GET
+                                            /api/intercom via
+                                            forwardToBackend, statuses
+                                            mapped in ThreadFetchError),
+                                            buildTranscript() ([#id]
+                                            author: text lines, target
+                                            marked '← Antwort-Ziel', cap
+                                            40), summarizeMessages()/
+                                            draftReplyMessages() (German
+                                            summary-only / reply-only
+                                            system prompts),
+                                            runAiHelper() (shared
+                                            pipeline: validate → fetch →
+                                            404 lookup → transcript →
+                                            chat → {summary|draft} or
+                                            {status, error})
+  portal/web/src/app/api/ai/summarize/      POST {threadId} → 200
+  route.ts                                  {summary}; GET probe → 200
+                                            {enabled:true} / 503
+                                            {enabled:false} when
+                                            OLLAMA_URL unset (gate fires
+                                            before the body is read);
+                                            dedicated route, takes
+                                            precedence over the [[...path]]
+                                            catch-all
+  portal/web/src/app/api/ai/draft/          same contract → 200 {draft},
+  route.ts                                  reply anchored on the marked
+                                            target note
+  portal/web/src/lib/ai.ts                  same-origin browser client:
+                                            aiEnabledProbe() (swallow-
+                                            everything — any failure
+                                            resolves false, silence is
+                                            the contract), summarizeThread/
+                                            draftReply (POST {threadId},
+                                            AuthError on 401, error-field
+                                            extraction like postIntercom);
+                                            own module so the wholesale
+                                            @/lib/api mock in the legacy
+                                            IntercomPanel suite is
+                                            untouched
+  portal/web/src/components/                AI row after the notes list,
+  IntercomPanel.tsx                         visible only when the mount
+                                            probe reports enabled: '✨
+                                            Zusammenfassen' + '✏ Antwort
+                                            vorschlagen' (disabled while
+                                            in flight), German status line
+                                            (role="status") with the
+                                            summary/draft, 'KI-Fehler: …'
+                                            inline, AuthError → existing
+                                            login CTA; targets the newest
+                                            note (messages[0].id);
+                                            empty-thread hint 'Keine
+                                            Notizen vorhanden — erst
+                                            etwas notieren.'
+  portal/web/src/lib/llm.test.ts            27 unit tests, global fetch
+                                            stubbed: gate/config env
+                                            matrix, ollamaChat
+                                            success/timeout/unreachable/
+                                            HTTP/non-JSON/empty,
+                                            fetchIntercomThread
+                                            (cookie forward, 401, 503,
+                                            unreachable, malformed),
+                                            transcript + prompts,
+                                            runAiHelper (400 body matrix,
+                                            200 both kinds, 404, 401,
+                                            LlmError 502, unexpected →
+                                            generic 502)
+  portal/web/src/app/api/ai/summarize/      9 route tests: probe 503/200,
+  route.test.ts                             disabled POST short-circuits,
+                                            400 validation, happy path
+                                            (asserts the /api/chat body:
+                                            model + transcript), cookie
+                                            forwarding, 404, 401, 502
+  portal/web/src/app/api/ai/draft/          4 route tests (shared pipeline
+  route.test.ts                             exhaustively covered on the
+                                            summarize side)
+  portal/web/src/components/                9 component tests (separate
+  IntercomPanel.ai.test.tsx                 file — the legacy
+                                            IntercomPanel.test.tsx keeps
+                                            its assertions): row hidden on
+                                            probe false/throw, both
+                                            buttons when enabled, summary/
+                                            draft calls with newest id,
+                                            German error status, 401 →
+                                            login CTA, busy disabling,
+                                            empty-thread hint
+  portal/web/src/components/                additive vi.mock("@/lib/ai")
+  IntercomPanel.test.tsx                    (probe false) — without it the
+                                            real probe raced the cloud-
+                                            picker tests' single stubbed
+                                            Response body ("Body has
+                                            already been used"); all
+                                            legacy assertions unchanged
+  docs/af-int-T6-ai.txt                     this report
+
+DISCOVERY
+  * Ollama/AI is NOT deployed on this host (no ai container) — delivered
+    code + mocked tests only, no live-LLM gating, exactly as tasked.
+  * The Rust backend has no single-note GET (only list POST/GET, :id
+    DELETE, /files/:token/:name) — fetchIntercomThread fetches the whole
+    list with the caller's cookie and filters by id (broadcast route's
+    forwardToBackend pattern; the page.tsx API_BASE pattern carries no
+    session, which the intercom requires).
+  * Previous tasks were REJECTED for portal/web/docs/af-int-*.txt
+    (outside portal/web/src/ + docs/ scope — see the T1 prompt's attempt
+    log), so this report lives at the repo-root docs/ like T1–T5.
+  * OLLAMA_URL/OLLAMA_MODEL naming already exists in the repo (analysis
+    stack, README); the AI card uses AI_API_URL — T6 keeps the tasked
+    OLLAMA_URL gate for the intercom AI row and reads AI_MODEL first,
+    falling back to OLLAMA_MODEL then llama3.1.
+  * Dedicated route folders (api/ai/summarize, api/ai/draft) beat the
+    [[...path]] catch-all by Next.js segment precedence — no
+    next.config/rewrite changes needed (same mechanism as /api/broadcast).
+  * jsdom's DOMException is not `instanceof Error` — the timeout detection
+    reads err.name structurally, and the probe effect additionally has a
+    .catch guard so even misbehaving mocks can never produce an unhandled
+    rejection ("no error spam").
+
+VERIFICATION (worktree, 2026-11-15, node v22.15.1 via
+/opt/node-host/bin, node_modules symlinked from the main checkout —
+identical package-lock md5 9d061aaeeeb68c9b759f3893bc5e36ba)
+  * ./node_modules/.bin/vitest run            26 files / 212 tests green
+                                              (164 baseline + 48 new)
+  * ./node_modules/.bin/tsc --noEmit          clean
+  * npm run build                             passes (next build)
+  * Gate-off probe: GET /api/ai/summarize with OLLAMA_URL unset → 503
+    {enabled:false} (pinned by route test)
+  * Mocked happy path pinned end-to-end: POST {threadId} → cookie hops to
+    /api/intercom → transcript (#id author: text, target marked) → POST
+    /api/chat {model, messages, stream:false} → 200 {summary|draft}
+  * Failure paths pinned: timeout (TimeoutError), unreachable
+    (TypeError), HTTP 404/500 (error field extracted), non-JSON body,
+    empty answer → all 502 with the graceful German message, no URLs or
+    stack traces leaked
+
+DESIGN NOTES
+  * Operator opt-in identical in spirit to INTERCOM_BROADCAST/AI_API_URL:
+    OLLAMA_URL unset → route answers 503 {enabled:false}, the UI probe
+    hides the row — the surface simply disappears, no error spam, and
+    requests still 503 before reading the body.
+  * Thin routes, fat lib: both routes are ~15 lines; the whole pipeline
+    (gate → validate → session hop → transcript → prompt → LLM) lives in
+    lib/llm.ts, which imports no next/* and is fully unit-testable with a
+    stubbed fetch.
+  * lib/ai.ts (browser) is deliberately separate from lib/api.ts: the
+    legacy IntercomPanel suite mocks @/lib/api wholesale with an explicit
+    factory, so a new import there would have forced edits to that file's
+    mock and risked its assertions; the separate module also isolates the
+    swallow-everything probe contract.
+  * The draft prompt marks the target note inline ('← Antwort-Ziel') so
+    one transcript serves both summarize (whole thread) and draft
+    (anchored reply) without route-specific plumbing.
+  * LlmError messages are user-facing German ('KI nicht erreichbar',
+    'KI-Antwort fehlgeschlagen (HTTP …)'); technical causes ride the
+    error's detail field for server logs only.
+
+KNOWN LIMITATIONS
+  * No live LLM verification possible on this host (no ai container) —
+    the /api/chat contract is pinned against mocks; first live deployment
+    should smoke-test with OLLAMA_URL + AI_MODEL set on portal-web.
+  * The transcript cap (40 notes) bounds prompt size; the Rust store's
+    own INTERCOM_MAX_MESSAGES cap applies upstream.
+  * Compose wiring (OLLAMA_URL/AI_MODEL env on portal-web, ai service)
+    is out of scope for this task.
+  * AI_TIMEOUT_MS default 120 s assumes a local/small model; larger
+    models may need the operator to raise it (the UI shows '…' while
+    waiting, buttons disabled).
+
+TASK ID: T6-ai-surfaces
+BRANCH: tf/T6-ai-surfaces
