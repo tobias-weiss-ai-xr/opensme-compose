@@ -83,6 +83,38 @@ check_sso_redirect() {
     fi
 }
 
+# SOGo6 OIDC mode probe: GET /api/user/v1/auth/mode?username=… returns the
+# auth mode for a user. With the IdP realm active it answers kind:"sso" plus
+# a Zitadel authorize location (client_id on that hop). A missing/broken SSO
+# wiring instead answers kind:"credentials" (DB lookup) — fail then.
+check_sso_mode() {
+    local name="$1" url="$2" expected_idp="$3" expected_client="${4:-}"
+    info "Checking $name SSO mode…"
+    local user="${SSO_TEST_USER:-testuer@${DOMAIN}}"
+    local body
+    body=$(curl -sk --max-time 30 "${url}?username=${user}" 2>&1 || echo "ERROR")
+    if [[ "$body" == "ERROR" ]]; then
+        err "  $name: request failed"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    if ! echo "$body" | grep -q '"kind":"sso"'; then
+        err "  $name: no SSO kind in auth-mode answer (${body:0:100})"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    local loc
+    loc=$(echo "$body" | grep -o '"location":"[^"]*"' | head -1 | sed 's/"location":"//;s/"$//' | sed 's/\\u0026/\&/g')
+    if ! echo "$loc" | grep -q "$expected_idp"; then
+        err "  $name: SSO mode points away from IdP (location: ${loc:0:90})"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    if [[ -n "$expected_client" ]] && ! echo "$loc" | grep -q "client_id=${expected_client}"; then
+        err "  $name: SSO mode client_id mismatch (expected ${expected_client} in ${loc:0:100})"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    ok "  $name: SSO mode verified (→ $expected_idp, client=$expected_client)"
+    return 0
+}
+
 # Own-login apps serve their own login page with an SSO entry instead of a
 # blind IdP redirect on / — assert the SSO signal is actually present there
 # (per-app markers, cf. docs/SSO.md verification notes).
@@ -195,12 +227,24 @@ if [[ -n "${NOSDESK_DOMAIN:-}" ]]; then
     fi
 fi
 
-# Webmail/SOGo — with the OIDC realm active the whole /SOGo/ entry is
-# IdP-gated: no cookies ⇒ 302 to the authorize endpoint (client_id on the
-# first hop), then the chain lands on the IdP login UI.
+# Webmail — SOGo6 (real OIDC RP since 0.1.x): the UI triggers SSO by
+# asking the backend which auth mode applies for a username:
+#   GET /api/user/v1/auth/mode?username=<email>  →  {"kind":"sso","location":<authorize-URL>}
+# The authorize-URL carries client_id on the first hop. Legacy SOGo5
+# stacks instead IdP-gate the whole /SOGo/ entry (302 to authorize).
+# Probe both; either proving SSO → IdP counts as health.
 if [[ -n "${SOGO_DOMAIN:-}" ]]; then
-    check_sso_redirect "Webmail/SOGo" "https://$SOGO_DOMAIN/SOGo/" \
-        "$IDP_DOMAIN" "$SOGO_OIDC_CLIENT_ID" || true
+    _sogo_ok=""
+    if check_sso_mode "Webmail/SOGo6" "https://$SOGO_DOMAIN/api/user/v1/auth/mode" \
+        "$IDP_DOMAIN" "$SOGO_OIDC_CLIENT_ID"; then
+        _sogo_ok=1
+    elif check_sso_redirect "Webmail/SOGo (legacy)" "https://$SOGO_DOMAIN/SOGo/" \
+        "$IDP_DOMAIN" "$SOGO_OIDC_CLIENT_ID"; then
+        _sogo_ok=1
+    else
+        warn "  Webmail: neither SOGo6 auth-mode nor legacy /SOGo/ redirect proved SSO"
+        FAILED=$((FAILED+1))
+    fi
 fi
 
 # Paperless (django-allauth generic OIDC; shows the openSME/zitadel button)

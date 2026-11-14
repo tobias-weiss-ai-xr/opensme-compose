@@ -38,6 +38,23 @@ SMOKE_ONLY=false
 DRY_RUN=false
 FAILS=0
 
+# The compose project may live in a subdirectory (ansible deploys the repo
+# under /opt/opensme-compose/compose while the verify scripts sit in
+# /opt/opensme-compose/scripts). Docker compose locates the project via
+# COMPOSE_FILE/COMPOSE_PROJECT_DIR; point it at the real project so both the
+# container loop and the smoke suite resolve the live stack regardless of cwd.
+COMPOSE_PROJECT="${COMPOSE_PROJECT:-}"
+if [[ -z "$COMPOSE_PROJECT" && -f "${ROOT}/compose/docker-compose.yml" ]]; then
+  COMPOSE_PROJECT="${ROOT}/compose"
+elif [[ -z "$COMPOSE_PROJECT" && -f "${ROOT}/docker-compose.yml" ]]; then
+  COMPOSE_PROJECT="${ROOT}"
+fi
+if [[ -n "$COMPOSE_PROJECT" ]]; then
+  export COMPOSE_PROJECT_DIR="$COMPOSE_PROJECT"
+  [[ -f "$COMPOSE_PROJECT/.env" ]] && export COMPOSE_ENV_FILES="$COMPOSE_PROJECT/.env"
+  info "compose project: $COMPOSE_PROJECT"
+fi
+
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
 while [[ $# -gt 0 ]]; do
   case "$1" in

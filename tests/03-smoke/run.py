@@ -67,7 +67,9 @@ def install_dns_fallback() -> None:
 # a smoke check must not demand tools the image does not ship (the alpine
 # memcached image has no memcached-tool; its health contract is nc -z).
 SERVICE_ENDPOINTS = {
-    "portal": {"path": "/", "port": 8080, "codes": [200], "name": "Portal"},
+    # Portal is edge-fronted (https on PORTAL_DOMAIN) in live/system-traefik
+    # deployments; raw host:8080 only exists in the local demo profile.
+    "portal": {"path": "/", "port": 8080, "codes": [200, 301, 302, 307], "name": "Portal"},
     "postgres": {"check": "pg_isready", "name": "PostgreSQL"},
     "redis": {"check": "redis-cli ping", "name": "Redis"},
     "memcached": {"check": "nc -z 127.0.0.1 11211", "name": "Memcached"},
@@ -111,7 +113,7 @@ def endpoint_checks(domain: str) -> list[tuple[str, list[int], str]]:
     cloud = cfg("OPENCLOUD_DOMAIN", f"cloud.{domain}")
     schema = "https" if domain != "localhost" else "http"
     s = f"{schema}://"
-    return [
+    checks = [
         (f"{s}{portal}/", [200, 301, 302, 307], "Portal landing page"),
         (f"{s}{zitadel}/healthz", [200], "Zitadel health"),
         # The login v2 UI is path-routed on the IdP origin (zitadel-login
@@ -119,12 +121,20 @@ def endpoint_checks(domain: str) -> list[tuple[str, list[int], str]]:
         # route — the idpplain lesson — so probe the page itself.
         (f"{s}{zitadel}/ui/v2/login/", [200], "IdP login page (login v2 UI)"),
         (f"{s}{cloud}/healthz", [200], "OpenCloud health"),
-        # api.insecure is disabled; the dashboard is served ONLY through the
-        # authenticated api@internal router on traefik.<domain>. Without
-        # credentials the auth middleware must answer 401 (403 if the
-        # deployment narrows it further, 200 if it allows anonymous).
-        (f"{s}traefik.{domain}/dashboard/", [200, 401, 403], "Traefik dashboard"),
     ]
+    # The dashboard is served ONLY through the authenticated api@internal
+    # router on traefik.<domain> WHEN the stack runs its own standalone
+    # traefik. Deployments that route the edge via a shared fleet traefik
+    # (profiles/system-traefik.yml / opensme-live.yml on the 1blu host)
+    # have no such container — checking it there would report a false 404
+    # and fail a healthy stack. Gate on the in-stack traefik container.
+    if any(n.startswith("opensme-traefik") or n == "traefik" for n in _running_names()):
+        checks.append(
+            # api.insecure is disabled; without credentials the auth
+            # middleware answers 401 (403 if narrowed, 200 if anonymous).
+            (f"{s}traefik.{domain}/dashboard/", [200, 401, 403], "Traefik dashboard"),
+        )
+    return checks
 
 
 def http_status(url: str, timeout: int = 10) -> tuple[int, str]:
@@ -171,6 +181,17 @@ def docker_ps() -> list[str]:
         return []
 
 
+_names_cache: list[str] | None = None
+
+
+def _running_names() -> list[str]:
+    """Cached container names (endpoint_checks runs before main's docker_ps)."""
+    global _names_cache
+    if _names_cache is None:
+        _names_cache = docker_ps()
+    return _names_cache
+
+
 def main():
     result = Result("smoke-tests")
     result.header("Layer 3: Smoke tests")
@@ -206,8 +227,17 @@ def main():
             else:
                 result.fail(f"{check['name']}: unhealthy ({msg})")
         elif "path" in check:
+            # Edge-fronted web apps: probe the TLS origin on the public
+            # domain. Raw host:p in SERVICE_ENDPOINTS survives only in the
+            # local demo profile (portal on :8080) — refuse the false
+            # failure there, let the edge path be authoritative here.
             port = check.get("port", 80)
-            url = f"http://{domain}:{port}{check['path']}"
+            origin = f"{domain}:{port}"
+            if svc_name == "portal":
+                origin = cfg("PORTAL_DOMAIN", f"portal.{domain}")
+                url = f"https://{origin}{check['path']}"
+            else:
+                url = f"http://{origin}{check['path']}"
             status, err = http_status(url)
             if status in check["codes"]:
                 result.ok(f"{check['name']} ({url}): {status}")
