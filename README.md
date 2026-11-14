@@ -769,6 +769,13 @@ openSME-compose/
 │       ├── intercom.rs        # Internal notes with cloud attachment metadata
 │       ├── polls.rs           # Polls / "Umfragen" tab
 │       └── logout.rs          # OIDC logout + session teardown
+├── nix/                        # Nix flake: reproducible stack images
+│   ├── flake.nix               # Flake building the nix-owned images (build from nix/)
+│   ├── opencloud.nix           # opencloud:9.1.0-nix-flake (upstream release binary)
+│   ├── vc-room.nix             # vc-room:1.0.0 (Flask + vendored LiveKit SDK)
+│   ├── portal.nix              # portal:0.1.0 (Rust opensme-portal)
+│   ├── calrs.nix               # calrs:1.6.0-openSME (upstream v1.6.0 + local patches)
+│   └── README.md               # Packages, build/load commands, caveats
 ├── scripts/
 │   ├── init-env.sh           # Generate working .env (random secrets)
 │   ├── start.sh               # Start stack (core + zitadel + opencloud)
@@ -1276,6 +1283,34 @@ available via `nix develop`.
 | `dev-agent` | ~950 MB | Python 3, curl, Docker CLI, bash |
 | `predictive-agent` | ~950 MB | Python 3, curl, Docker CLI, bash |
 | `taskfleet` | ~1.2 GB | bash, jq, git, curl, Docker CLI, Node.js 22 (for `pi` agent) |
+
+### Nix-built stack images (`nix/`)
+
+The opencloud, vc-room, portal, and calrs images are also defined as Nix
+packages in [`nix/`](nix/), re-exported by the repository-root
+[`flake.nix`](flake.nix) so `nix build .#<package>` works from the checkout
+root:
+
+```sh
+. /home/weiss/.nix-profile/etc/profile.d/nix.sh   # Nix 2.35.6, single-user
+nix build .#vc-room .#portal .#calrs
+./result | docker load                             # streamLayeredImage results are scripts
+```
+
+| Package | Tag | Source |
+|---|---|---|
+| `opencloud` | `opencloud:9.1.0-nix-flake` | upstream stable release binary (v9.1.0) |
+| `vc-room` | `vc-room:1.0.0` | `images/vc-room/` (Flask + vendored LiveKit SDK) |
+| `portal` | `portal:0.1.0` | `portal/` (Rust `opensme-portal`) |
+| `calrs` | `calrs:1.6.0-openSME` | upstream v1.6.0 + `images/calrs/patches/` |
+
+The images mirror their Dockerfile counterparts (uid 1000:1000, healthcheck
+binaries, CA certs, writable data dirs, no setuid binaries) so the compose
+`read_only` + `cap_drop: ALL` posture holds unchanged. They are build
+replacements, not deployed substitutes: the live stack keeps its current
+images until each one is explicitly adopted. See
+[`nix/README.md`](nix/README.md) for caveats (calrs uid-999 → uid-1000
+volume chown, rustc MSRV input, flake-only-sees-tracked-files).
 
 ## Configuration
 
