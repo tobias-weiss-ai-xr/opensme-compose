@@ -1,0 +1,205 @@
+name: Nix images (x86_64 + aarch64 → ghcr.io)
+
+# Builds the nix/ flake images NATIVELY on both architectures and pushes
+# them to ghcr.io/<owner>/:
+#   - build-x86:   ubuntu-24.04      → .#opencloud .#vc-room .#portal .#calrs
+#   - build-arm64: ubuntu-24.04-arm  → .#opencloud natively
+#
+# nix/opencloud.nix is hostPlatform-aware (amd64 release asset on
+# x86_64-linux, arm64 asset on aarch64-linux), so both jobs build the SAME
+# expression on the matching hardware — no binfmt/qemu emulation, no buildx.
+#
+# ── Multi-arch strategy (documented decision) ─────────────────────────
+# The two jobs are deliberately DECOUPLED and publish per-arch tags:
+#     ghcr.io/<owner>/<name>:<version>          (x86_64 build)
+#     ghcr.io/<owner>/<name>:<version>-arm64    (aarch64 build)
+# The alternative — a third dependent job joining both digests into one
+# multi-platform manifest index (docker buildx imagetools create) — gives
+# a single tag per image but needs cross-job digest exchange and a second
+# registry round-trip per image. Per-arch suffix tags carry the same
+# information with zero coordination between jobs; a manifest-join job can
+# be layered on later WITHOUT changing either build job.
+#
+# Versions are NOT hardcoded in this workflow: each image is retagged from
+# the name:tag its flake expression produced (parsed from `docker load`
+# output), e.g. the flake's opencloud:9.1.0-nix-flake lands as
+# ghcr.io/<owner>/opencloud:9.1.0-nix-flake (+ -arm64 twin). Version bumps
+# stay in the flake, never drift into CI.
+#
+# Heavy job (nixpkgs eval + image pushes + an arm runner): like the other
+# paid-for jobs in this repo (mailcow.yml), it runs on main pushes and
+# manual dispatch only.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nix-images-${{ github.ref }}
+  cancel-in-progress: true
+
+# Same split as ci.yml plus packages:write — GITHUB_TOKEN needs it for
+# `docker push` against ghcr.io; everything else stays read-only.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: tobias-weiss-ai-xr
+
+jobs:
+  build-x86:
+    name: Nix images x86_64 → ghcr.io
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        # Recent major of cachix/install-nix-action. sandbox=false mirrors
+        # the local build config (nix/README.md): hosted runners and the
+        # flake's runCommand steps don't get along with the default sandbox.
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            sandbox = false
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the nix images
+        # The flake lives in nix/ (see nix/README.md) and exposes one
+        # package per image. Flakes only see git-tracked files, so this
+        # builds straight from the checked-out tree.
+        working-directory: nix
+        run: nix build .#opencloud .#vc-room .#portal .#calrs
+
+      - name: Load, tag and push each image to ghcr.io
+        # nix names out-links `result` (single installable) or
+        # `result-<attr>` (multiple installables) — handle both. The
+        # target ref is composed from the image name:tag the flake itself
+        # produced, so this loop needs no per-image knowledge.
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/pushed-tags"
+          shopt -s nullglob
+          for link in result result-*; do
+            [ -e "$link" ] || continue
+            img=$(docker load -i "$link" | sed -n 's/^Loaded image: //p' | head -1)
+            [ -n "$img" ] || { echo "::error::no image loaded from $link"; exit 1; }
+            target="$REGISTRY/$IMAGE_OWNER/$img"
+            echo "$img → $target"
+            docker tag "$img" "$target"
+            docker push "$target"
+            echo "$target" >> "$RUNNER_TEMP/pushed-tags"
+          done
+          # Silent-glob-empty guard: zero out-links means the flake no
+          # longer exposes the four packages — fail loudly, not quietly.
+          [ -s "$RUNNER_TEMP/pushed-tags" ] || {
+            echo "::error::nothing was built/loaded — check the flake exposes .#opencloud .#vc-room .#portal .#calrs"
+            exit 1
+          }
+
+      - name: Verify pushed tags (best effort)
+        # docker manifest inspect immediately after push can hit a short
+        # ghcr propagation window; best effort means warn, never fail.
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+        run: |
+          set -u
+          while read -r tag; do
+            if docker manifest inspect "$tag" > /dev/null; then
+              echo "manifest OK: $tag"
+            else
+              echo "::warning::manifest inspect failed for $tag (registry propagation delay?)"
+            fi
+          done < "$RUNNER_TEMP/pushed-tags"
+
+  build-arm64:
+    name: Nix opencloud aarch64 → ghcr.io
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            sandbox = false
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build opencloud natively on arm64
+        # nix/opencloud.nix selects the arm64 release asset on
+        # aarch64-linux automatically — a native build, no emulation.
+        # Only .#opencloud for now: the flake's remaining packages are not
+        # arm-clean yet; add them to this build when they are.
+        working-directory: nix
+        run: nix build .#opencloud
+
+      - name: Load, tag with -arm64 suffix and push
+        # Same tag the x86 job pushed plus the -arm64 suffix — the
+        # documented multi-arch strategy (see the header comment).
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/pushed-tags"
+          shopt -s nullglob
+          for link in result result-*; do
+            [ -e "$link" ] || continue
+            img=$(docker load -i "$link" | sed -n 's/^Loaded image: //p' | head -1)
+            [ -n "$img" ] || { echo "::error::no image loaded from $link"; exit 1; }
+            target="$REGISTRY/$IMAGE_OWNER/$img-arm64"
+            echo "$img → $target"
+            docker tag "$img" "$target"
+            docker push "$target"
+            echo "$target" >> "$RUNNER_TEMP/pushed-tags"
+          done
+          [ -s "$RUNNER_TEMP/pushed-tags" ] || {
+            echo "::error::nothing was built/loaded — check the flake exposes .#opencloud for aarch64"
+            exit 1
+          }
+
+      - name: Verify pushed tags (best effort)
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+        run: |
+          set -u
+          while read -r tag; do
+            if docker manifest inspect "$tag" > /dev/null; then
+              echo "manifest OK: $tag"
+            else
+              echo "::warning::manifest inspect failed for $tag (registry propagation delay?)"
+            fi
+          done < "$RUNNER_TEMP/pushed-tags"
+
+      - name: Check upstream arm64 availability (warning only)
+        # A FEW core upstream images the compose chain actually pulls —
+        # deliberately NOT an inventory of the whole chain. Any image
+        # without a linux/arm64 manifest cannot start on the arm runner,
+        # so this doubles as the go/no-go signal for widening the arm64
+        # job beyond opencloud. Warning-only: informational, never gates.
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+        run: |
+          set -u
+          for image in postgres:17 redis:alpine matrixdotorg/synapse:latest; do
+            if docker manifest inspect "$image" | grep -q '"architecture": *"arm64"'; then
+              echo "arm64 available: $image"
+            else
+              echo "::warning::$image publishes no linux/arm64 manifest — cannot run on the arm64 runner"
+            fi
+          done
