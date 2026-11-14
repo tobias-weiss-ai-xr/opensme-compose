@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * openSME portal — openEduSuite-style theming.
  * CSS custom properties + Tailwind v4 @theme mapping (same pattern as
@@ -21,6 +23,21 @@
   --danger: #a93226;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   --radius: 10px;
+}
+
+.dark {
+  --background: #1a1d21;
+  --card: #252930;
+  --border: #3a4048;
+  --foreground: #e6e8eb;
+  --foreground-dim: #9aa4b2;
+  --accent: #4a9eff;
+  --accent-light: #1e3a5f;
+  --accent-hover: #f0844a;
+  --footer-bg: #002855;
+  --footer-text: #ffffff;
+  --danger: #e05a4a;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 @theme inline {
@@ -302,4 +319,20 @@ body {
 }
 .btn-login:hover {
   filter: brightness(0.92);
+}
+
+/* Dark mode overrides for hardcoded palette values */
+.dark .announcement.warn {
+  background: #3a2a10;
+  color: #f0b060;
+}
+.dark .poll-opt.voted .poll-fill {
+  background: #3a2020;
+}
+.dark .btn-ghost {
+  background: var(--card);
+}
+.dark .btn-logout:hover {
+  background: #a02828;
+  border-color: #a02828;
 }

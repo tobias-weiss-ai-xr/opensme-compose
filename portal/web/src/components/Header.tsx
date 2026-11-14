@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import LogoutButton from "./LogoutButton";
+import ThemeToggle from "./ThemeToggle";
 
 interface Tab {
   id: string;
@@ -73,6 +74,7 @@ export default function Header({ activeTab, onTabChange, tabs = [] }: HeaderProp
               Anmelden
             </a>
           ) : null}
+          <ThemeToggle />
         </nav>
       </div>
     </header>
