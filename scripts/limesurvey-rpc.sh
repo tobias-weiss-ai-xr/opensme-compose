@@ -47,7 +47,7 @@ CURL_MAX_TIME=20
 
 die() { echo "Fehler: $*" >&2; exit 1; }
 
-usage() { grep '^#   ' "$0" | sed 's/^#   //'; exit "${1:-0}"; }
+usage() { grep '^#   ' "$0" | sed 's/^#   //'; exit 0; }
 
 # Strip CR and surrounding quotes from a .env value.
 env_value() {
