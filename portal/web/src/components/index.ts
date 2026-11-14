@@ -8,6 +8,8 @@ export type {
   CloudFilesResponse,
   ListFilesResponse,
 } from "./CloudFileBrowser";
+export { default as CloudFilePicker } from "./CloudFilePicker";
+export type { CloudFileEntry } from "./CloudFilePicker";
 export { default as FeedColumn } from "./FeedColumn";
 export { default as Footer } from "./Footer";
 export { default as Header } from "./Header";

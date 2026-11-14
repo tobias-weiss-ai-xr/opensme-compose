@@ -1,0 +1,107 @@
+AF T1-cloud-filepicker — report (2026-11-14)
+=============================================
+
+TASK: Cloud file picker integration in the Next.js portal web
+(portal/web/src): "Aus der Cloud anhängen" in the team-notes
+(Intercom) panel opens a modal that lists cloud files and attaches the
+picked file to a note. Branch: tf/T1-cloud-filepicker (worktree).
+
+0. SCOPE / GATE CONFLICT NOTE
+-----------------------------
+Allowed scope for this task: portal/web/src/ and docs/ (repo root).
+The orchestrator gate command contains `test -f docs/af-int-T1-filepicker.txt`
+while running `cd /home/weiss/git/openSME-compose/portal/web` — i.e. it
+resolves to portal/web/docs/, which is OUTSIDE the allowed scope (this
+exact mismatch got attempt 1 rejected). Decision: the scope constraint is
+authoritative; this report lives at REPO-ROOT docs/af-int-T1-filepicker.txt
+(following the existing convention of docs/af-calendar-report.txt etc.),
+and nothing was ever written to portal/web/docs/. Anyone running the gate
+verbatim from portal/web must resolve the docs/ path against the repo root.
+
+1. IMPLEMENTATION (all paths under portal/web/src)
+--------------------------------------------------
+1.1 app/api/cloud/list/route.ts (NEW) — GET /api/cloud/list?path=<rel-dir>
+    returns a bare JSON array [{name, size, mime, path}] (files only,
+    sorted case-insensitively by name, de locale). Two sources:
+    a) PRIMARY: direct WebDAV PROPFIND (Depth: 1, Basic auth from env,
+       15 s timeout, no-store). Env resolution: base =
+       OPENCLOUD_WEBDAV_URL || CLOUD_WEBDAV_URL || OPENCLOUD_URL +
+       /remote.php/dav/files || https://OPENCLOUD_DOMAIN + /remote.php/dav/files;
+       user = OPENCLOUD_ADMIN_USER || CLOUD_WEBDAV_USER; pass =
+       OPENCLOUD_ADMIN_PASSWORD || OPENCLOUD_ADMIN_PASS || CLOUD_WEBDAV_PASS.
+       Multistatus parsed prefix-agnostic via regex
+       <(?:[\w.-]+:)?tag …>…</(?:[\w.-]+:)?tag> (displayname,
+       getcontentlength, getcontenttype, resourcetype, href);
+       directories (trailing slash / <collection/>) and the requested
+       collection itself are skipped; hrefs decoded (entities +
+       percent-encoding) and rebased to a path RELATIVE to the user's
+       DAV files root. size = number|null, mime = getcontenttype ||
+       extension map || application/octet-stream.
+    b) FALLBACK (deployed compose chain: portal-web gets no DAV
+       secrets, only BACKEND_URL): GET {BACKEND_URL}/api/cloud/files/
+       metadata?path=… and map {files:[…]} onto the same contract
+       (is_directory filtered out, path = "<rel>/<name>", mime =
+       content_type || extension map). backendUrl() from lib/backend.
+    Errors (JSON {error}, German): 400 "Ungültiger Cloud-Pfad"
+    (path traversal guard: leading slash, empty/./.. segments
+    rejected; "" = root is valid), 502 "Cloud-Liste fehlgeschlagen
+    (HTTP n)" / "Cloud nicht erreichbar". Exports dynamic =
+    "force-dynamic", runtime = "nodejs". The static app route takes
+    precedence over the catch-all [[...path]] proxy (unchanged),
+    confirmed by next build output (/api/cloud/list listed as ƒ).
+1.2 components/CloudFilePicker.tsx (NEW) — "use client" modal
+    (role=dialog, aria-modal, Escape / backdrop / ✕ / Abbrechen all
+    close), props {open, onClose, onSelect}, exports CloudFileEntry
+    {name, size, mime, path}. Fetches /api/cloud/list on every open
+    (cache: no-store). German UI: "Aus der Cloud anhängen",
+    "Lade Dateien…", "Keine Dateien in der Cloud", "Cloud-Liste
+    fehlgeschlagen (<reason>)" + "Erneut versuchen" retry (recovery
+    without remount). Sizes via humanSize, emoji by mime group.
+    Picking calls onSelect(file) then onClose(); share-link creation
+    stays the parent's job.
+1.3 components/IntercomPanel.tsx — new "☁ Aus der Cloud anhängen"
+    button opens the picker. onCloudPick(picked): clears a picked
+    local file, calls postCloudShare(picked.path) and puts the
+    returned share URL into the EXISTING url/attachment_url plumbing
+    (the Rust attachment validator rejects relative URLs but
+    allowlists these absolute https share links) + chip
+    "☁ name (size)" with ✕ clear (clears chip and url). Mutual
+    exclusion both ways (file pick clears cloud chip). Share failure
+    → status "Cloud-Freigabe fehlgeschlagen: <msg>" (+ AuthError →
+    login view). Chip reset after successful send.
+1.4 lib/api.ts — postCloudShare(path): POST /api/cloud/share?path=…
+    → {url}; 401 → AuthError, other !ok → German {error} (same
+    pattern as postIntercom).
+1.5 components/index.ts — barrel exports CloudFilePicker +
+    CloudFileEntry type.
+
+2. TESTS
+--------
+2.1 components/CloudFilePicker.test.tsx (NEW, 9 tests, mocked global
+    fetch via vi.stubGlobal): closed → no dialog/no fetch; open →
+    lists names + sizes, hits /api/cloud/list; onSelect receives the
+    exact payload and modal closes; German empty state; 502 error →
+    German alert + retry recovers; Escape closes; Abbrechen/✕ close;
+    backdrop closes but inner clicks don't.
+2.2 components/IntercomPanel.test.tsx — postCloudShare added to the
+    @/lib/api mock factory (required: the component imports it) +
+    mockReset + two integration tests (cloud pick → share → URL field
+    filled + chip shown; share failure → German status, URL stays
+    empty). Existing 18 tests untouched and green.
+
+3. VERIFICATION (worktree portal/web, node_modules symlinked from the
+   main checkout /home/weiss/git/openSME-compose/portal/web/node_modules,
+   PATH=/opt/node-host/bin:$PATH)
+   - vitest run src/components/CloudFilePicker.test.tsx → 9/9 passed
+   - vitest run (full suite)            → 21 files, 147/147 passed
+   - tsc --noEmit                       → clean
+   - npm run build                      → success; /api/cloud/list
+     registered as its own dynamic route (ƒ), catch-all untouched
+   node v22.15.1, Next 15.3, React 19, vitest 3.2.7.
+
+4. OUT OF SCOPE / NOT TOUCHED
+-----------------------------
+Rust portal (share endpoint already exists and is documented as the
+picker's select handback), catch-all [[...path]] route, middleware/CSP
+(same-origin fetch only), CloudFileBrowser/CloudShareLink (pre-existing
+components left as-is).

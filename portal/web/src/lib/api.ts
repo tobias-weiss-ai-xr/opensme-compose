@@ -112,6 +112,30 @@ export async function postIntercomUpload(
   return res.json() as Promise<{ message: IntercomMessage }>;
 }
 
+/**
+ * Asks the backend to create a public read-only share link for a cloud
+ * file (path relative to the user's DAV files root). The returned URL
+ * is absolute https — exactly what the intercom attachment validator
+ * allowlists; relative cloud paths are rejected there.
+ */
+export async function postCloudShare(path: string): Promise<{ url: string }> {
+  const res = await fetch(`/api/cloud/share?path=${encodeURIComponent(path)}`, {
+    method: "POST",
+  });
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) {
+    let error = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) error = data.error;
+    } catch {
+      /* keep HTTP fallback */
+    }
+    throw new Error(error);
+  }
+  return res.json() as Promise<{ url: string }>;
+}
+
 export async function chatWithAi(req: AiChatRequest): Promise<AiChatResponse> {
   const res = await fetch("/api/ai/chat", {
     method: "POST",

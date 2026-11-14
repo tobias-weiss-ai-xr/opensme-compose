@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import IntercomPanel from "./IntercomPanel";
-import { fetchIntercom, postIntercom, postIntercomUpload } from "@/lib/api";
+import { fetchIntercom, postCloudShare, postIntercom, postIntercomUpload } from "@/lib/api";
 import type { IntercomListResponse, IntercomMessage } from "@/lib/types";
 
 const { MockAuthError } = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
   fetchIntercom: vi.fn(),
   postIntercom: vi.fn(),
   postIntercomUpload: vi.fn(),
+  postCloudShare: vi.fn(),
   AuthError: MockAuthError,
 }));
 
@@ -24,6 +25,14 @@ const AuthError = MockAuthError;
 const mockedFetch = vi.mocked(fetchIntercom);
 const mockedPost = vi.mocked(postIntercom);
 const mockedUpload = vi.mocked(postIntercomUpload);
+const mockedShare = vi.mocked(postCloudShare);
+
+const CLOUD_FILE = {
+  name: "kickoff.pdf",
+  size: 2048,
+  mime: "application/pdf",
+  path: "docs/kickoff.pdf",
+};
 
 function msg(partial: Partial<IntercomMessage> & { text: string }): IntercomMessage {
   return { id: 1, attachment: null, ...partial };
@@ -50,12 +59,14 @@ describe("IntercomPanel", () => {
     mockedFetch.mockReset();
     mockedPost.mockReset();
     mockedUpload.mockReset();
+    mockedShare.mockReset();
     vi.useRealTimers();
     setHidden(false);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("renders the empty state once the initial fetch resolves with []", async () => {
@@ -244,6 +255,61 @@ describe("IntercomPanel", () => {
     await waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(1));
     expect(mockedUpload).toHaveBeenCalledWith("Mit Datei", file);
     expect(mockedPost).not.toHaveBeenCalled();
+  });
+
+  it("attaches a cloud pick as a share link via postCloudShare", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([CLOUD_FILE]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    mockedShare.mockResolvedValue({ url: "https://cloud.example/s/xyz" });
+    render(<IntercomPanel />);
+    await screen.findByText(/No notes yet/);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Aus der Cloud anhängen/ }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /kickoff\.pdf/ }));
+    await waitFor(() =>
+      expect(mockedShare).toHaveBeenCalledWith("docs/kickoff.pdf"),
+    );
+    expect(screen.getByLabelText("Anhang-URL")).toHaveValue(
+      "https://cloud.example/s/xyz",
+    );
+    expect(screen.getByText(/☁ kickoff\.pdf/)).toBeInTheDocument();
+  });
+
+  it("surfaces a German error when the cloud share creation fails", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([CLOUD_FILE]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    mockedShare.mockRejectedValue(new Error("HTTP 500"));
+    render(<IntercomPanel />);
+    await screen.findByText(/No notes yet/);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Aus der Cloud anhängen/ }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /kickoff\.pdf/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Cloud-Freigabe fehlgeschlagen: HTTP 500",
+      ),
+    );
+    expect(screen.getByLabelText("Anhang-URL")).toHaveValue("");
   });
 
   it("surfaces the error message when sending fails and keeps the text", async () => {

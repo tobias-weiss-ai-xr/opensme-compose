@@ -5,10 +5,13 @@ import { humanSize, relativeTime } from "@/lib/format";
 import {
   AuthError,
   fetchIntercom,
+  postCloudShare,
   postIntercom,
   postIntercomUpload,
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
+import CloudFilePicker from "@/components/CloudFilePicker";
+import type { CloudFileEntry } from "@/components/CloudFilePicker";
 import type { IntercomMessage } from "@/lib/types";
 
 /** Delta-poll cadence (ms) — pauses entirely while the tab is hidden. */
@@ -34,6 +37,8 @@ export default function IntercomPanel() {
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [cloudPick, setCloudPick] = useState<CloudFileEntry | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const latestRef = useRef(0);
   const authRef = useRef(false);
@@ -112,7 +117,34 @@ export default function IntercomPanel() {
 
   function onFileChange(f: File | null) {
     setFile(f);
-    if (f) setUrl(""); // either a cloud link or a picked file
+    if (f) {
+      setUrl(""); // either a cloud link or a picked file
+      setCloudPick(null);
+    }
+  }
+
+  /**
+   * Cloud pick: the backend turns the file (path relative to the user's
+   * DAV root) into a public read-only share link. That link rides the
+   * existing attachment_url plumbing — the Rust attachment validator
+   * rejects relative paths but allowlists these share URLs.
+   */
+  async function onCloudPick(picked: CloudFileEntry) {
+    setPickerOpen(false);
+    setFile(null);
+    if (fileRef.current) fileRef.current.value = "";
+    setOut("…");
+    try {
+      const shared = await postCloudShare(picked.path);
+      setUrl(shared.url);
+      setCloudPick(picked);
+      setOut(null);
+    } catch (err) {
+      setOut(
+        `Cloud-Freigabe fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (err instanceof AuthError) markAuthRequired();
+    }
   }
 
   async function send() {
@@ -142,6 +174,7 @@ export default function IntercomPanel() {
       setText("");
       setUrl("");
       setFile(null);
+      setCloudPick(null);
       if (fileRef.current) fileRef.current.value = "";
       setOut(null);
     } catch (err) {
@@ -230,6 +263,13 @@ export default function IntercomPanel() {
               onChange={(e) => setUrl(e.target.value)}
             />
             <div className="mt-2 flex items-center gap-3">
+              <button
+                type="button"
+                className="ic-cloud text-sm text-accent"
+                onClick={() => setPickerOpen(true)}
+              >
+                ☁ Aus der Cloud anhängen
+              </button>
               <label className="cursor-pointer text-sm text-accent" htmlFor="ic-file">
                 📎 Datei…
               </label>
@@ -242,8 +282,25 @@ export default function IntercomPanel() {
                 onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
               />
               <span className="text-xs text-dim" aria-live="polite">
-                {file ? `${file.name} (${humanSize(file.size)})` : ""}
+                {file
+                  ? `${file.name} (${humanSize(file.size)})`
+                  : cloudPick
+                    ? `☁ ${cloudPick.name}${humanSize(cloudPick.size) ? ` (${humanSize(cloudPick.size)})` : ""}`
+                    : ""}
               </span>
+              {cloudPick && (
+                <button
+                  type="button"
+                  className="ic-cloud-clear text-xs text-dim"
+                  aria-label="Cloud-Anhang entfernen"
+                  onClick={() => {
+                    setCloudPick(null);
+                    setUrl("");
+                  }}
+                >
+                  ✕
+                </button>
+              )}
               <button
                 className="ic-send ml-auto"
                 type="button"
@@ -261,6 +318,11 @@ export default function IntercomPanel() {
           </div>
         </div>
       </div>
+      <CloudFilePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(picked) => void onCloudPick(picked)}
+      />
     </section>
   );
 }
