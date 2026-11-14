@@ -72,3 +72,4 @@ mail/mailcow-dockerized/data/
 mail/mailcow-dockerized/helper-scripts/overwrite.conf
 portal/web/tsconfig.tsbuildinfo
 tests/00-static/.internal-denylist.txt
+scripts/.paperless-intake.state.json

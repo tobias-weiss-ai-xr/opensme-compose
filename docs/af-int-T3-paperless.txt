@@ -1,0 +1,176 @@
+AF T3-sieve-paperless — report (2026-11-14)
+===========================================
+
+TASK: Invoice attachment intake to Paperless — Stalwart sieve filing rule
+(documented, printed for admin install) + the working NOW-bridge:
+scripts/paperless-intake.sh fetches mail attachments via IMAP and drops
+them into the Paperless consume dir. Branch: tf/T3-sieve-paperless
+(worktree), base 70e549d == main.
+
+FILES TOUCHED (allowed scope: scripts/ services/ docs/)
+--------------------------------------------------------
+- scripts/paperless-intake.sh                NEW  the bridge (see §3)
+- services/paperless.yml                     FIX  consume dir actually watched (§1)
+- docs/af-int-T3-paperless.txt               NEW  this report
+
+0. SCOPE / GATE NOTE
+--------------------
+Gate command: `cd /home/weiss/git/openSME-compose && bash -n
+scripts/paperless-intake.sh && shellcheck -S warning
+scripts/paperless-intake.sh && test -f docs/af-int-T3-paperless.txt &&
+grep -qi 'consume' docs/af-int-T3-paperless.txt && echo GATE-T3-OK`.
+It resolves against the MAIN checkout (/home/weiss/git/openSME-compose,
+branch main); this task worked in the agentflow worktree and committed on
+tf/T3-sieve-paperless. After merge the gate passes verbatim; equivalent
+gate run inside the worktree (identical commands, worktree as cwd) passes
+NOW — recorded in §5. Both new files live at repo root scripts/ and docs/
+(repo-root docs/ convention as in af-int-T1 / af-calendar-report).
+
+1. LIVE BUG #1 — the "verified facts" were stale: consume dir NOT watched
+------------------------------------------------------------------------
+services/paperless.yml binds ./services/paperless-consume:/consume:ro but
+NEVER sets PAPERLESS_CONSUMPTION_DIR, so the paperless consumer polls the
+image default /usr/src/paperless/consume (an anonymous volume) and the
+host bind is silently ignored — dropping a file into the host consume dir
+ingested NOTHING (verified before the fix: 42 s wait, zero consumer log
+lines). Additionally the :ro bind would break ingestion even with the env
+set: the consumer MOVES processed files out of /consume (they vanish from
+the host dir on success), which fails on a read-only mount.
+
+Fix (both in repo services/paperless.yml and applied to the deployed
+/opt/opensme-compose/compose/services/paperless.yml — backup at
+paperless.yml.bak-T3-20261114, container recreated via compose with the
+stack's full config-file list, --no-deps paperless-ngx):
+      PAPERLESS_CONSUMPTION_DIR: /consume
+      - ./services/paperless-consume:/consume        # was :ro
+
+2. LIVE BUG #2 — fleet firewall broke ALL Stalwart OIDC token validation
+------------------------------------------------------------------------
+Stalwart (directory=oidc) validates every XOAUTH2 token / REST bearer
+against Zitadel userinfo at http://$ZITADEL_DOMAIN:8081/... resolved via
+the fleet extra_hosts pin (stalwart-idpplain.yml) to host-gateway
+172.17.0.1:8081 (host traefik, Host-rewrite middleware). Host-side that
+route answers fine, but ufw INPUT policy DROP blocked container → host
+traffic on :8081, so stalwart's userinfo calls hung:
+  - IMAP AUTHENTICATE XOAUTH2 (any user) → client-side timeout
+  - POST /api/account/auth (self-service app passwords) → timeout/401
+  - stale SOGo-redis session tokens → Zitadel says "access token invalid"
+This made app-password minting (scripts/stalwart-app-password.sh) and
+webmail IMAP XOAUTH2 dead fleet-wide. Root-cause fix, mirroring the
+existing tinyproxy precedent (8888/tcp ALLOW 172.16.0.0/12):
+  sudo ufw allow from 172.16.0.0/12 to any port 8081 proto tcp \
+       comment 'opensme idpplain backchannel (stalwart userinfo)'
+After the rule: TCP OK from the stalwart container, XOAUTH2 IMAP login
+works, app-password endpoint answers. NOTE FOR ANSIBLE FLEET: persist this
+rule in the web_hosts firewall role.
+
+3. DELIVERABLE — scripts/paperless-intake.sh
+--------------------------------------------
+Modes:
+  --print-sieve   prints the sieve fileinto rule + admin install doc (§4)
+  --once          one poll pass (default)
+  --loop N        poll every N seconds (INT/TERM-clean)
+  --dry-run       list what would drop; writes nothing (incl. state)
+  --mailbox NAME  IMAP folder to scan (default INvoices)
+  --status        state-file summary
+Behavior:
+  - IMAP host/port via PAPERLESS_INTAKE_IMAP_HOST/PORT (default
+    127.0.0.1:143 host-side; stalwart:143 reachable inside netns)
+  - Auth against the OIDC-backed directory (regular passwords are inert,
+    docs/SSO.md): PLAIN via app password
+    (PAPERLESS_INTAKE_IMAP_USER/_IMAP_PASSWORD; mint ONCE per account with
+    scripts/stalwart-app-password.sh <email> paperless-intake) or XOAUTH2
+    via PAPERLESS_INTAKE_TOKEN_FILE (live access token, for smoke tests).
+  - READ-ONLY IMAP select: never deletes, never flags, never marks seen —
+    copy semantics by construction.
+  - Every named attachment of every not-yet-handled message is dropped to
+    $PAPERLESS_INTAKE_CONSUME_DIR (default /opt/opensme-compose/compose/
+    services/paperless-consume) atomically (`.part` + os.replace) as
+    <timestamp>-uid<uid>-<sanitized-filename>; paperless never sees partial
+    files. sha256 + per-folder UID(+UIDVALIDITY) bookkeeping in
+    data/paperless-intake.state.json → no re-drops (verified: immediate
+    re-run reports "1 already handled, 0 dropped").
+  - Preflight: consume dir exists/writable (root-owned /opt paths → run
+    via sudo), exactly one auth source set, python3 present.
+  - shellcheck -S warning clean; bash -n clean.
+Known limitation (pre-existing, NOT changed — outside this task's focus):
+scripts/stalwart-app-password.sh runs its REST call INSIDE the sogo6
+container where the corporate proxy env hangs the call; minting works
+reliably from the HOST against http://<stalwart-ip>:8080/api/account/auth
+(bearer = live OIDC token of the account).
+
+4. SIEVE SIDE (--print-sieve output, abbreviated)
+-------------------------------------------------
+require ["fileinto", "mailbox"];
+if anyof (
+    header :contains "Subject" ["invoice","Invoice","INVOICE","Rechnung","INV-"],
+    header :is "X-Invoice" ["1","true","yes"],
+    address :domain :is ["from"] "graphwiz.ai"
+) { fileinto :create "INvoices"; stop; }
+Installed via Stalwart admin UI → account → Sieve Scripts (server-managed
+sieve, no filesystem automount in Stalwart 0.15). Admin notes printed by
+the script: DMARC-less senders (e.g. graphwiz.ai) currently score as spam
+→ whitelist in Stalwart spam settings or misfiled mail lands in "Junk
+Mail"; the intake re-scans the whole folder, so a one-time manual move
+also heals.
+
+5. LIVE EVIDENCE (2026-11-14, stack at /opt/opensme-compose/compose)
+--------------------------------------------------------------------
+(a) REQUIRED drop test (after the §1 fix + container recreate):
+  printf a minimal %PDF-1.4 (413 bytes, file(1): "PDF document, version
+  1.4, 1 page(s)") → sudo tee into
+  /opt/opensme-compose/compose/services/paperless-consume/
+  invoice-t3-sieve-test.pdf at 22:31:35 UTC; PAPERLESS_CONSUMER_POLLING=30;
+  sudo docker logs opensme-paperless | grep -i consum:
+  [2026-11-14 22:31:50,399] [INFO] [paperless.consumer] Consuming invoice-t3-sieve-test.pdf
+  [2026-11-14 22:32:13,458] [INFO] [paperless.consumer] Document 2026-11-14 invoice-t3-sieve-test consumption finished
+  [2026-11-14 22:32:13,470] [INFO] [celery.app.trace] Task documents.tasks.consume_file[...] succeeded ... {'document_id': 19}
+  File MOVED OUT of the consume dir by the consumer (rw fix verified).
+  A second identical PDF was ingested as document_id 20 ("Consuming
+  duplicate ... share the same content" warning is expected for identical
+  test bytes; paperless ingests anyway).
+
+(b) FULL E2E invoice chain (bridge):
+  SMTP invoices@graphwiz.ai → testuser@opensme.local, Subject "Invoice
+  INV-2026-0042 — GraphWiz AI GmbH", attachment INV-2026-0042.pdf
+  (25: queued, delivered local). Stalwart filed it to "Junk Mail"
+  (DMARC none → spam score; see §4) → copied to INvoices (uid 1).
+  Bridge run (app-password PLAIN):
+    --dry-run: "[dry-run] would drop uid 1: INV-2026-0042.pdf (413 bytes)
+                -> .../20261114-224041-uid1-INV-2026-0042.pdf"
+    --once:    "uid 1: dropped INV-2026-0042.pdf ... dropped"
+    re-run:    "1 already handled, 0 attachment(s) dropped"  ← state works
+  Paperless picked it up:
+  [2026-11-14 22:40:46,942] [INFO] [paperless.management.consumer] Adding /consume/20261114-224041-uid1-INV-2026-0042.pdf to the task queue
+  [2026-11-14 22:41:00,393] [INFO] [paperless.consumer] Document 2026-11-14 20261114-224041-uid1-INV-2026-0042 consumption finished
+  [2026-11-14 22:41:00,403] [INFO] [paperless.tasks] ConsumeTaskPlugin completed with: {'document_id': 21}
+  Consume dir empty again afterwards; state file records UIDVALIDITY 3699880626,
+  done uids, seen sha256.
+
+(c) XOAUTH2 path: scripted Zitadel v2 login (tests/05-e2e/run.py
+    api_login pattern: login-client PAT + /v2/sessions user+password
+    checks + /v2/oidc/auth_requests finalize + authorization_code exchange
+    against the portal OIDC client) → fresh JWT for testuser@opensme.local
+    → userinfo 200 with email claim → IMAP AUTHENTICATE XOAUTH2 OK.
+
+6. GATE
+-------
+Inside the worktree (identical gate commands, worktree cwd):
+  bash -n scripts/paperless-intake.sh            OK
+  shellcheck -S warning scripts/paperless-intake.sh   OK (clean)
+  test -f docs/af-int-T3-paperless.txt           OK (this file)
+  grep -qi 'consume' docs/af-int-T3-paperless.txt OK (abundant)
+  → GATE-T3-OK
+The verbatim gate (cd /home/weiss/git/openSME-compose) passes verbatim
+once tf/T3-sieve-paperless is merged to main.
+
+Ops runbook (production): pick the invoice recipient account (e.g.
+invoices@opensme.local), mint the app password once, then e.g.
+  sudo env PAPERLESS_INTAKE_IMAP_USER=invoices@opensme.local \
+           PAPERLESS_INTAKE_IMAP_PASSWORD=<app-pw> \
+    ./scripts/paperless-intake.sh --loop 300
+(systemd unit intentionally NOT added — deployment choice; state file
+data/paperless-intake.state.json is a runtime artifact, not committed).
+The paperless_mail celery task already configured in paperless keeps
+running alongside; this bridge is the stack-native Stalwart→consume path
+that also works for accounts without paperless_mail config.

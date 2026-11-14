@@ -71,6 +71,11 @@ services:
       PAPERLESS_WEBSERVER_WORKERS: "1"
       PAPERLESS_TASK_WORKERS: "1"
       PAPERLESS_CONSUMER_POLLING: "30"
+      # Watch the host bind ./services/paperless-consume (mounted at /consume,
+      # scripts/paperless-intake.sh drops mail attachments here). Without this
+      # the consumer polls the image default /usr/src/paperless/consume (an
+      # anonymous volume) and the host bind is silently ignored.
+      PAPERLESS_CONSUMPTION_DIR: /consume
       PAPERLESS_FILENAME_FORMAT: "{created_year}/{created_month}/{created_day}/{correspondent}/{title}"
       PAPERLESS_CONVERT_MEMORY_LIMIT: 256
       PAPERLESS_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
@@ -106,7 +111,9 @@ services:
       - paperless-data:/usr/src/paperless/data
       - paperless-media:/usr/src/paperless/media
       - paperless-export:/usr/src/paperless/export
-      - ./services/paperless-consume:/consume:ro
+      # NOTE: NOT :ro — the consumer moves processed files OUT of /consume
+      # (into media); a read-only bind makes every ingestion fail at cleanup.
+      - ./services/paperless-consume:/consume
     networks:
       opensme-net:
         aliases:
