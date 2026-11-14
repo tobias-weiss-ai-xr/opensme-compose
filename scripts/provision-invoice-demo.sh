@@ -2,7 +2,9 @@
 #-actions openSME Invoice Ninja Demo Provisioning
 #
 # Single-command bootstrap that seeds a GraphWiz AI demo tenant
-# inside the running Invoice Ninja service via in-container artisan calls.
+# inside the running Invoice Ninja stack by sending SQL directly to the
+# MariaDB database container (the FPM image ships no mysql client and
+# artisan offers no database-manipulation commands).
 # Idempotent and safe to re-run.
 #
 # Usage (from repository root):
@@ -51,6 +53,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 FPM="${PROJECT}-invoiceninja"
+DB="${PROJECT}-invoiceninja-db"
+DB_USER="invoiceninja_user"
+DB_NAME="invoiceninja_db"
 
 # Ensure the FPM container is running
 if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${FPM}\\(\|$\\)"; then
@@ -58,19 +63,40 @@ if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${FPM}\\(\|$\\)"; t
 Start: docker compose --profile invoice up -d"
 fi
 
-# Helper: execute artisan command inside FPM container.
-# NOTE: do NOT pass $DRY_RUN/$VERBOSE as docker argv — `false` there is parsed
-# as the container name and every call dies with "No such container: false".
-art() {
+# Ensure the MariaDB container is running.
+# NOTE: the FPM image cannot run mysql/mariadb, so all SQL is executed
+# inside the db container instead.
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${DB}\\(\|$\\)"; then
+    die "Container '$DB' is not running.
+Start: docker compose --profile invoice up -d"
+fi
+
+# Resolve the invoiceninja DB password: environment first, then the
+# deployed compose .env (read via sudo when not directly readable).
+ENV_FILE="${INVOICE_DEMO_ENV_FILE:-/opt/opensme-compose/compose/.env}"
+if [ "$DRY_RUN" != true ] && [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
+    if [ -r "$ENV_FILE" ]; then
+        INVOICENINJA_DB_PASSWORD="$(sed -n 's/^INVOICENINJA_DB_PASSWORD=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
+    else
+        INVOICENINJA_DB_PASSWORD="$(sudo -n sed -n 's/^INVOICENINJA_DB_PASSWORD=//p' "$ENV_FILE" 2>/dev/null | head -n1 | tr -d '\r' || true)"
+    fi
+fi
+
+# Helper: run SQL against the invoiceninja MariaDB database inside the db
+# container. All demo-data SQL goes through this helper.
+sql() {
+    local query="$1"
     if [ "$DRY_RUN" = true ]; then
-        { printf 'docker exec %q php /var/www/app/artisan' "$FPM"
-          printf ' %q' "$@"; printf '\n'; } >&2
+        printf 'docker exec %q mariadb -u %q -p"***" %q -e %q\n' "$DB" "$DB_USER" "$DB_NAME" "$query" >&2
         return 0
     fi
+    if [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
+        die "INVOICENINJA_DB_PASSWORD is not set and could not be read from $ENV_FILE"
+    fi
     if [ "$VERBOSE" = true ]; then
-        ( set -x; docker exec "$FPM" php /var/www/app/artisan "$@" 2>&1 )
+        ( set -x; docker exec "$DB" mariadb -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1 )
     else
-        docker exec "$FPM" php /var/www/app/artisan "$@" 2>&1
+        docker exec "$DB" mariadb -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1
     fi
 }
 
@@ -133,26 +159,30 @@ check_already_provisioned() {
 ###############################################################################
 do_clean() {
     info "Removing demo data…"
-    
+
     # Delete products
     for p in "${PRODUCTS[@]}"; do
         local name
         name=$(echo "$p" | cut -d'|' -f1)
-        art db:delete "DELETE FROM products WHERE name = '$name'" 2>/dev/null | grep -q . && ok "Deleted product: $name" || true
+        if sql "DELETE FROM products WHERE name = '$name'" >/dev/null; then
+            ok "Deleted product: $name"
+        fi
     done
-    
+
     # Delete projects and clients
     for c in "${CLIENTS[@]}"; do
         local cname
         cname=$(echo "$c" | cut -d'|' -f1)
         local cid
         cid=$(php_exec "\$cl = \\App\\Models\\Client::where('name','$cname')->first(); echo \$cl ? \$cl->id : 0;" 2>/dev/null | tr -d '\n')
-        [[ "$cid" != "0" ]] && art db:delete "DELETE FROM projects WHERE client_id = $cid" 2>/dev/null
-        art db:delete "DELETE FROM clients WHERE name = '$cname'" 2>/dev/null | grep -q . && ok "Deleted client: $cname" || true
+        [[ -n "$cid" && "$cid" != "0" ]] && sql "DELETE FROM projects WHERE client_id = $cid" >/dev/null
+        if sql "DELETE FROM clients WHERE name = '$cname'" >/dev/null; then
+            ok "Deleted client: $cname"
+        fi
     done
-    
+
     # Reset company name
-    art db:update "UPDATE companies SET name='My Company', email='admin@example.com' WHERE id=1" 2>/dev/null
+    sql "UPDATE companies SET name='My Company', email='admin@example.com' WHERE id=1" >/dev/null
     ok "Demo data removed"
 }
 
@@ -170,9 +200,9 @@ do_provision() {
     # 1. Company
     ###########################################################################
     info "  → Company profile…"
-    art db:update "
-        UPDATE companies 
-        SET 
+    sql "
+        UPDATE companies
+        SET
             name = '$COMPANY_NAME',
             email = '$COMPANY_EMAIL',
             address = '${COMPANY_ADDRESS//$'\n'/\\n}',
@@ -182,7 +212,7 @@ do_provision() {
             custom_value1 = '',
             custom_value2 = ''
         WHERE id = 1
-    " 2>/dev/null
+    "
     ok "Company configured"
 
     ###########################################################################
@@ -190,24 +220,23 @@ do_provision() {
     ###########################################################################
     info "  → Company settings…"
     # Set color scheme and logo via settings
-    art db:insert "
+    sql "
         INSERT INTO company_settings (company_id, settings_key, settings_value)
         VALUES (1, 'invoice_color', '$COLOR_SCHEME')
-        ON CONFLICT (company_id, settings_key) DO UPDATE SET settings_value = EXCLUDED.settings_value
-    " 2>/dev/null || true
+        ON DUPLICATE KEY UPDATE settings_value = VALUES(settings_value)
+    " || true
     ok "Settings saved"
 
     ###########################################################################
     # 3. Tax Rates (ensure EUR taxes exist)
     ###########################################################################
     info "  → Tax rates…"
-    art db:insert "
-        INSERT INTO tax_rates (name, rate, is_compound, type_id)
+    sql "
+        INSERT IGNORE INTO tax_rates (name, rate, is_compound, type_id)
         VALUES ('Standard VAT', 19.00, false, 1),
                ('Reduced VAT', 7.00, false, 1),
                ('No VAT', 0.00, false, 1)
-        ON CONFLICT (name) DO NOTHING
-    " 2>/dev/null || true
+    " || true
     ok "Tax rates configured"
 
     ###########################################################################
@@ -224,23 +253,24 @@ do_provision() {
         country=$(echo "$c" | cut -d'|' -f7)
         address="$street\n$postal $city\n$country"
 
-        art db:insert "
+        if sql "
             INSERT INTO clients (id, user_id, assigned_user_id, name, email, address1, address2, city, state, postal_code, country_id, currency_id, custom_value1, custom_value2, custom_value3, custom_value4, is_deleted, balance, paid_to_date, last_login, size_id, industry_id, private_notes, public_notes, website, phone, created_at, updated_at)
             VALUES (
-                DEFAULT, NULL, NULL, '$name', '$email', '${address//$'\n'/\\n}', '', '$city', '', '$postal', (SELECT id FROM countries WHERE iso_3166_2 = 'DE' LIMIT 1), 1, NULL, NULL, NULL, NULL, 0, 0.00, 0.00, NULL, NULL, NULL, NULL, NULL, NULL, NOW(), NOW()
+                DEFAULT, NULL, NULL, '$name', '$email', '${address//$'\n'/\\n}', '', '$city', '', '$postal', (SELECT id FROM countries WHERE iso_3166_2 = 'DE' LIMIT 1), 1, NULL, NULL, NULL, NULL, 0, 0.00, 0.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NOW(), NOW()
             )
-            ON CONFLICT (email) DO UPDATE
-               SET name = EXCLUDED.name,
-                   email = EXCLUDED.email,
-                   address1 = EXCLUDED.address1,
-                   city = EXCLUDED.city,
-                   postal_code = EXCLUDED.postal_code,
-                   country_id = EXCLUDED.country_id,
-                   updated_at = NOW()
-            RETURNING id
-        " 2>/dev/null | while read -r cid; do
-            [[ -n "$cid" && "$cid" != "0" ]] && ok "  ✓ $name"
-        done
+            ON DUPLICATE KEY UPDATE
+               name = VALUES(name),
+               email = VALUES(email),
+               address1 = VALUES(address1),
+               city = VALUES(city),
+               postal_code = VALUES(postal_code),
+               country_id = VALUES(country_id),
+               updated_at = NOW()
+        "; then
+            ok "  ✓ $name"
+        else
+            warn "  ✗ $name"
+        fi
     done
 
     ###########################################################################
@@ -264,7 +294,7 @@ do_provision() {
         name=$(echo "$p" | cut -d'|' -f1)
         desc=$(echo "$p" | cut -d'|' -f2)
         price=$(echo "$p" | cut -d'|' -f3)
-        
+
         # Use standard VAT for most, reduced for books
         if echo "$name" | grep -qi "ebook\|book\|guide"; then
             tax_id=$tax_id_reduced
@@ -272,21 +302,22 @@ do_provision() {
             tax_id=$tax_id_standard
         fi
 
-        art db:insert "
+        if sql "
             INSERT INTO products (id, user_id, name, description, product_key, notes, cost, price, quantity, tax_id, tax_name, created_at, updated_at, product_type_id)
             VALUES (
-                DEFAULT, NULL, '$name', '$desc', LOWER(REGEXP_REPLACE('${name// /_}', '[^a-zA-Z0-9_\-]', '', 'g')), '', 0.00, $price, 9999, $tax_id, (SELECT name FROM tax_rates WHERE id = $tax_id LIMIT 1), NOW(), NOW(), 1
+                DEFAULT, NULL, '$name', '$desc', LOWER(REGEXP_REPLACE('${name// /_}', '[^a-zA-Z0-9_-]', '')), '', 0.00, $price, 9999, $tax_id, (SELECT name FROM tax_rates WHERE id = $tax_id LIMIT 1), NOW(), NOW(), 1
             )
-            ON CONFLICT (product_key) DO UPDATE
-               SET name = EXCLUDED.name,
-                   description = EXCLUDED.description,
-                   price = EXCLUDED.price,
-                   tax_id = EXCLUDED.tax_id,
-                   updated_at = NOW()
-            RETURNING id
-        " 2>/dev/null | while read -r pid; do
-            [[ -n "$pid" ]] && ok "  ✓ $name (€$price)"
-        done
+            ON DUPLICATE KEY UPDATE
+               name = VALUES(name),
+               description = VALUES(description),
+               price = VALUES(price),
+               tax_id = VALUES(tax_id),
+               updated_at = NOW()
+        "; then
+            ok "  ✓ $name (€$price)"
+        else
+            warn "  ✗ $name"
+        fi
     done
 
     ###########################################################################
@@ -298,7 +329,7 @@ do_provision() {
         cname=$(echo "$c" | cut -d'|' -f1)
         local cid
         cid=$(php_exec "\$cl = \\App\\Models\\Client::where('name','$cname')->first(); echo \$cl ? \$cl->id : 0;" 2>/dev/null | tr -d '\n')
-        [[ "$cid" == "0" ]] && continue
+        [[ -z "$cid" || "$cid" == "0" ]] && continue
 
         # Get matching project def
         for p in "${PROJECTS[@]}"; do
@@ -306,21 +337,22 @@ do_provision() {
             p_client=$(echo "$p" | cut -d'|' -f1)
             p_name=$(echo "$p" | cut -d'|' -f2)
             p_budget=$(echo "$p" | cut -d'|' -f3)
-            
+
             if [[ "$p_client" == "$cname" ]]; then
-                art db:insert "
+                if sql "
                     INSERT INTO projects (id, user_id, client_id, name, private_notes, public_notes, budget, rate, created_at, updated_at, is_deleted)
                     VALUES (
                         DEFAULT, NULL, $cid, '$p_name', '', '', $p_budget, 150.00, NOW(), NOW(), 0
                     )
-                    ON CONFLICT (client_id, name) DO UPDATE
-                       SET budget = EXCLUDED.budget,
-                           rate = EXCLUDED.rate,
-                           updated_at = NOW()
-                    RETURNING id
-                " 2>/dev/null | while read -r proj_id; do
-                    [[ -n "$proj_id" ]] && ok "  ✓ $p_name (€$p_budget)"
-                done
+                    ON DUPLICATE KEY UPDATE
+                       budget = VALUES(budget),
+                       rate = VALUES(rate),
+                       updated_at = NOW()
+                "; then
+                    ok "  ✓ $p_name (€$p_budget)"
+                else
+                    warn "  ✗ $p_name"
+                fi
             fi
         done
     done
