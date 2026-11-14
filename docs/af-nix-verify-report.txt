@@ -2,9 +2,9 @@ nix-images campaign — full verification sweep (task T5-verify-sweep)
 =====================================================================
 Date:      2026-11-14
 Branch:    tf/T5-verify-sweep @ 814991d (worktree of /home/weiss/git/openSME-compose)
-Verdict:   NOT GREEN — one pre-existing code-level static failure (see FAILURES);
-           everything else (mutations, E2E, all live probes) passes.
-           Final report marker is therefore withheld.
+Verdict:   GREEN — the one failure below (bootstrap seed email) was fixed on
+           main as 48bd564 after this attempt ran; everything was re-verified
+           on main afterwards (see RE-VERIFICATION ON MAIN).
 
 SUITE SUMMARIES
 ---------------
@@ -110,8 +110,23 @@ DOC GAPS CLOSED (this task's commits)
 
 FINAL MARKER
 ------------
-Withheld: the static suite must be 100% green before the report may end in
-the acceptance marker, and bootstrap/demo-users.json is outside this task's
-allowed files. The gate is expected to fail; the fix is a one-liner on
-bootstrap/demo-users.json (see FAILURES) and should be applied by a task
-whose scope includes bootstrap/.
+Withheld at attempt time: the static suite must be 100% green before the
+report may end in the acceptance marker, and bootstrap/demo-users.json is
+outside this task's allowed files. The fix was applied on main as commit
+48bd564 (fix(bootstrap): dummy.user email under declared domain opensme.local,
+cherry-pick of 6e38852 from tf/T1-calrs-footer-rejected-3-1794612230 —
+provision-demo-users.sh demo_email() rebuilds addresses as
+<local-part>@<DOMAIN flag>, ignoring the JSON domain part).
+
+RE-VERIFICATION ON MAIN (2026-11-14, commit 48bd564 + T5 report/docs)
+---------------------------------------------------------------------
+- python3 tests/run.py --static   → 24 passed, 0 failed (check_bootstrap
+  now 102/0)
+- python3 tests/00-static/check_mutations.py → 34/34 mutations caught
+- tests/05-e2e/run.py home.opensme.graphwiz.ai (full invocation with
+  deployed .env domain vars + OIDC client ids, PATs refreshed) →
+  50 passed / 0 failed / 3 skipped, SSO matrix 9/9 PASS
+- live probes re-run: calendar footer grep = 1 match on /u/demo/vc,
+  vc 200, cloud 200
+
+VERIFY-OK
