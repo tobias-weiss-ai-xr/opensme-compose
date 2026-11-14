@@ -67,6 +67,7 @@ LAYERS = {
             ("Notes celery broker auth", "tests/00-static/check_notes_broker.py"),
             ("Dev-maintenance-bot agent lint", "tests/00-static/check_agent.py"),
             ("Backup drift guard", "tests/00-static/check_backup.py"),
+            ("Env-quote hardening (brand/loader)", "tests/00-static/check_env_quote.py"),
             ("Test-suite coverage (no dead checks)", "tests/00-static/check_suite_coverage.py"),
             ("Mutation tests (checks have teeth)", "tests/00-static/check_mutations.py"),
         ],
@@ -305,8 +306,10 @@ def main():
         name = layer.get("name", f"Layer {layer_num}")
         print(f"  {icon} Layer {layer_num}: {name}")
 
-    status_color = GREEN if total_fail == 0 else RED
-    print(f"\n  {BOLD}Total: {GREEN}{total_pass} passed{NC}, {status_color}{total_fail} failed{NC}")
+    # Total line stays PLAIN TEXT (no ANSI codes): gate scripts and CI
+    # summary parsers grep it verbatim, e.g. `[0-9]+ passed, *0 failed` —
+    # color codes between "passed" and "," would break that contract.
+    print(f"\n  Total: {total_pass} passed, {total_fail} failed")
     print(f"{BOLD}╚══════════════════════════════════════════════════════════════╝{NC}")
 
     return total_fail == 0

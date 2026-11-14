@@ -104,10 +104,13 @@ set_env() {
     return 0
   fi
   if sudo -n test -w "$file" 2>/dev/null; then
-    sudo -n sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+    # values MUST be written double-quoted (env-quote hardening): an
+    # unquoted multi-word value makes `source .env` assign the first word
+    # and try to EXECUTE the second ('Source: command not found' incident)
+    sudo -n sed -i "s|^${key}=.*|${key}=\"${val}\"|" "$file"
     # append if missing
     if ! sudo -n grep -q "^${key}=" "$file"; then
-      printf '%s=%s\n' "$key" "$val" | sudo -n tee -a "$file" >/dev/null
+      printf '%s="%s"\n' "$key" "$val" | sudo -n tee -a "$file" >/dev/null
     fi
   else
     err "  cannot write $file (no sudo?)"
