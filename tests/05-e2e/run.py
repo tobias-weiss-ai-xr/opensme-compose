@@ -471,6 +471,20 @@ def _marker_webmail(r, session, base):
     if not (r.status_code in REDIRECTS and "/auth/callback" in loc) \
             and not cookies:
         return f"callback HTTP {r.status_code} Location={loc!r} — no session"
+    # Verify the issued token actually authenticates an API call — catches a
+    # stale OIDC client secret / broken allow-redirect that still 302s.
+    import re as _re
+    m = _re.search(r"#token=([^&]+)", loc)
+    if m:
+        tok = m.group(1)
+        try:
+            rr = session.get(base + "/api/user/v1/preferences",
+                             headers={"Authorization": f"Bearer {tok}"}, timeout=T)
+            if rr.status_code != 200:
+                return (f"SOGo token does not authenticate "
+                        f"/preferences: HTTP {rr.status_code}")
+        except Exception as e:
+            return f"SOGo preferences check failed: {e}"
     return None
 
 

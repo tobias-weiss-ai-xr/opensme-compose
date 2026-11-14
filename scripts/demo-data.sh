@@ -38,6 +38,11 @@ cd "$SCRIPT_DIR/.."
 MODE=""
 DRY_RUN=false
 LIST_ONLY=false
+VERIFY=false
+DRY_ARGS=()
+STATUS_ONLY=false
+LOG_FILE=""
+FAILED=()
 
 usage() {
   cat <<'EOF'
@@ -65,6 +70,9 @@ Options:
   --components L   comma subset of the CORE components only
   --data           (deprovision) also `docker compose down -v`
   --yes            (deprovision --data) skip the confirmation prompt
+  --verify         (provision) run SSO smoke (tweiss + dummy.user) afterwards
+  --status         report current demo-data state (containers + user count) and exit
+  --log PATH       tee all output to PATH (audit trail)
   --list           print this inventory and exit
   --help, -h       show this help
 
@@ -105,14 +113,39 @@ while [[ $# -gt 0 ]]; do
     --data|--yes) CORE_ARGS+=("$1"); shift ;;
     --components) CORE_ARGS+=("$1" "$2"); shift 2 ;;
     --skip-*)     SKIP_EXTRA+=("${1#--skip-}"); CORE_ARGS+=("$1"); shift ;;
+    --verify)     VERIFY=true; shift ;;
+    --status)     STATUS_ONLY=true; shift ;;
+    --log)        [[ -n "${2:-}" ]] || { err "--log needs a path"; exit 1; }; LOG_FILE="$2"; shift 2 ;;
     --list)       LIST_ONLY=true; shift ;;
     --help|-h)    usage; exit 0 ;;
     *)            err "Unknown option: $1 (see --help)"; exit 1 ;;
   esac
 done
 
+# build the dry-run argv once (truthy, not just non-empty)
+if [[ "$DRY_RUN" == true ]]; then DRY_ARGS+=(--dry-run); fi
+
 if [[ "$LIST_ONLY" == true ]]; then
   usage; exit 0
+fi
+
+# ── --status: report, don't change ───────────────────────────────────────
+if [[ "$STATUS_ONLY" == true ]]; then
+  info "Demo-data status"
+  echo ""
+  info "Containers:"
+  for c in opensme-zitadel opensme-portal opensme-notes-backend opensme-opencloud opensme-paperless opensme-sogo6-postgres opensme-invoiceninja opensme-calendar opensme-camunda opensme-limesurvey; do
+    st=$(docker ps --filter "name=^${c}$" --format '{{.Status}}' 2>/dev/null | head -1)
+    printf '  %-28s %s\n' "$c" "${st:-DOWN}"
+  done
+  echo ""
+  if [[ -r /tmp/opencode/machine-pat ]]; then
+    cnt=$(curl -sk -H "Authorization: Bearer $(cat /tmp/opencode/machine-pat)"           -H 'Content-Type: application/json'           https://auth.home.opensme.graphwiz.ai/management/v1/users/_search           -d '{}' 2>/dev/null | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("result",[])))' 2>/dev/null || echo "?")
+    info "Zitadel users: ${cnt}"
+  else
+    warn "no machine PAT at /tmp/opencode/machine-pat — skipping user count"
+  fi
+  exit 0
 fi
 
 skip_extra() {
@@ -133,10 +166,39 @@ run() {
     ok "  ok: $*"
   else
     warn "  failed: $* (continuing)"
+    FAILED+=("$*")
   fi
 }
 
 running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
+
+# ── optional audit log ───────────────────────────────────────────────────
+if [[ -n "$LOG_FILE" ]]; then
+  mkdir -p "$(dirname "$LOG_FILE")"
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  info "Logging to $LOG_FILE"
+fi
+
+# ── source deployed .env for component creds (best effort) ───────────────
+DEPLOYED_ENV="/opt/opensme-compose/compose/.env"
+if sudo -n test -r "$DEPLOYED_ENV" 2>/dev/null; then
+  set +e
+  set -a
+  # shellcheck disable=SC1090
+  source <(sudo -n cat "$DEPLOYED_ENV" 2>/dev/null)
+  set +a
+  set -e
+  echo "DEBUG after source: OC_ADMIN_PASSWORD=${OC_ADMIN_PASSWORD:-<unset>}" >  set -e
+fi
+
+# auto-discover Zitadel machine PAT if not provided
+if [[ -z "${ZITADEL_PAT:-}" && -r /tmp/opencode/machine-pat ]]; then
+  ZITADEL_PAT="$(cat /tmp/opencode/machine-pat)"
+  export ZITADEL_PAT
+fi
+if [[ -z "${E2E_ZITADEL_PAT:-}" && -n "${ZITADEL_PAT:-}" ]]; then
+  export E2E_ZITADEL_PAT="$ZITADEL_PAT"
+fi
 
 info "Mode: ${MODE}"
 [[ "$DRY_RUN" == true ]] && info "Dry run — nothing will be changed"
@@ -158,13 +220,13 @@ info "── app demo data (${MODE}) ──"
 if ! skip_extra opencloud; then
   if [[ "$MODE" == "provision" ]]; then
     if running opensme-opencloud; then
-      run bash scripts/provision-opencloud.sh ${DRY_RUN:+--dry-run}
+      run bash scripts/provision-opencloud.sh "${DRY_ARGS[@]}"
     else
       warn "opensme-opencloud not running — skipping opencloud"
     fi
   else
     if running opensme-opencloud; then
-      run bash scripts/provision-opencloud.sh --clean ${DRY_RUN:+--dry-run}
+      run bash scripts/provision-opencloud.sh --clean "${DRY_ARGS[@]}"
     else
       warn "opensme-opencloud not running — skipping opencloud"
     fi
@@ -201,9 +263,9 @@ fi
 if ! skip_extra invoice-demo && ! skip_extra invoice; then
   if running opensme-invoiceninja; then
     if [[ "$MODE" == "provision" ]]; then
-      run bash scripts/provision-invoice-demo.sh ${DRY_RUN:+--dry-run}
+      run bash scripts/provision-invoice-demo.sh "${DRY_ARGS[@]}"
     else
-      run bash scripts/provision-invoice-demo.sh --clean ${DRY_RUN:+--dry-run}
+      run bash scripts/provision-invoice-demo.sh --clean "${DRY_ARGS[@]}"
     fi
   else
     warn "opensme-invoiceninja not running — skipping invoice-demo"
@@ -214,7 +276,11 @@ fi
 if ! skip_extra calendar; then
   if running opensme-calendar; then
     if [[ "$MODE" == "provision" ]]; then
-      run bash scripts/calendar-setup.sh
+      ENV_ARG=()
+      if [[ -r /opt/opensme-compose/compose/.env ]]; then
+        ENV_ARG+=(--env-file /opt/opensme-compose/compose/.env)
+      fi
+      run bash scripts/calendar-setup.sh "${ENV_ARG[@]}"
     else
       warn "calendar event types are not auto-removed (re-run provision to reset)"
     fi
@@ -227,7 +293,7 @@ fi
 if ! skip_extra admin; then
   if running opensme-zitadel; then
     if [[ "$MODE" == "provision" ]]; then
-      run bash scripts/provision-admin.sh ${DRY_RUN:+--dry-run}
+      run bash scripts/provision-admin.sh "${DRY_ARGS[@]}"
     else
       warn "admin coverage is not auto-revoked (re-run provision to reset)"
     fi
@@ -236,5 +302,30 @@ if ! skip_extra admin; then
   fi
 fi
 
+# ── optional smoke verification (provision only) ─────────────────────────
+if [[ "$MODE" == "provision" && "$VERIFY" == true && "$DRY_RUN" != true ]]; then
+  echo ""
+  info "── smoke verification (provisioned-sso-smoke.sh) ──"
+  if [[ -x scripts/provisioned-sso-smoke.sh ]]; then
+    for u in tweiss dummy.user; do
+      if bash scripts/provisioned-sso-smoke.sh "$u" >/tmp/demo-data-smoke.log 2>&1; then
+        ok "  smoke OK: $u"
+      else
+        warn "  smoke FAIL: $u (see /tmp/demo-data-smoke.log)"
+        FAILED+=("smoke:$u")
+      fi
+    done
+  else
+    warn "scripts/provisioned-sso-smoke.sh missing — skipping --verify"
+  fi
+fi
+
+# ── summary ───────────────────────────────────────────────────────────────
 echo ""
-ok "Demo data ${MODE} complete."
+if [[ ${#FAILED[@]} -eq 0 ]]; then
+  ok "Demo data ${MODE} complete — all components OK."
+else
+  warn "Demo data ${MODE} complete with ${#FAILED[@]} failure(s):"
+  for f in "${FAILED[@]}"; do warn "  - $f"; done
+  exit 1
+fi
