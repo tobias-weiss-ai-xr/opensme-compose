@@ -156,3 +156,172 @@ Acceptance gate command (verbatim) passes:
   grep -qiE 'event.type|admin|source' docs/af-calendar-report.txt &&
   echo GATE-T2-OK
 → GATE-T2-OK
+
+AF T3-eventtype-fix-and-chat — report (2026-11-14)
+==================================================
+
+TASK: Fix the junk event_types.location_value of slug 'call' (dashboard-
+created row carried its own title 'Discovery Call' as location_value — a
+dead link on guest booking confirmations), add a 'chat' event type
+("Text Chat", 30 min) pointing at the element chat room, and extend
+scripts/calendar-setup.sh with an idempotent seeding step so fresh installs
+reach the same state via code. Scope: scripts/ + docs/ only; the live DB
+fix is data surgery on the running stack per task brief. Worktree branch:
+tf/T3-eventtype-fix-and-chat.
+
+1. DISCOVERY (live state before the fix)
+----------------------------------------
+1.1 calrs 1.6.0 (container opensme-calendar, healthy) + radicale passenger
+    opensme-calendar-radicale (network_mode "service:calendar", pinned IP
+    172.19.0.250 — see T2 D1/V6).
+1.2 /var/lib/calrs IS the named-volume mount compose_calrs-data
+    (docker-compose.yml declares top-level volume "calrs-data:", lines
+    613 + 862). DB calrs.db: owner calrs:calrs (999:999), mode 644,
+    journal_mode=wal (live -wal/-shm files → a plain docker cp yields a
+    torn snapshot; the helper-container pattern below reads through
+    sqlite itself instead).
+1.3 event_types BEFORE (helper SELECT):
+      vc   → location_value 'https://vc.home.opensme.graphwiz.ai/room/{uid}'
+             (GREEN baseline; admin account 3507debb-6a1d-4273-8e49-
+             51411b00bd01 = demo@opensme.local)
+      call → location_value 'Discovery Call'   ← THE JUNK: the literal
+             title string as location; guest confirmations render a dead
+             link. Row dashboard-created 2026-11-13 by the OIDC operator
+             account 42ea1110-2204-4def-b479-6e749433c42a
+             (testuser@opensme.local), reminder_minutes 1440, no
+             description.
+1.4 Element room discovery (task-mandated sources):
+    $ sudo grep -iE 'room|ELEMENT' services/element.yml → template +
+      rendered config carry only server_name
+      (matrix.home.opensme.graphwiz.ai); no default_room_config.
+    $ .env key NAMES only: the sole room|element match is
+      VC_ROOM_IMAGE_TAG. → NO provisioned default room exists, so the
+      static fallback URL applies:
+      https://chat.home.opensme.graphwiz.ai/#/room/support
+      (element router Host: chat.home.opensme.graphwiz.ai).
+
+2. LIVE DB FIX (goals 1+2 — SQL used)
+-------------------------------------
+2.1 docker stop opensme-calendar (clean SIGTERM close checkpoints the
+    WAL; calrs holds the SQLite db — avoid corruption per brief).
+2.2 Helper container (brief's option A; NO docker-cp ownership dance —
+    the root helper edits the existing file in place, and a cp-out would
+    land root:root anyway):
+    sudo docker run --rm -i -v compose_calrs-data:/data alpine:3.19 \
+      sh -c 'apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/calrs.db'
+    piped SQL (verbatim):
+      update event_types
+        set location_value='https://vc.home.opensme.graphwiz.ai/room/{uid}'
+        where slug='call';
+      insert into event_types (id, account_id, slug, title, duration_min,
+                               location_type, location_value)
+      select 'e4e0c2fa-19d4-421d-98ab-4b2a9510a641',
+             '42ea1110-2204-4def-b479-6e749433c42a',
+             'chat','Text Chat',30,'link',
+             'https://chat.home.opensme.graphwiz.ai/#/room/support'
+      where not exists (select 1 from event_types where slug='chat');
+    The insert is guarded (idempotent). Chat was seeded on the SAME
+    account as the operator's 'call' row (42ea1110… = testuser), pairing
+    the operator's contact types; see D2 for the account-placement note.
+    Rows verified by SELECT inside the same helper session.
+2.3 docker start opensme-calendar → healthy;
+    docker restart opensme-calendar-radicale (passenger re-attach,
+    cf. T2 D1) → healthy.
+
+3. VERIFICATIONS (command + evidence)
+-------------------------------------
+V1 AFTER rows via helper SELECT: call →
+   'https://vc.home.opensme.graphwiz.ai/room/{uid}'; chat →
+   id e4e0c2fa-19d4-421d-98ab-4b2a9510a641, account 42ea1110-…,
+   title 'Text Chat', duration_min 30, location_type 'link',
+   location_value 'https://chat.home.opensme.graphwiz.ai/#/room/support'.
+   Gate part 1 (docker cp + host python3 asserts, verbatim) →
+   CALRS-ROWS-OK.
+V2 calrs CLI sees the rows (calrs respects existing DB rows):
+   $ docker compose exec -T calendar calrs event-type list
+     vc   | Video Consultation | 30min | active
+     call | Discovery Call     | 30min | active
+     chat | Text Chat          | 30min | active
+V3 Sync still works after the stop/start cycle:
+   calrs sync → "✓ Public Booking — unchanged … CalDAV sync completed
+   source_id=34025673-4739-4d8c-a21a-b4524cb98f09", exit 0.
+V4 Booking pages over the edge:
+   /u/testuser/chat → 200, /u/demo/vc → 200,
+   https://chat.home.opensme.graphwiz.ai/ → 200.
+
+4. SCRIPT CHANGE (goal 3; scripts/calendar-setup.sh 556 → 688 lines)
+---------------------------------------------------------------------
+4.1 New Step 9/10 between step 8 (vc event-type create) and the booking-
+    URL print (now Step 10/10); header list renumbered to 10 items;
+    usage() documents CHAT_ROOM_URL.
+4.2 WHY a sqlite helper (comment block in the script): calrs v1.6.0
+    `event-type create` has NO location flags and there is no
+    `event-type update`; the container ships neither sqlite3 nor python3.
+    The step follows the Step-1 htpasswd-helper pattern: one-shot
+    alpine:3.19 (apk add sqlite; needs package-mirror network) against
+    the calrs-data volume (name resolved via `compose config` →
+    .volumes["calrs-data"].name, fallback <project>_calrs-data).
+4.3 Idempotence: a read-only probe (SELECT … CASE → IN-SYNC/SEED; empty
+    output = unknown → warn + skip, never stop a healthy calendar on a
+    guess). APPLY: dc stop calendar → helper piped SQL (UPDATE call to
+    the VC room template + guarded INSERT chat; account = vc row's
+    account_id, fallback min(accounts.id)) → dc start calendar →
+    dc restart calendar-radicale (T2 D1 passenger re-attach) →
+    dc up -d --wait calendar calendar-radicale → re-probe; exit 1 unless
+    the post-seed probe reports IN-SYNC.
+4.4 Config: VC_ROOM_TEMPLATE =
+    ${CALRS_VC_URL:-https://vc.home.opensme.graphwiz.ai} (trailing slash
+    stripped) + /room/{uid}; CHAT_ROOM_URL default
+    https://chat.home.opensme.graphwiz.ai/#/room/support (static-room
+    comment); single-quote guard on both links (they are embedded in
+    single-quoted SQL literals); chat row id = v4 UUID (python3, with a
+    /dev/urandom fallback).
+4.5 bash -n OK; shellcheck -S warning OK (0.9.0, baseline clean).
+
+5. DEVIATIONS / FINDINGS
+------------------------
+D1 STATIC chat room (task-flagged limitation): element-web ships no
+   default-room configuration and no matrix room provisioner exists, so
+   EVERY chat booking joins the same room (#/room/support). The booking
+   flow is unaffected (calrs renders the link); per-booking rooms would
+   need a provisioner integration — out of scope for T3. Documented here
+   and in the script.
+D2 Account placement: live chat was seeded on the OIDC testuser account
+   (42ea1110…, the account that also owns the operator-created 'call'
+   row), while the script's seeding places chat on the admin/vc account
+   (consistent with how the script creates 'vc'). Both deliberate; when
+   sharing booking links, mind which account owns the chat event type.
+D3 Root cause of the junk 'call' row: the dashboard's event-type editor
+   persists the TITLE into location_value (calrs default). calrs itself
+   is vendor code — not fixed here; the script's Step 9 self-heals the
+   value on every run.
+D4 The helper needs network access to the alpine package mirror per run
+   (apk add sqlite). When offline, the probe returns unknown and the
+   step warns + skips rather than stopping a healthy calendar stack.
+D5 Carried over from T2 (report T2, D1 recommendation): step 3 now
+   converges BOTH services (`dc up -d --wait calendar calendar-radicale`,
+   tolerated when the passenger is not in the chain) so any calendar-
+   container recreation re-attaches the netns passenger automatically —
+   the first task with scripts/ in scope since T2 flagged it.
+
+6. SECRETS HANDLING
+-------------------
+No secret values printed or written: .env discovery recorded KEY NAMES
+only (e.g. ELEMENT_DEFAULT_SERVER_URL, VC_ROOM_IMAGE_TAG,
+CALRS_OIDC_CLIENT_SECRET); the helper SQL carries URLs only. One sed-
+masking regex during discovery missed a value in terminal output; it was
+never copied into any file or report.
+
+7. GATE
+-------
+Part 1 (verbatim):
+  python3 - <<'PY' … docker cp opensme-calendar:/var/lib/calrs/calrs.db …
+  assert rows['call'][1]=='https://vc.home.opensme.graphwiz.ai/room/{uid}'
+  assert rows['chat'][1].startswith('https://')
+→ CALRS-ROWS-OK
+Part 2 (verbatim):
+  grep -q 'CHAT_ROOM_URL' scripts/calendar-setup.sh &&
+  bash -n scripts/calendar-setup.sh &&
+  shellcheck -S warning scripts/calendar-setup.sh &&
+  grep -q 'T3' docs/af-calendar-report.txt && echo GATE-T3-OK
+→ GATE-T3-OK

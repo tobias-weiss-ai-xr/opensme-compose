@@ -33,7 +33,18 @@
 #   8. Public event type  — `calrs event-type create` for the public
 #      "Video Consultation" booking page (slug `vc`, 30 min, VC link
 #      from CALRS_VC_URL); skipped when the slug exists.
-#   9. Prints the public booking URL + a one-line privacy reminder.
+#   9. Event-type booking links — calrs v1.6.0 has NO location flags and
+#      no `event-type update`, so booking links are unreachable via the
+#      CLI: ensure slug 'call' carries the VC room template (a dashboard-
+#      created 'call' otherwise ships location_value = its own title —
+#      a dead link on guest booking confirmations) and ensure slug
+#      'chat' ("Text Chat", 30 min) carries CHAT_ROOM_URL. Applied via a
+#      stop/sqlite-helper-container/start cycle on the calrs-data volume
+#      (the container ships no sqlite3); skipped entirely when both links
+#      already match. NOTE: the chat room is STATIC — every chat booking
+#      joins the same room (no per-booking rooms without a matrix room
+#      provisioner).
+#   10. Prints the public booking URL + a one-line privacy reminder.
 #
 # calrs v1.6.0 CLI surface — VERIFIED against the pinned upstream tag
 # (github.com/olivierlambert/calrs v1.6.0, src/commands/*.rs); do NOT
@@ -57,7 +68,8 @@
 #     VC URL in --description is NEVER rendered to guests — the booking
 #     confirmation shows a clickable join link only when
 #     event_types.location_value is set (seed it via the dashboard or a
-#     direct UPDATE).
+#     direct UPDATE — step 9 below does exactly that via a sqlite helper
+#     container).
 #   * Booking pages live at /u/<username>/<slug>; the username is the
 #     lowercased email local part with '.'->'-' (src/auth.rs
 #     generate_username).
@@ -121,6 +133,9 @@ Environment (from the env file or the environment):
   RADICALE_USER / RADICALE_PASSWORD   booking CalDAV login (htpasswd, bcrypt)
   CALRS_ADMIN_EMAIL / CALRS_ADMIN_PASSWORD  calrs admin (first user = admin)
   CALRS_VC_URL                        video-consultation join link (optional)
+  CHAT_ROOM_URL                       text-chat booking link (default:
+                                      https://chat.home.opensme.graphwiz.ai/#/room/support
+                                      — a STATIC element-web room)
   CALENDAR_DOMAIN / CALRS_IMAGE_TAG   calendar host / image tag (compose)
 
 Requires: docker, jq, python3 (CONTRIBUTING baseline) — python3 feeds
@@ -347,7 +362,26 @@ if [[ -z "${CALRS_VC_URL:-}" ]]; then
   warn "CALRS_VC_URL is empty — the event type will be created without a video-call link"
 fi
 
-# ── Step 1/9: Radicale htpasswd (helper container, /config/users) ──────────
+# ── booking links the v1.6.0 CLI cannot express (Step 9 seeds them) ─────────
+# VC room template: {uid} is expanded by calrs PER BOOKING (same mechanism
+# the live 'vc' row uses); derived from CALRS_VC_URL when set, falling back
+# to the deployed host literal.
+VC_ROOM_TEMPLATE="${CALRS_VC_URL:-https://vc.home.opensme.graphwiz.ai}"
+VC_ROOM_TEMPLATE="${VC_ROOM_TEMPLATE%/}/room/{uid}"
+# Static support room: element-web ships no default-room config (only
+# ELEMENT_DEFAULT_SERVER_URL) and there is no matrix room provisioner, so
+# EVERY chat booking joins the same room — documented in
+# docs/af-calendar-report.txt (T3).
+CHAT_ROOM_URL="${CHAT_ROOM_URL:-https://chat.home.opensme.graphwiz.ai/#/room/support}"
+CHAT_ROOM_URL="${CHAT_ROOM_URL%$'\r'}"
+for _link in "$VC_ROOM_TEMPLATE" "$CHAT_ROOM_URL"; do
+  # the links are embedded in single-quoted SQL literals below
+  case "$_link" in
+    *"'"*) err "booking link must not contain a single quote: ${_link}"; exit 1 ;;
+  esac
+done
+
+# ── Step 1/10: Radicale htpasswd (helper container, /config/users) ──────────
 radicale_volume() {
   local vol project
   vol="$(dc config --format json 2>/dev/null \
@@ -371,7 +405,7 @@ radicale_volume() {
 }
 RADICALE_VOLUME="$(radicale_volume)"
 
-info "Step 1/9 — Radicale htpasswd user '${RADICALE_USER}' (volume: ${RADICALE_VOLUME})"
+info "Step 1/10 — Radicale htpasswd user '${RADICALE_USER}' (volume: ${RADICALE_VOLUME})"
 USERS_CHANGED=false
 existing_users="$(docker run --rm -v "${RADICALE_VOLUME}":/config httpd:2.4-alpine \
   sh -c 'cat /config/users 2>/dev/null || true' 2>/dev/null || true)"
@@ -399,17 +433,17 @@ else
   fi
 fi
 
-# ── Step 2/9: restart calendar-radicale only when the users file changed ───
+# ── Step 2/10: restart calendar-radicale only when the users file changed ───
 if [[ "$USERS_CHANGED" == true ]]; then
-  info "Step 2/9 — restarting calendar-radicale to pick up the new htpasswd"
+  info "Step 2/10 — restarting calendar-radicale to pick up the new htpasswd"
   dc restart calendar-radicale 2>/dev/null \
     || info "calendar-radicale not running yet — it reads /config/users at first start"
 else
-  info "Step 2/9 — htpasswd unchanged, calendar-radicale keeps running"
+  info "Step 2/10 — htpasswd unchanged, calendar-radicale keeps running"
 fi
 
-# ── Step 3/9: bring the calendar services up ────────────────────────────────
-info "Step 3/9 — docker compose up -d --wait calendar (chain: ${COMPOSE_FILE})"
+# ── Step 3/10: bring the calendar services up ────────────────────────────────
+info "Step 3/10 — docker compose up -d --wait calendar (chain: ${COMPOSE_FILE})"
 if ! docker image inspect "calrs:${CALRS_IMAGE_TAG}" >/dev/null 2>&1; then
   err "image calrs:${CALRS_IMAGE_TAG} not found — compose would try to BUILD images/calrs,"
   err "which is a pinned reference, not a self-building subtree. Build the image from the"
@@ -417,10 +451,14 @@ if ! docker image inspect "calrs:${CALRS_IMAGE_TAG}" >/dev/null 2>&1; then
   err "docker buildx build -t calrs:${CALRS_IMAGE_TAG} ."
   exit 1
 fi
-dc up -d --wait calendar
+# bring up BOTH services: calendar-radicale is a netns passenger
+# (network_mode "service:calendar") and must be recreated/re-attached when
+# the calendar container is replaced (T2 finding D1); tolerated when the
+# passenger is not part of the compose chain
+dc up -d --wait calendar calendar-radicale 2>/dev/null || dc up -d --wait calendar
 
-# ── Step 4/9: calrs admin user ──────────────────────────────────────────────
-info "Step 4/9 — calrs admin user (${CALRS_ADMIN_EMAIL})"
+# ── Step 4/10: calrs admin user ──────────────────────────────────────────────
+info "Step 4/10 — calrs admin user (${CALRS_ADMIN_EMAIL})"
 if calrs_list user list 2>/dev/null | grep -Fq "$CALRS_ADMIN_EMAIL"; then
   ok "calrs user '${CALRS_ADMIN_EMAIL}' already exists — skipping create"
 else
@@ -445,9 +483,9 @@ else
   fi
 fi
 
-# ── Step 5/9: CalDAV source -> radicale ─────────────────────────────────────
+# ── Step 5/10: CalDAV source -> radicale ─────────────────────────────────────
 CALDAV_URL="http://calendar-radicale:5232/"
-info "Step 5/9 — CalDAV source '${CALDAV_URL}' (Public Calendar)"
+info "Step 5/10 — CalDAV source '${CALDAV_URL}' (Public Calendar)"
 SOURCE_ADDED=false
 if calrs_list source list 2>/dev/null | grep -Fq "$CALDAV_URL"; then
   ok "CalDAV source '${CALDAV_URL}' already connected — skipping add"
@@ -470,14 +508,14 @@ else
   fi
 fi
 
-# ── Step 6/9: ensure Radicale calendar collection + write target ───────────
+# ── Step 6/10: ensure Radicale calendar collection + write target ───────────
 # calrs write-back needs an actual VCALENDAR collection under the booking
 # principal's calendar-home-set (/booking/). A FRESH Radicale store has only
 # the bare principal dir (tagless) -> PROPFIND lists 0 calendars, calrs
 # discovers nothing and write-back has nowhere to land (the historical
 # "empty booking store" bug). MKCALENDAR the collection exactly where the
 # patched calrs + sogo6 subscription expect it: /booking/main/.
-info "Step 6/9 — Radicale calendar collection '${RADICALE_USER}/main/'";
+info "Step 6/10 — Radicale calendar collection '${RADICALE_USER}/main/'";
 BOOKING_EDGE="https://${CALENDAR_DOMAIN}/dav/booking/main/"
 probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
   -u "${RADICALE_USER}:${RADICALE_PASSWORD}" -X PROPFIND "$BOOKING_EDGE" \
@@ -505,8 +543,8 @@ else
   fi
 fi
 
-# ── Step 7/9: sync (full on first source add) ───────────────────────────────
-info "Step 7/9 — calrs sync"
+# ── Step 7/10: sync (full on first source add) ───────────────────────────────
+info "Step 7/10 — calrs sync"
 if [[ "$SOURCE_ADDED" == true || "$FORCE_FULL" == true ]]; then
   if ! docker compose "${COMPOSE_ARGS[@]}" exec -T calendar calrs sync --full; then
     err "full sync failed — usually a Radicale auth problem: verify RADICALE_USER/"
@@ -521,8 +559,8 @@ else
   fi
 fi
 
-# ── Step 8/9: public 'Video Consultation' event type ────────────────────────
-info "Step 8/9 — public 'Video Consultation' event type (slug vc)"
+# ── Step 8/10: public 'Video Consultation' event type ────────────────────────
+info "Step 8/10 — public 'Video Consultation' event type (slug vc)"
 # v1.6.0 has no location/visibility flags: new types default to
 # visibility='public' + location_type='link' (empty location_value) and
 # Mon-Fri 09:00-17:00 availability — the VC link rides in the description.
@@ -540,7 +578,104 @@ else
   fi
 fi
 
-# ── Step 9/9: booking URL ───────────────────────────────────────────────────
+# ── Step 9/10: event-type booking links (call VC template + chat room) ──────
+# calrs v1.6.0 has NO location flags on `event-type create` and no
+# `event-type update` (see header), so booking links are unreachable via
+# the CLI — and the container ships neither sqlite3 nor python3. This step
+# therefore follows the same helper-container pattern as Step 1's htpasswd
+# seeding: a one-shot alpine:3.19 (apk add sqlite — needs package-mirror
+# network) against the calrs-data volume. calrs holds the SQLite db, so the
+# APPLY branch stops the calendar container first (clean SIGTERM close
+# checkpoints the WAL) and re-attaches the calendar-radicale netns
+# passenger afterwards (T2 finding D1). Everything is idempotent: the probe
+# is read-only (WAL readers don't block) and the step no-ops entirely when
+# both links already match.
+info "Step 9/10 — event-type booking links (call VC template + chat room)"
+calrs_volume() {
+  local vol project
+  vol="$(dc config --format json 2>/dev/null \
+    | jq -r '.volumes["calrs-data"].name // empty' 2>/dev/null || true)"
+  if [[ -z "$vol" ]]; then
+    # named volume name not exposed — derive from the compose project name
+    project="${COMPOSE_PROJECT_NAME:-}"
+    if [[ -z "$project" ]]; then
+      project="$(dc config --format json 2>/dev/null \
+        | jq -r '.name // empty' 2>/dev/null || true)"
+    fi
+    vol="${project:-opensme-compose}_calrs-data"
+    # stderr: this function's stdout is captured — a warn there would
+    # pollute the volume name with ANSI codes and newlines
+    warn "could not resolve the calrs-data volume via compose config — using '${vol}'" >&2
+  fi
+  printf '%s' "$vol"
+}
+CALRS_VOLUME="$(calrs_volume)"
+
+# read-only sync probe: prints IN-SYNC when slug 'call' carries the VC room
+# template AND slug 'chat' exists with the configured chat room URL. Empty
+# output = state UNKNOWN (helper/apk failure) — the step then skips rather
+# than stopping a healthy calendar service on a guess.
+seed_state() {
+  printf '%s\n' \
+    "select case when (select location_value from event_types where slug='call')='${VC_ROOM_TEMPLATE}' and (select count(*) from event_types where slug='chat' and location_value='${CHAT_ROOM_URL}')=1 then 'IN-SYNC' else 'SEED' end;" \
+    | docker run --rm -i -v "${CALRS_VOLUME}":/data:ro alpine:3.19 \
+        sh -c 'apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/calrs.db' 2>/dev/null \
+    || true
+}
+
+STATE="$(seed_state)"
+if [[ "$STATE" == "IN-SYNC" ]]; then
+  ok "event-type links already in sync (call VC template + chat room) — nothing to do"
+elif [[ -z "$STATE" ]]; then
+  warn "cannot probe the calrs db (sqlite helper failed; apk needs network) — skipping event-type link seeding"
+else
+  info "seeding event-type booking links on volume '${CALRS_VOLUME}' (stop -> sqlite helper -> start)"
+  # unique id for the chat row (python3 is the repo baseline; the fallback
+  # builds a valid v4 UUID from /dev/urandom: version nibble '4', variant
+  # nibble 8/9/a/b)
+  if command -v python3 >/dev/null 2>&1; then
+    CHAT_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+  else
+    hex="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    case "${hex:16:1}" in [0-3]) vb=8 ;; [4-7]) vb=9 ;; [a-b]) vb=a ;; *) vb=b ;; esac
+    CHAT_ID="${hex:0:8}-${hex:8:4}-4${hex:13:3}-${vb}${hex:17:3}-${hex:20:12}"
+  fi
+  SEEDED=false
+  if dc stop calendar; then
+    if printf '%s\n' \
+        "update event_types set location_value='${VC_ROOM_TEMPLATE}' where slug='call';" \
+        "insert into event_types (id, account_id, slug, title, duration_min, location_type, location_value)" \
+        "select '${CHAT_ID}', coalesce((select account_id from event_types where slug='vc'), (select min(id) from accounts))," \
+        "'chat','Text Chat',30,'link','${CHAT_ROOM_URL}'" \
+        "where not exists (select 1 from event_types where slug='chat');" \
+        | docker run --rm -i -v "${CALRS_VOLUME}":/data alpine:3.19 \
+            sh -c 'apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/calrs.db'; then
+      SEEDED=true
+    else
+      err "sqlite seeding helper failed — check network access to the alpine package mirror"
+    fi
+    # bring the stack back no matter what, seeded or not: start calendar,
+    # re-attach the netns passenger stranded by the stop (T2 D1), wait healthy
+    dc start calendar
+    dc restart calendar-radicale 2>/dev/null \
+      || info "calendar-radicale not deployed — skipping passenger re-attach"
+    dc up -d --wait calendar calendar-radicale 2>/dev/null || dc up -d --wait calendar
+  else
+    err "could not stop the calendar container — skipping event-type link seeding"
+  fi
+  if [[ "$SEEDED" != true ]]; then
+    err "event-type link seeding failed — fix the helper error above and re-run"
+    exit 1
+  fi
+  STATE="$(seed_state)"
+  if [[ "$STATE" != "IN-SYNC" ]]; then
+    err "post-seed verification failed (expected call='${VC_ROOM_TEMPLATE}' and chat='${CHAT_ROOM_URL}')"
+    exit 1
+  fi
+  ok "event-type links seeded: call -> VC room template, chat -> ${CHAT_ROOM_URL} (static room)"
+fi
+
+# ── Step 10/10: booking URL ───────────────────────────────────────────────────
 # /u/<username>/<slug>; username = lowercased email local part, '.'->'-',
 # everything but [a-z0-9-] dropped (calrs src/auth.rs generate_username)
 booking_user="$(printf '%s' "$CALRS_ADMIN_EMAIL" | cut -d@ -f1 \
@@ -551,6 +686,7 @@ BOOKING_URL="https://${CALENDAR_DOMAIN}/u/${booking_user}/vc"
 echo ""
 ok "calendar stack seeded."
 echo "  Booking page : ${BOOKING_URL}"
+echo "  Chat booking : https://${CALENDAR_DOMAIN}/u/${booking_user}/chat (static support room)"
 echo "  Admin UI     : https://${CALENDAR_DOMAIN}/dashboard (login: ${CALRS_ADMIN_EMAIL})"
 echo "  Privacy      : the booking page is PUBLIC — anyone with the URL sees free slots;"
 echo "                 event details and the VC link stay private to confirmed bookings."
