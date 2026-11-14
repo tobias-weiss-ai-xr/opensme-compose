@@ -1,0 +1,91 @@
+T2 — Verify invoice-demo provisioning works
+============================================
+Task:    T2-verify-invoice
+Branch:  tf/T2-verify-invoice (worktree of state-invoice-fix)
+Scope:   scripts/, docs/
+Base:    T1 fix commit 6ecd6e7 ("Fix provision-invoice-demo.sh artisan commands")
+
+RESULT: PASS — dry-run OK, real run OK (no errors), report written (this file).
+
+What T2 found (verification of T1's fix)
+----------------------------------------
+T1 replaced the original bogus `artisan db:*` commands with SQL sent to the
+MariaDB container — the right architecture — but the SQL itself did not match
+the deployed Invoice Ninja v5 schema. The dry-run "worked" (it only prints),
+while the real run failed at the very first statement:
+
+    ERROR 1054 (42S22): Unknown column 'name' in 'SET'
+
+Defects found against the live schema (invoiceninja_db, MariaDB 11.8.9):
+  1. UPDATE companies SET name/email/address/phone/website/vat_number…
+     — these columns do not exist; the company profile lives inside the
+     JSON `settings` column (name, address1, city, postal_code, country_id,
+     phone, email, website, vat_number, primary_color …).
+  2. INSERT INTO company_settings — table does not exist in this deployment.
+  3. INSERT INTO tax_rates (…, is_compound, type_id) — columns do not exist.
+  4. INSERT INTO clients (email, currency_id, …, user_id=NULL) — clients has
+     no email/currency_id columns (contacts carry the email), and the NOT NULL
+     company_id/user_id columns were not provided.
+  5. INSERT INTO products (name, description, tax_name, product_type_id) —
+     products has no `name` column (display name = product_key, description =
+     notes, default tax = tax_name1/tax_rate1) and no product_type_id column.
+  6. INSERT INTO projects (budget, rate) — columns do not exist; the schema
+     uses budgeted_amount / task_rate (budgeted_hours is NOT NULL too).
+  7. php_exec() `php -r` lookups (company check, client IDs, tax IDs) cannot
+     work at all: `php -r` does not boot Laravel, so
+     `Class "App\Models\Company" not found` — fatal for every real run.
+  8. Client address parsing was off by one field: city got "10115 Berlin"
+     and postal_code got "Germany"; address1 was assembled from wrong parts.
+
+Fix applied (scripts/provision-invoice-demo.sh)
+-----------------------------------------------
+- Company profile: UPDATE companies SET settings = JSON_SET(settings,
+  '$.name', …, '$.address1', …, '$.postal_code', …, '$.country_id', '276',
+  '$.vat_number', …, '$.primary_color', '#0e578d'), updated_at = NOW().
+  Color scheme now lands in settings.primary_color (replaces the
+  company_settings insert against a non-existent table). JSON_VALID(settings)=1.
+- Tax rates: INSERT … SELECT … WHERE NOT EXISTS on (company_id=1, name) —
+  idempotent, correct columns only (company_id, user_id, name, rate).
+- Clients: INSERT with company_id/user_id/name/address1/city/postal_code/
+  country_id (resolved via subquery on countries.iso_3166_2='DE'), guarded by
+  WHERE NOT EXISTS; address parsing fixed (postal = first token of the
+  "postal city" field, city = remainder).
+- Client emails: primary client_contacts row per client (contact_key =
+  MD5(…), password = '' to satisfy NOT NULL).
+- Products: INSERT with product_key = display name, notes = description,
+  tax_name1/tax_rate1 set per product (E-Book → Reduced VAT 7 %, rest →
+  Standard VAT 19 %), guarded by WHERE NOT EXISTS.
+- Projects: budgeted_amount = budget, task_rate = 150.00,
+  budgeted_hours = 0 (NOT NULL), guarded by WHERE NOT EXISTS.
+- All php_exec()/PHP lookups removed; every DB access is pure SQL through
+  the db container (sql()/sqlq()/lookup() helpers). lookup() returns a
+  placeholder in --dry-run so the plan shows contacts and projects too.
+- --force now means clean + recreate; --clean also removes demo tax rates
+  and resets the company profile fields in settings.
+- utf8mb4 charset pinned on all mariadb invocations (umlauts: Köln,
+  Musterstraße, München). shellcheck: clean.
+
+Verification evidence
+---------------------
+1. Dry-run (gate):  bash scripts/provision-invoice-demo.sh --dry-run
+   → exit 0, full plan printed, no errors.
+2. Real run:        bash scripts/provision-invoice-demo.sh
+   → exit 0, no SQL errors, no 'Command not defined'; company ✓, 3 tax
+   rates ✓, 3 clients + contacts ✓, 6 products ✓, 4 projects ✓.
+3. Data check via SQL: settings JSON valid (JSON_VALID=1), profile fields
+   correct (GraphWiz AI / Köln / 276 / DE123456789 / #0e578d), client
+   addresses correct (postal/city split right), E-Book has 7 % VAT.
+4. Idempotency: second plain run exits 0 with "already provisioned";
+   --force run recreates exactly 3 clients / 6 products / 4 projects /
+   3 tax rates / 3 contacts — no duplicates.
+5. Acceptance gate (run verbatim):
+   bash scripts/provision-invoice-demo.sh --dry-run >/dev/null 2>&1 \
+     && echo 'DRY-RUN-OK' \
+     && test -f docs/af-invoice-fix-report.txt && echo GATE-T2-OK
+   → DRY-RUN-OK / GATE-T2-OK.
+
+Notes
+-----
+- Raw-SQL inserts leave demo clients without portal hashes/numbers; that is
+  fine for demo display and can be filled by the app later.
+- Demo data currently provisioned on opensme (company id=1, user id=1 admin).
