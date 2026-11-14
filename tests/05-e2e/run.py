@@ -584,6 +584,31 @@ def section_sso_matrix(result: Result, session, disc: dict, idp_base: str,
                             timeout=T)
             u = urlparse(redirect_uri)
             problem = marker(r, session, f"{u.scheme}://{u.netloc}")
+            if name == "notes":
+                # Regression guard for the 2026-11-14 celery-broker outage:
+                # POST /api/v1.0/documents/ must create a doc (201), not
+                # 500 (kombu OperationalError on an un-authenticated broker).
+                csrf = session.cookies.get("csrftoken") or session.cookies.get("docs_csrftoken") or ""
+                rdoc = session.post(notes_base + "/api/v1.0/documents/",
+                                    json={"title": "e2e-broker-probe"},
+                                    headers={"X-CSRFToken": csrf,
+                                             "Referer": notes_base + "/docs/new/",
+                                             "Content-Type": "application/json"},
+                                    timeout=T)
+                if rdoc.status_code >= 500:
+                    raise E2EError(
+                        f"document create returned HTTP {rdoc.status_code} "
+                        f"(celery broker auth?) — {rdoc.text[:120]}")
+                # best-effort cleanup (never let it mask a pass)
+                try:
+                    did = rdoc.json().get("id")
+                    if did:
+                        session.delete(notes_base + f"/api/v1.0/documents/{did}/",
+                                       headers={"X-CSRFToken": csrf,
+                                                "Referer": notes_base + "/"},
+                                       timeout=T)
+                except Exception:
+                    pass
             if problem:
                 raise E2EError(f"callback failed: {problem}")
         except E2EError as e:

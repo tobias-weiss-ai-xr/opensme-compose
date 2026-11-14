@@ -351,6 +351,16 @@ MUTATIONS = [
         "why": "perf budgets — .env.example must keep the digest-pin vars "
               "documented for pinned images",
     },
+    {
+        "name": "notes-broker-env-name",
+        "file": "services/notes.yml",
+        "old": "DJANGO_CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0",
+        "new": "CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0",
+        "check": "tests/00-static/check_notes_broker.py",
+        "why": "notes celery broker — the DJANGO_ prefix is mandatory "
+              "(django-configurations ignores the bare name); renaming it "
+              "must fail check_notes_broker.py",
+    },
 ]
 
 

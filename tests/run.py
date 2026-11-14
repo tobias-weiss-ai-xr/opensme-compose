@@ -64,6 +64,7 @@ LAYERS = {
             ("Zitadel OIDC client registration", "tests/00-static/check_oidc.py"),
             ("Webmail SSO backchannel (stalwart)", "tests/00-static/check_webmail_sso.py"),
             ("Outbound LLM payload patterns", "tests/00-static/check_outbound_patterns.py"),
+            ("Notes celery broker auth", "tests/00-static/check_notes_broker.py"),
             ("Dev-maintenance-bot agent lint", "tests/00-static/check_agent.py"),
             ("Backup drift guard", "tests/00-static/check_backup.py"),
             ("Test-suite coverage (no dead checks)", "tests/00-static/check_suite_coverage.py"),
