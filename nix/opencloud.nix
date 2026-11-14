@@ -112,9 +112,18 @@ pkgs.dockerTools.streamLayeredImage {
   # Writable config/state dirs (compose mounts named volumes over them:
   # opencloud-config -> /etc/opencloud, opencloud-lib -> /var/lib/opencloud,
   # opencloud-data -> /var/lib/opencloud/data), owned by the non-root user.
+  # NOTE: dockerTools lays contents out as SYMLINKS into /nix/store — docker
+  # >= 29 `exec` walks /etc/passwd + /etc/group with openat2 RESOLVE_BENEATH
+  # and fails across the layer boundary ("openat etc/group: path escapes
+  # from parent"). Materialize them as REAL files (enableFakechroot makes
+  # the symlinks readable here).
   fakeRootCommands = ''
     mkdir -p etc/opencloud var/lib/opencloud/data
     chown 1000:1000 etc/opencloud var/lib/opencloud var/lib/opencloud/data
+    cat etc/passwd > etc/passwd.tmp && rm -f etc/passwd \
+      && mv etc/passwd.tmp etc/passwd && chmod 0444 etc/passwd
+    cat etc/group > etc/group.tmp && rm -f etc/group \
+      && mv etc/group.tmp etc/group && chmod 0444 etc/group
   '';
   enableFakechroot = true;
 
