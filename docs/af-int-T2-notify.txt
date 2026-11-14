@@ -1,0 +1,142 @@
+AF T2-booking-notify — report (2026-11-14)
+===========================================
+
+TASK: Booking-to-Element notification bridge — build scripts/booking-notify.sh
+(idempotent, --dry-run/--check/--loop N), post a Matrix m.room.message into
+the support Element room when a calrs booking is confirmed, document the
+discovered provisioning path, verify against the live stack.
+Worktree branch: tf/T2-booking-notify (worktree of /home/weiss/git/openSME-compose).
+
+FILES
+-----
+scripts/booking-notify.sh   new (the bridge; pure bash + docker + jq + curl)
+docs/af-int-T2-notify.txt   this report
+
+DISCOVERY (live stack, verified before writing code)
+----------------------------------------------------
+* Synapse 1.162.0 behind the edge at https://matrix.home.opensme.graphwiz.ai
+  answers /_matrix/client/v3/... but NOT the legacy /r3/ prefix named in the
+  task text (r3 login -> {"errcode":"M_UNRECOGNIZED"}). The script uses v3.
+* Send endpoint: both POST .../send/m.room.message and PUT
+  .../send/m.room.message/<txnId> work; the script uses PUT with the
+  booking id as txnId -> server-side dedupe makes retries idempotent.
+* Room landscape at build time: total_rooms=0 (synapse admin API), public
+  directory empty, alias #support:matrix.home.opensme.graphwiz.ai did NOT
+  exist -> per task, the room was created via demo-user credentials
+  (see PROVISIONING). scripts/provision-demo-users.sh runs INSIDE the
+  synapse container via the shared-secret /_synapse/admin/v1/register API
+  and services/synapse.yml exposes no admin/registration env to the host —
+  so the script provisions nothing through admin APIs: it logs in with the
+  demo test user over the plain client API (password login) and creates the
+  room as that user if missing.
+* Test user: bootstrap/demo-users.json 'testuser' (roles: support,
+  department: Evaluation), password eval2026 — same baseline as
+  scripts/provision-sogo-caldav.sh (E2E_TESTUSER_PASSWORD default).
+* calrs db: /var/lib/calrs/calrs.db on docker volume compose_calrs-data
+  (deployed compose project 'compose' under /opt/opensme-compose/compose;
+  NOT the bare-checkout project name). bookings table: status + guest_name/
+  guest_email/guest_timezone/uid/event_type_id/start_at, NO location column
+  (as stated). 31 rows at build time: 3 confirmed, 28 cancelled.
+  Helper pattern from scripts/calendar-setup.sh step 9 (alpine:3.19 +
+  `apk add sqlite`, volume mounted read-only; WAL readers don't block
+  calrs) works and is reused; sqlite 3.44.2 ships JSON1, so rows come out
+  as one json_object() per line — no fragile field separators.
+* `docker compose` on the deployed tree currently FAILS interpolation for
+  bare checkout .env files (services.vc-room requires LIVEKIT_API_SECRET,
+  services.vc-livekit requires VC_PUBLIC_IP) — even `docker compose exec`.
+  The script therefore has NO compose dependency: the calrs-data volume is
+  resolved via `docker inspect opensme-calendar` (mount at /var/lib/calrs),
+  with a `docker volume ls` fallback.
+* Element web (opensme-element, chat.home.opensme.graphwiz.ai) — the
+  calendar-setup.sh default booking link points at .../#/room/support; the
+  created #support alias gives that link a real target.
+
+PROVISIONING (what the script does, and what was done live)
+-----------------------------------------------------------
+MATRIX_ROOM defaults to #support:$MATRIX_DOMAIN. Resolution order per run:
+  '!room-id' given            -> use directly (join if needed)
+  '#'alias resolves (GET /_matrix/client/v3/directory/room) -> use it
+  '#'alias missing + apply    -> createRoom {room_alias_name:support,
+                                 name:Support, visibility:public,
+                                 preset:public_chat} as MATRIX_USER, then join
+  '#'alias missing + check    -> reported as FAILED (check never mutates)
+  '#'alias missing + dry-run  -> reported as "would be created"
+Live run created the room:
+  alias  #support:matrix.home.opensme.graphwiz.ai
+  id     !WnQcxON1h0KdG4dEYyRXqmYYKp1FmXx7SOLdAbRkV9A
+  joined by @testuser:matrix.home.opensme.graphwiz.ai (creator)
+Public preset on purpose: support staff can join via the alias/directory
+without an invite step; MATRIX_ROOM_INVITE can invite explicit mxids at
+creation. (A throwaway #t2-probe room used to verify create/PUT-send/read
+was deleted again via the tweiss admin API; the probe left no rooms.)
+
+VERIFICATION (all against the live stack, from the worktree checkout —
+no .env present, i.e. the documented defaults path)
+----------------------------------------------------
+1. bash scripts/booking-notify.sh --dry-run
+   -> exit 0; room reported MISSING-would-create; listed the 3 confirmed
+      bookings with rendered message bodies (guest, event title, start,
+      timezone) — exactly what apply WOULD post.
+2. bash scripts/booking-notify.sh --check   (before first apply)
+   -> 6/7 checks PASS; room MISSING -> FAILED (correct: check never
+      creates); exit 1.
+3. bash scripts/booking-notify.sh            (first apply)
+   -> created room, joined, 3 posted / 0 failed, exit 0. Message bodies
+      read back from the room timeline via /messages match the dry-run
+      preview byte-for-byte (incl. event titles via the event_types join).
+4. bash scripts/booking-notify.sh            (re-run)
+   -> 0 posted, 0 failed — idempotent (state file).
+   State file compose_calrs-data:/data/booking-notify.state holds exactly
+   the 3 posted booking ids.
+5. bash scripts/booking-notify.sh --dry-run  -> 0 pending, exit 0.
+6. bash scripts/booking-notify.sh --check    (after apply)
+   -> all checks PASS (volume, db readable, state writable, homeserver,
+      login, room exists + joined), exit 0.
+7. Gate command equivalents from the worktree:
+   bash -n scripts/booking-notify.sh                 -> OK
+   shellcheck -S warning scripts/booking-notify.sh   -> clean (0.9.0)
+   bash scripts/booking-notify.sh --dry-run >/dev/null 2>&1 -> exit 0
+   test -f docs/af-int-T2-notify.txt                 -> OK
+   (see docs/af-int-T2-notify.txt present + committed on the branch; the
+   verbatim gate runs after the orchestrator merges tf/T2-booking-notify
+   into the main checkout.)
+
+DESIGN NOTES
+------------
+* Idempotency: posted booking ids are appended to
+  /var/lib/calrs/booking-notify.state (INSIDE the calrs-data volume,
+  written through the same alpine helper — a plain file, so no sqlite
+  write locks against live calrs, and no calendar stop/start cycles).
+  A pass refuses to run when the state file is unreadable ("state
+  unknown" must never post). Crash between PUT and state append can at
+  worst re-send: the booking-id txnId makes the server dedupe it.
+* Poll source: SELECT ... FROM bookings b LEFT JOIN event_types e WHERE
+  b.status='confirmed' — read-only, helper-mounted :ro.
+* Secrets: MATRIX_PASSWORD never printed or traced (set +x); login/send
+  bodies go through 0600 temp files (removed via EXIT trap); the access
+  token is passed to curl as an -H @file so it never appears in argv or
+  URLs. Errors surface errcodes only.
+* Rate limits: login honors Synapse 429 retry_after_ms (capped 60s) and
+  the access token is reused across passes (whoami-validated) so --loop
+  logs in once per process instead of once per poll.
+* Modes: default single apply pass; --dry-run strictly read-only and
+  always exit 0; --check read-only audit, exit !=0 on failed checks;
+  --loop [N] polls every N seconds (default 60).
+* Env: MATRIX_USER/MATRIX_PASSWORD/MATRIX_ROOM/MATRIX_DOMAIN documented
+  in the header; values load from the repo .env (env-quote-hardened
+  loader, byte-identical block from calendar-setup.sh/demo-data.sh) with
+  explicit environment winning (docker semantics); every default is
+  complete, so a missing .env is only a warning.
+
+KNOWN LIMITATIONS
+-----------------
+* First apply announces ALL confirmed bookings not yet in the state file
+  (the 3-bookings backlog here was intentional and documented); seed the
+  state file on the volume to suppress a backlog.
+* Notifications are plain m.text (no HTML/formatted_body).
+* The booking-created → confirmed transition (if calrs ever gains
+  'pending') would need the WHERE clause revisited; today every booking
+  row observed carries status confirmed|cancelled only.
+
+TASK ID: T2-booking-notify
+BRANCH:  tf/T2-booking-notify
