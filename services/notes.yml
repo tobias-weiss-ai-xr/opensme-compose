@@ -141,6 +141,20 @@ services:
       - "traefik.http.routers.notesapi.entrypoints=websecure"
       - "traefik.http.routers.notesapi.priority=100"
       - "traefik.http.services.notesapi.loadbalancer.server.port=8000"
+      # notes-frontend's router (merged netns: frontend attaches via
+      # network_mode: "service:notes-backend"; its labels moved here so
+      # traefik reaches the shared netns IP — port 8080 is the frontend's
+      # listener, priority default (0) keeps /api||/oidc on notesapi@100)
+      - "traefik.http.routers.notesapp.rule=Host(`notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.notesapp.tls=true"
+      - "traefik.http.routers.notesapp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.notesapp.entrypoints=websecure"
+      - "traefik.http.services.notesapp.loadbalancer.server.port=8080"
+      # Explicit service links (see docker-compose.yml calendar: traefik
+      # v2.11 refuses auto-linking when a container defines multiple
+      # services — notesapi + notesapp now share this container).
+      - "traefik.http.routers.notesapi.service=notesapi"
+      - "traefik.http.routers.notesapp.service=notesapp"
 
   notes-frontend:
     <<: *service-defaults
@@ -151,18 +165,13 @@ services:
     environment:
       NOTES_BACKEND_URL: http://notes-backend:8000
       NOTES_Y_PROVIDER_URL: http://notes-y-provider:4444
-    networks:
-      - opensme-net
+    # Shares the notes-backend network namespace — one netns instead of
+    # two (~58 numiptent entries; notes-y-provider already rides the same
+    # netns). Its traefik router moved to the backend service.
+    network_mode: "service:notes-backend"
     depends_on:
       notes-backend:
         condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.notesapp.rule=Host(`notes.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`)"
-      - "traefik.http.routers.notesapp.tls=true"
-      - "traefik.http.routers.notesapp.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.notesapp.entrypoints=websecure"
-      - "traefik.http.services.notesapp.loadbalancer.server.port=8080"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 20s

@@ -219,7 +219,20 @@ services:
       retries: 5
       start_period: 30s
     networks:
-      - opensme-net
+      opensme-net:
+        # Netns owner of the merged infra quartet: pgbouncer, redis and
+        # memcached attach via network_mode: "service:postgres" — ONE
+        # network namespace instead of four (~58 numiptent entries each
+        # on OpenVZ). The aliases keep the service-name DNS working for
+        # every consumer (postgres:5432 / pgbouncer:6432 / redis:6379 /
+        # memcached:11211 — ports don't collide inside the shared netns).
+        # NOTE: restarting postgres restarts nothing but drops the shared
+        # netns — the three passengers must be `up -d`-restarted after.
+        aliases:
+          - postgres
+          - pgbouncer
+          - redis
+          - memcached
     deploy:
       resources:
         limits:
@@ -259,8 +272,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    networks:
-      - opensme-net
+    # Shares postgres's network namespace (numiptent saving; see the
+    # postgres aliases comment). Reachable as "pgbouncer:6432" via the
+    # owner's alias; localhost:6432 inside the shared netns.
+    network_mode: "service:postgres"
     deploy:
       resources:
         limits:
@@ -295,14 +310,18 @@ services:
     environment:
       # for the healthcheck only (no AUTH warning noise)
       - REDIS_PASSWORD
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Shares postgres's network namespace (numiptent saving; reachable as
+    # "redis:6379" via the owner's alias).
+    network_mode: "service:postgres"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 10s
-    networks:
-      - opensme-net
     deploy:
       resources:
         limits:
@@ -318,13 +337,17 @@ services:
     container_name: opensme-memcached
     restart: unless-stopped
     command: memcached -m 2048 -c 4096 -t 4
+    depends_on:
+      postgres:
+        condition: service_started
+    # Shares postgres's network namespace (numiptent saving; reachable as
+    # "memcached:11211" via the owner's alias).
+    network_mode: "service:postgres"
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "11211"]
       interval: 30s
       timeout: 5s
       retries: 3
-    networks:
-      - opensme-net
     deploy:
       resources:
         limits:
@@ -430,6 +453,19 @@ services:
       - "traefik.http.routers.portal.tls=true"
       - "traefik.http.routers.portal.entrypoints=websecure"
       - "traefik.http.services.portal.loadbalancer.server.port=8080"
+      # portal-web's routers (merged netns: portal-web attaches via
+      # network_mode: "service:portal"; its labels moved here so traefik
+      # reaches the shared netns IP). Priority 10 shadows the Rust router
+      # on the same Host when the web profile is on.
+      - "traefik.http.routers.portal-web.rule=Host(`${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}`)"
+      - "traefik.http.routers.portal-web.priority=10"
+      - "traefik.http.routers.portal-web.tls=true"
+      - "traefik.http.routers.portal-web.entrypoints=websecure"
+      - "traefik.http.services.portal-web.loadbalancer.server.port=3000"
+      # Explicit service links (see calendar: traefik v2.11 refuses
+      # auto-linking when a container defines multiple services).
+      - "traefik.http.routers.portal.service=portal"
+      - "traefik.http.routers.portal-web.service=portal-web"
     deploy:
       resources:
         limits:
@@ -496,16 +532,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    networks:
-      - opensme-net
-    labels:
-      - "traefik.enable=true"
-      - "com.centurylinklabs.watchtower.enable=false"
-      - "traefik.http.routers.portal-web.rule=Host(`${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}`)"
-      - "traefik.http.routers.portal-web.priority=10"
-      - "traefik.http.routers.portal-web.tls=true"
-      - "traefik.http.routers.portal-web.entrypoints=websecure"
-      - "traefik.http.services.portal-web.loadbalancer.server.port=3000"
+    # Shares the portal (Rust API) network namespace — one netns instead
+    # of two (~58 numiptent entries). Its traefik routers moved to the
+    # portal service; BACKEND_URL keeps working via the owner's own name.
+    network_mode: "service:portal"
     deploy:
       resources:
         limits:
@@ -574,13 +604,23 @@ services:
     # OIDC or POST /dashboard/admin/oidc with an admin session.
     extra_hosts:
       - "${ZITADEL_DOMAIN:-auth.opensme.graphwiz.ai}:host-gateway"
-    depends_on:
-      calendar-radicale:
-        condition: service_healthy
+    # NOTE: no depends_on calendar-radicale — radicale shares THIS netns
+    # (network_mode "service:calendar"), which compose turns into an
+    # implicit radicale→calendar edge; an explicit edge here would be a
+    # dependency cycle. calrs reaches radicale via localhost:5232 in the
+    # shared netns and retries while radicale finishes booting.
     volumes:
       - calrs-data:/var/lib/calrs
     networks:
-      - opensme-net
+      opensme-net:
+        # Takes over radicale's pinned IP: CalDAV clients subscribe via the
+        # IP literal, and radicale now shares THIS netns (network_mode:
+        # "service:calendar") — ports 3000 (calrs) and 5232 (radicale)
+        # don't collide.
+        ipv4_address: 172.19.0.250
+        aliases:
+          - calendar
+          - calendar-radicale
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.calendar.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`)"
@@ -588,6 +628,27 @@ services:
       - "traefik.http.routers.calendar.tls.certresolver=letsencrypt"
       - "traefik.http.routers.calendar.entrypoints=websecure"
       - "traefik.http.services.calendar.loadbalancer.server.port=3000"
+      # calendar-radicale's edge routers (its netns merged here; labels
+      # moved so traefik keeps reaching the shared netns — port 5232 is
+      # radicale's listener inside this netns). Privacy contract
+      # unchanged: the /dav store holds ONLY public bookings (never
+      # staff/SOGo calendars), and Radicale's own htpasswd auth still
+      # applies on top of the edge route.
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "traefik.http.routers.calendar-dav.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`) && PathPrefix(`/dav`)"
+      - "traefik.http.routers.calendar-dav.tls=true"
+      - "traefik.http.routers.calendar-dav.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.calendar-dav.entrypoints=websecure"
+      - "traefik.http.routers.calendar-dav.priority=10010"
+      - "traefik.http.middlewares.calendar-dav-strip.stripprefix.prefixes=/dav"
+      - "traefik.http.routers.calendar-dav.middlewares=calendar-dav-strip"
+      - "traefik.http.services.calendar-dav.loadbalancer.server.port=5232"
+      # Explicit service links: this container now defines TWO traefik
+      # services (calendar + calendar-dav) — traefik v2.11 refuses to
+      # auto-link routers by name when a container has multiple services
+      # ("cannot be linked automatically with multiple Services").
+      - "traefik.http.routers.calendar.service=calendar"
+      - "traefik.http.routers.calendar-dav.service=calendar-dav"
     healthcheck:
       # curl is baked into the vendored image (images/calrs delta);
       # calrs has no /health route — any HTTP status proves the process
@@ -634,31 +695,14 @@ services:
       # first mount; the env block above rewrites it at every start
       - radicale-config:/config
       - radicale-data:/data
-    networks:
-      # Pinned IP so internal CalDAV clients whose URL validator requires a
-      # dotted host or IP literal (sogo6 external-calendar marshmallow
-      # fields.Url rejects TLD-less names like "calendar-radicale") can
-      # subscribe via http://172.19.0.250:5232/… without an edge route.
-      opensme-net:
-        ipv4_address: 172.19.0.250
-    labels:
-      # Read-only-at-the-edge CalDAV view of the PUBLIC BOOKING store, so
-      # groupware clients (sogo6 external calendar, source_type=caldav)
-      # can subscribe over HTTPS — sogo6's IcsFetcher is https-only and
-      # rejects private IPs (SSRF guard), so the internal name/IP is not
-      # usable from a client. Privacy contract unchanged: this store holds
-      # ONLY public bookings (never staff/SOGo calendars), and Radicale's
-      # own htpasswd auth still applies on top of the edge route.
-      - "traefik.enable=true"
-      - "traefik.http.routers.calendar-dav.rule=Host(`${CALENDAR_DOMAIN:-calendar.opensme.graphwiz.ai}`) && PathPrefix(`/dav`)"
-      - "traefik.http.routers.calendar-dav.tls=true"
-      - "traefik.http.routers.calendar-dav.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.calendar-dav.entrypoints=websecure"
-      - "traefik.http.routers.calendar-dav.priority=10010"
-      - "traefik.http.middlewares.calendar-dav-strip.stripprefix.prefixes=/dav"
-      - "traefik.http.routers.calendar-dav.middlewares=calendar-dav-strip"
-      - "traefik.http.services.calendar-dav.loadbalancer.server.port=5232"
-      - "com.centurylinklabs.watchtower.enable=false"
+    # Shares the calendar (calrs) network namespace — one netns instead
+    # of two (~58 numiptent entries). The pinned 172.19.0.250 IP and the
+    # /dav edge routers moved to the calendar service (netns owner); the
+    # DNS name stays resolvable via its aliases.
+    network_mode: "service:calendar"
+    # no depends_on calendar here: base `calendar` already depends_on
+    # radicale (service_healthy) and netns sharing adds owner-first
+    # ordering implicitly — an explicit edge would be a dependency cycle.
     healthcheck:
       # the image ships curl; no --fail — with htpasswd auth the root
       # path answers 401 and ANY HTTP status proves the server is up

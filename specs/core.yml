@@ -133,7 +133,9 @@ services:
       - LOGIN_SESSION_COOKIE_SECRET
       - PORTAL_OIDC_CLIENT_ID
       - PORTAL_OIDC_CLIENT_SECRET
-    traefik_labels: true
+    # shares the portal netns (network_mode "service:portal"); its portal-web
+    # router lives on the portal owner (netns-merge 2026-11-14)
+    traefik_labels: false
     resource_limits:
       memory: 256M
 
@@ -176,7 +178,9 @@ services:
       - RADICALE_CONFIG_AUTH_HTPASSWD_FILENAME
       - RADICALE_CONFIG_AUTH_HTPASSWD_ENCRYPTION
       - RADICALE_CONFIG_STORAGE_FILESYSTEM_FOLDER
-    traefik_labels: true
+    # shares the calendar netns (network_mode "service:calendar"); its /dav
+    # router lives on the calendar owner (netns-merge 2026-11-14)
+    traefik_labels: false
     resource_limits:
       memory: 256M
 

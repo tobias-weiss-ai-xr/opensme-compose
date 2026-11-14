@@ -93,9 +93,11 @@ fi
 ENV_FILE="${INVOICE_DEMO_ENV_FILE:-/opt/opensme-compose/compose/.env}"
 if [ "$DRY_RUN" != true ] && [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
     if [ -r "$ENV_FILE" ]; then
-        INVOICENINJA_DB_PASSWORD="$(sed -n 's/^INVOICENINJA_DB_PASSWORD=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
+        _inv_db_pw="$(grep -E '^INVOICENINJA_DB_PASSWORD=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '\r')"
+        INVOICENINJA_DB_PASSWORD="$_inv_db_pw"
     else
-        INVOICENINJA_DB_PASSWORD="$(sudo -n sed -n 's/^INVOICENINJA_DB_PASSWORD=//p' "$ENV_FILE" 2>/dev/null | head -n1 | tr -d '\r' || true)"
+        _inv_db_pw="$(sudo -n grep -E '^INVOICENINJA_DB_PASSWORD=' "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' || true)"
+        INVOICENINJA_DB_PASSWORD="$_inv_db_pw"
     fi
 fi
 

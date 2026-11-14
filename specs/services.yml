@@ -172,7 +172,9 @@ services:
     healthcheck: true
     networks: [opensme-net]
     depends_on: [notes-backend]
-    traefik_labels: true
+    # shares the notes-backend netns (network_mode "service:notes-backend");
+    # its notesapp router lives on the backend owner (netns-merge 2026-11-14)
+    traefik_labels: false
     resource_limits:
       memory: 64M
 

@@ -222,10 +222,10 @@ MUTATIONS = [
     {
         "name": "tiles-routed-exclusion",
         "file": "contracts/tiles.yml",
-        "old": "  - id: notes-backend # Django API + SSO exchange behind the notes tile (no own journey start)\n",
-        "new": "  # DELETED notes-backend exclusion (mutation)\n",
+        "old": "    router: notesapp\n",
+        "new": "    # DELETED notesapp router link (mutation)\n",
         "check": "tests/00-static/check_tiles.py",
-        "why": "tiles catalog — the routed service exclusion must stay in 'excluded'",
+        "why": "tiles catalog — the notes tile's notesapp router link must stay",
     },
     {
         "name": "coverage-runner-wiring",
