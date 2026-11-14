@@ -1,0 +1,158 @@
+AF T2-calendar-setup-run — report (2026-11-14)
+=================================================
+
+TASK: Deploy scripts/calendar-setup.sh from the T2 worktree to the live
+compose tree (/opt/opensme-compose/compose, project 'compose'), run it
+against the live stack, verify the calendar booking stack end-to-end,
+report results. Worktree branch: tf/T2-calendar-setup-run.
+
+1. PROCEDURE
+------------
+1.1 Backup: /opt/opensme-compose/compose/scripts/calendar-setup.sh.bak-20261114
+    already existed (root-owned, 494-line pre-T1 script) — backup step
+    satisfied, no new backup created.
+1.2 Deploy: copied the worktree 556-line scripts/calendar-setup.sh (the
+    version WITH the T1 env-quote hardening block) to
+    /opt/opensme-compose/compose/scripts/calendar-setup.sh, chmod 755.
+    Verified byte-identical afterwards (diff -q → silent, echo
+    DEPLOYED-IDENTICAL).
+1.3 Run #1 (before any manual intervention):
+    sudo bash -c 'cd /opt/opensme-compose/compose && COMPOSE_PROFILES="ai,
+    camunda,chat,cms,collab,element,invoice,notes,paperless,surveys,store,
+    ticketing,tika,vc,web,calendar,standalone" bash scripts/calendar-setup.sh
+    --env-file /opt/opensme-compose/compose/.env --compose-file
+    "docker-compose.yml:idm/zitadel.yml:opencloud/opencloud.yml:mail/stalwart.yml:
+    mail/sogo6.yml:stalwart-idpplain.yml:services/camunda.yml:services/invoice-ninja.yml:
+    services/paperless.yml:services/notes.yml:services/synapse.yml:services/element.yml:
+    services/limesurvey.yml:services/calendar.yml:services/vc.yml:prod-tuning.yml:
+    profiles/system-traefik.yml:opensme-coexist.yml:opensme-live.yml:profiles/medium.yml"'
+    → EXIT=0. Steps 1,2 (htpasswd present, radicale not restarted), step 3
+    recreated opensme-calendar (recreated → healthy), steps 4,5,8 skipped
+    (admin / source / event-type 'vc' already present), step 7 sync FAILED
+    for the source ("tcp connect error: Connection refused (os error 111)"
+    against http://calendar-radicale:5232/, calrs exits 0 anyway), step 6
+    PROPFIND probe failed + MKCALENDAR → HTTP 502 via the edge.
+    → DEVIATION D1, investigated and fixed (see §3).
+1.4 Operational fix: recreated the netns passenger so it re-attached to the
+    NEW calendar container:
+    docker compose --env-file .env up -d --wait calendar calendar-radicale
+    (same chain/profiles, run from /opt/opensme-compose/compose).
+    → opensme-calendar-radicale Recreated/Started/Healthy, EXIT=0.
+1.5 Run #2 (idempotent re-run, same command as 1.3): EXIT=0, all steps OK;
+    step 6 warn MKCALENDAR HTTP 409 (existing collection — see D2); step 7
+    sync "… Syncing 'Public Calendar'… ✓ Public Booking — unchanged …
+    CalDAV sync completed source_id=34025673-…" (SUCCESS).
+
+2. VERIFICATIONS (command + evidence)
+-------------------------------------
+V1 Radicale htpasswd non-empty:
+   $ sudo docker exec opensme-calendar-radicale test -s /config/users
+   → exit 0 (HTPASSWD-NONEMPTY); contents show user: booking
+   (bcrypt hash, not reproduced here).
+
+V2 Booking page serves over the edge:
+   $ curl -sk -o /dev/null -w '%{http_code}' https://calendar.home.opensme.graphwiz.ai/
+   → root "/" returns 303 → Location: /auth/login; followed (-L) → 200.
+   The actual public booking page:
+   $ curl -sk -o /dev/null -w '%{http_code}' https://calendar.home.opensme.graphwiz.ai/u/demo/vc
+   → 200.
+   (D3: the bare root redirects to the login page by design; the booking
+   URL from the script — /u/demo/vc — is the page that matters and is 200.)
+
+V3 calrs DB contains admin user, radicale source, event-type 'vc':
+   (calrs 1.6.0 CLI reads the SQLite DB live; container has no sqlite3,
+   docker cp of a WAL-mode DB yields a stale/inconsistent snapshot, so the
+   CLI listings are the authoritative evidence.)
+   $ docker compose exec -T calendar calrs user list
+     demo@opensme.local | Calendar Admin | role=admin | provider=local | enabled ✓
+     (plus pre-existing OIDC testuser@opensme.local — untouched)
+   $ docker compose exec -T calendar calrs source list
+     ID 34025673 | Public Calendar | http://calendar-radicale:5232/ |
+     username booking | Last Synced 2026-11-14 19:21:17   ← updated by run #2
+   $ docker compose exec -T calendar calrs event-type list
+     vc   | Video Consultation | 30min | active ✓
+     call | Discovery Call      | 30min | active    ← KNOWN JUNK ROW,
+                                        left in place per task brief (T3 fixes;
+                                        event_types NOT modified in T2)
+   Cross-check via a DB snapshot (docker cp → host python3 sqlite3):
+   users row: email=demo@opensme.local, role=admin, username=demo, enabled=1;
+   caldav_sources row: name='Public Calendar', url='http://calendar-radicale:5232/',
+   username='booking', enabled=1, write_calendar_href='/booking/main/';
+   event_types row: slug='vc', title='Video Consultation', duration_min=30,
+   visibility='public', location_value='https://vc.home.opensme.graphwiz.ai/room/{uid}'
+   (the KNOWN GREEN baseline row — unchanged).
+
+V4 MKCALENDAR /booking/main/ collection exists and is a real VCALENDAR:
+   - Radicale collection dir in radicale-data volume:
+     /data/collections/collection-root/booking/main/ contains
+     .Radicale.props = {"C:supported-calendar-component-set": "VEVENT",
+     "D:displayname": "Public Booking", "tag": "VCALENDAR"}
+     plus two calrs write-back events (*@calrs.ics, from Nov 8 / Nov 11).
+   - PROPFIND through the edge (Depth 0, booking/htpasswd auth):
+     $ curl -u booking:*** -X PROPFIND .../dav/booking/main/
+     → 207 Multi-Status, resourcetype: <C:calendar /><collection />
+     (auth + routing + collection tag all verified; password read from the
+     env file inside a sudo shell, never echoed).
+
+V5 Sync (real credential + connectivity check):
+   $ docker compose exec -T calendar calrs sync
+   → ✓ Public Calendar — "✓ Public Booking — unchanged"; log line
+   "CalDAV sync completed source_id=34025673-…"; exit 0.
+
+V6 Netns topology (post-fix):
+   $ docker inspect opensme-calendar-radicale → netns=container:71a6e1e2…
+   (= the CURRENT opensme-calendar container);
+   inside: eth0 = 172.19.0.250/16 on opensme-net (the pinned IP carrying
+   BOTH calrs:3000 and radicale:5232 per docker-compose.yml design).
+   Both containers report (healthy).
+
+3. DEVIATIONS / FINDINGS
+------------------------
+D1 (fixed, operational only) — orphaned netns passenger on first run:
+   docker-compose.yml merges calendar-radicale into the calendar service's
+   network namespace (network_mode: "service:calendar"; traefik labels and
+   the DNS aliases 'calendar' + 'calendar-radicale' live on the calendar
+   container, pinned IP 172.19.0.250). Run #1's `compose up -d --wait
+   calendar` recreated the calendar container (netns owner) but compose did
+   NOT recreate radicale (its config hash was unchanged) → radicale kept
+   running in the dead netns of the REMOVED previous calendar container
+   (loopback only, no eth0). Symptoms: calrs sync "Connection refused"
+   against calendar-radicale:5232 (alias → 172.19.0.250, where nothing
+   listened), edge /dav → 502, MKCALENDAR → 502. FIX: `docker compose up -d
+   --wait calendar calendar-radicale` re-attached the passenger to the new
+   netns (V6). RECOMMENDATION (needs a script change → out of T2's
+   docs/-only scope): calendar-setup.sh step 3 should bring up BOTH
+   services (`dc up -d --wait calendar calendar-radicale`) so any future
+   calendar-container recreation re-attaches the passenger automatically.
+D2 (cosmetic, script quirk) — step 6 probe never matches:
+   The probe greps PROPFIND output for '<c:calendar/>' but Radicale
+   serializes '<C:calendar />' (uppercase namespace prefix + space), so the
+   "already present" branch never fires; every run falls through to
+   MKCALENDAR, which returns 409 on the existing collection and prints the
+   benign warn. Harmless (the script proceeds and sync confirms — V4/V5),
+   but the warn is misleading on every run. Same docs-only caveat as D1.
+D3 Booking root "/" returns 303 → /auth/login (200 followed). The public
+   booking page /u/demo/vc returns 200 (V2). Gate's plain `curl -sk`
+   exits 0 on the 303 (no --fail), behavior unchanged from before T2.
+D4 Backup calendar-setup.sh.bak-20261114 already existed — creation
+   skipped per procedure ("if not present").
+D5 Deployed script replaced by the 556-line worktree version (adds the T1
+   env-quote hardening block); the live .env was clean — no scrub warnings
+   were emitted during either run.
+
+4. SECRETS HANDLING
+-------------------
+No .env secret values printed or logged; the PROPFIND verification read
+RADICALE_PASSWORD into a shell variable inside a single sudo shell and used
+it only for the request. calrs password handling stayed inside the script's
+pty feeder (never argv, never echoed).
+
+5. GATE
+-------
+Acceptance gate command (verbatim) passes:
+  sudo docker exec opensme-calendar-radicale test -s /config/users &&
+  curl -sk -o /dev/null https://calendar.home.opensme.graphwiz.ai/ &&
+  test -f docs/af-calendar-report.txt &&
+  grep -qiE 'event.type|admin|source' docs/af-calendar-report.txt &&
+  echo GATE-T2-OK
+→ GATE-T2-OK
