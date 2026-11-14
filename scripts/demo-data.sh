@@ -188,7 +188,6 @@ if sudo -n test -r "$DEPLOYED_ENV" 2>/dev/null; then
   source <(sudo -n cat "$DEPLOYED_ENV" 2>/dev/null)
   set +a
   set -e
-  echo "DEBUG after source: OC_ADMIN_PASSWORD=${OC_ADMIN_PASSWORD:-<unset>}" >  set -e
 fi
 
 # auto-discover Zitadel machine PAT if not provided
@@ -289,7 +288,18 @@ if ! skip_extra calendar; then
   fi
 fi
 
-# tobias admin coverage
+# sogo sso allow-redirect repair
+if ! skip_extra sogo-sso && ! skip_extra sogo; then
+  if running opensme-sogo6-postgres; then
+    if [[ "$MODE" == "provision" ]]; then
+      run bash scripts/fix-sogo-sso.sh
+    else
+      warn "sogo sso allow-redirect is not auto-reversed"
+    fi
+  else
+    warn "opensme-sogo6-postgres not running — skipping sogo-sso"
+  fi
+fi
 if ! skip_extra admin; then
   if running opensme-zitadel; then
     if [[ "$MODE" == "provision" ]]; then
