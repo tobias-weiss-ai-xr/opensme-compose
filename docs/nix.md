@@ -50,8 +50,11 @@ shipped a broken build with zero notice. Key properties:
   `/etc/opencloud` + `/var/lib/opencloud`, non-root default user (the
   compose stack keeps `user: "0:0"`).
 - Local image tags: `opencloud:9.1.0-nix-flake` and
-  `ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0-nix-flake` (not pushed; the
-  deployed `:9.1.0` tag belongs to the separate source-built image).
+  `ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0-nix-flake`. Manual builds from
+  this host are not pushed (no registry credentials here); **CI pushes both
+  architectures** on every main push — see [CI builds](#ci-builds-github-actions)
+  below. The deployed `:9.1.0` tag belongs to the separate source-built
+  image and must not be overwritten.
 
 Build it:
 
@@ -64,3 +67,25 @@ Details and deployment status: [`nix/README.md`](../nix/README.md). See also
 [`pin-images.md`](pin-images.md) for the general pinning policy and
 [`monitoring/nix/`](../monitoring/nix/) for the same pattern applied to the
 monitoring agents.
+
+## CI builds (GitHub Actions)
+
+[`.github/workflows/nix-images.yml`](../.github/workflows/nix-images.yml)
+builds the flake images **natively on both architectures** on every push to
+`main` (plus manual dispatch) — two decoupled jobs, no binfmt/qemu emulation,
+no buildx:
+
+| Job | Runner | Packages | Pushes |
+|---|---|---|---|
+| `build-x86` | ubuntu-24.04 | `.#opencloud .#vc-room .#portal .#calrs` | `ghcr.io/tobias-weiss-ai-xr/<name>:<version>` |
+| `build-arm64` | ubuntu-24.04-arm | `.#opencloud` (arm64 release asset) | same tags + `-arm64` suffix |
+
+- Tags are parsed from the `name:tag` each flake expression produced
+  (`docker load` output) — versions stay in the flake, never in CI.
+- Per-arch suffix tags instead of a joined multi-platform manifest index is
+  a documented decision: zero cross-job coordination; a manifest-join job can
+  be added later without changing either build job.
+- Both jobs verify pushed tags via `docker manifest inspect` (best effort,
+  warning-only — ghcr propagation delay tolerated).
+- The sandbox setting mirrors the local build (`sandbox = false`, see
+  [`nix/README.md`](../nix/README.md)).

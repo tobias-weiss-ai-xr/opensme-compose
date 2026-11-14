@@ -1,0 +1,117 @@
+nix-images campaign — full verification sweep (task T5-verify-sweep)
+=====================================================================
+Date:      2026-11-14
+Branch:    tf/T5-verify-sweep @ 814991d (worktree of /home/weiss/git/openSME-compose)
+Verdict:   NOT GREEN — one pre-existing code-level static failure (see FAILURES);
+           everything else (mutations, E2E, all live probes) passes.
+           Final report marker is therefore withheld.
+
+SUITE SUMMARIES
+---------------
+[FAIL] python3 tests/run.py --static
+       23 checks passed, 1 failed (Layer 0 static validation).
+       Failing check: bootstrap-seed-data — 102 passed / 1 failed.
+       Layers 1 (spec compliance) and 2 (contract validation, 299 passed,
+       1 warning, 7 skipped) are green.
+       The single failure is a pre-existing seed-data defect on main, not a
+       regression of the nix-images campaign; details in FAILURES below.
+
+[PASS] python3 tests/00-static/check_mutations.py
+       34/34 mutations caught — all wired checks have teeth.
+
+[PASS] tests/05-e2e/run.py home.opensme.graphwiz.ai (invocation verified 2026-11-13)
+       SSO matrix 9/9 PASS (portal, notes, paperless, invoices, calendar,
+       bpm, matrix, webmail, cloud — full login chain per component).
+       Totals: 50 passed / 0 failed / 3 skipped (ticketing, cms, store not
+       running = the 3 known skips). Exit code 0.
+
+LIVE PROBES (all PASS)
+----------------------
+[PASS] (1) calendar footer — https://calendar.home.opensme.graphwiz.ai/u/demo/vc
+           body contains 'tobias-weiss-ai-xr/opensme-compose' (patch 0005 branding).
+[PASS] (2) cloud — https://cloud.home.opensme.graphwiz.ai/ answers 200.
+[PASS] (3) matrix — https://matrix.home.opensme.graphwiz.ai/_matrix/client/v3/login
+           advertises m.login.sso with identity provider oidc-zitadel.
+[PASS] (4) vc — https://vc.home.opensme.graphwiz.ai/ answers 200.
+[PASS] (5) invoices — https://invoices.home.opensme.graphwiz.ai/auth/oidc
+           302s to https://auth.home.opensme.graphwiz.ai/oauth/v2/authorize (the IdP).
+
+FAILURES
+--------
+FAIL bootstrap-seed-data (tests/00-static/check_bootstrap.py, line ~335):
+
+  bootstrap/demo-users.json user 'dummy.user': email
+  'dummy.user@home.opensme.graphwiz.ai' not under domain @opensme.local
+  (provisioning assumes it)
+
+Diagnosis (exact, no code change made — file is outside this task's
+allowed scope of docs/ + README.md):
+
+  * bootstrap/demo-users.json:155 sets dummy.user's email to
+    dummy.user@home.opensme.graphwiz.ai while the same file declares
+    "domain": "opensme.local" (line 3); check_bootstrap.py requires every
+    user email to end with @<file domain>.
+  * Introduced on main by commit 7a85c2d "feat(bootstrap): add dummy.user
+    demo account for e2e testing" (2026-11-13 20:28, human commit) — not by
+    any nix-images campaign task (T1–T4).
+  * A one-line fix already exists as commit 6e38852 "fix(bootstrap):
+    dummy.user email under declared domain opensme.local" (2026-11-14
+    00:22) — but only on the rejected branch
+    tf/T1-calrs-footer-rejected-3-1794612230; it was never merged to main.
+  * Nothing in tests/, scripts/ or bootstrap/ references the dummy.user
+    email address; changing it to dummy.user@opensme.local is safe and
+    makes the static suite fully green.
+
+OPS RECOVERY PERFORMED DURING THIS SWEEP (live stack, no repo changes)
+----------------------------------------------------------------------
+The host/docker daemon restarted uncleanly ~00:22 (containers Exited 255/137),
+which broke the live stack in ways that had to be repaired before E2E/probes
+could run:
+
+ 1. Restarted the dead containers: opensme-calendar, opensme-camunda,
+    opensme-gotenberg, opensme-opencloud, opensme-invoiceninja-db,
+    opensme-notes-y-provider, opensme-tika.
+ 2. opensme-opencloud needed stale containerd/runc task state cleared
+    (unforgeable "container with given ID already exists") and its static IP
+    172.19.0.17 back (opensme-postgres, dynamic IP, had taken it after the
+    restart-order shuffle) — postgres was disconnected/reconnected so
+    opencloud could claim .17.
+ 3. Refreshed the fleet-traefik standin backend IPs in
+    /root/git/docker-traefik/dynamic/ (normally refreshed by the
+    opensme_suite ansible role after every deploy; the daemon restart
+    shuffled container IPs): portal-standin -> 172.19.0.5:8080,
+    webmail-standin (SOGo UI) -> 172.19.0.10:3000, mail-home-standin
+    (stalwart) -> 172.19.0.18:8080.
+ 4. The postgres disconnect/reconnect in step 2 dropped the compose service
+    DNS alias 'postgres'; re-added it via `docker network connect --alias
+    postgres` and restarted opensme-zitadel so its DB pool reconnected
+    (zitadel had been dialing the unresolved name at the host's public IP).
+ 5. After recovery: all containers healthy, SSO matrix 9/9, totals
+    50/0/3 — matching the verified-working state of 2026-11-13.
+
+NOTE for the next run: any daemon restart on this OpenVZ host invalidates
+the standin IPs and (per the standin file comments) the traefik docker
+provider can lag; run the opensme_suite role (or re-pin the standin IPs)
+before trusting 502s as product failures.
+
+DOC GAPS CLOSED (this task's commits)
+-------------------------------------
+* .github/workflows/nix-images.yml (T4: native x86_64 + aarch64 builds,
+  ghcr push, per-arch -arm64 suffix tags, flake-parsed versions) was
+  undocumented: now described in README.md ("Nix-built stack images"
+  section) and docs/nix.md (new "CI builds (GitHub Actions)" section).
+* docs/nix.md opencloud section no longer claims the ghcr tag is "not
+  pushed" — manual host builds are not pushed, but CI pushes both
+  architectures; wording fixed accordingly.
+* calrs footer: docs/calendar.md already documents patch 0005 (footer
+  "Powered by calrs & openSME" linking to the repo), the build recipe and
+  the /u/demo/vc booking URL; the live probe above confirms it. No gap
+  left open.
+
+FINAL MARKER
+------------
+Withheld: the static suite must be 100% green before the report may end in
+the acceptance marker, and bootstrap/demo-users.json is outside this task's
+allowed files. The gate is expected to fail; the fix is a one-liner on
+bootstrap/demo-users.json (see FAILURES) and should be applied by a task
+whose scope includes bootstrap/.

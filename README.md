@@ -1312,6 +1312,17 @@ images until each one is explicitly adopted. See
 [`nix/README.md`](nix/README.md) for caveats (calrs uid-999 → uid-1000
 volume chown, rustc MSRV input, flake-only-sees-tracked-files).
 
+**CI builds both architectures.** On every push to `main` (and manual
+dispatch), [`.github/workflows/nix-images.yml`](.github/workflows/nix-images.yml)
+builds the flake images *natively* on hosted runners — no binfmt/qemu, no
+buildx: `build-x86` (ubuntu-24.04) builds all four packages and pushes
+`ghcr.io/tobias-weiss-ai-xr/<name>:<version>` for each; `build-arm64`
+(ubuntu-24.04-arm) builds `.#opencloud` natively (the flake picks the arm64
+release asset) and pushes the same tag with an `-arm64` suffix. Target tags
+are parsed from the name:tag the flake itself produced, so version bumps
+never drift into CI. Per-arch suffix tags are a documented decision — a
+manifest-join job can be layered on later without touching either build job.
+
 ## Configuration
 
 All configuration via `.env`. See [`.env.example`](.env.example) for the full list.
