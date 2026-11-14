@@ -80,6 +80,9 @@ export default async function HomePage() {
   const aiEnabled = Boolean(serverEnv("AI_API_URL").trim());
   const pollsEnabled =
     serverEnv("POLLS_ENABLED") === "1" || serverEnv("POLLS_ENABLED") === "true";
+  const broadcastEnabled =
+    serverEnv("INTERCOM_BROADCAST") === "1" ||
+    serverEnv("INTERCOM_BROADCAST") === "true";
 
   return (
     <PortalShell
@@ -88,6 +91,7 @@ export default async function HomePage() {
       feedColumns={feedColumns}
       aiEnabled={aiEnabled}
       pollsEnabled={pollsEnabled}
+      broadcastEnabled={broadcastEnabled}
       authenticated={authenticated}
     />
   );

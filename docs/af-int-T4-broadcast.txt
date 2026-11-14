@@ -1,0 +1,180 @@
+AF T4-broadcast-fanout — report (2026-11-14)
+
+FILES
+  portal/web/src/app/api/broadcast/route.ts   dedicated POST route (takes
+                                              precedence over the [[...path]]
+                                              catch-all): INTERCOM_BROADCAST
+                                              gate (404 hides the surface) →
+                                              text validation (trim, ≤ 2000) →
+                                              store via backend POST /api/intercom
+                                              (caller cookie forwarded, 401/other
+                                              statuses propagate, 502 on
+                                              unreachable) → fanoutBroadcast →
+                                              200 {message, fanout}
+  portal/web/src/lib/broadcast.ts             server-only fanout logic:
+                                              broadcastConfig() (env defaults
+                                              mirror booking-notify.sh),
+                                              matrixBroadcast() (client-v3
+                                              login → '#alias' directory resolve
+                                              or '!id' direct → PUT
+                                              send/m.room.message with idempotent
+                                              txn id broadcast-<ts>-<rand>,
+                                              one 429 login retry honoring
+                                              retry_after_ms capped at 5 s for
+                                              request context), mailBroadcast()
+                                              (execFile 'bash <script>' with
+                                              BROADCAST_* env, 60 s timeout,
+                                              ANSI-stripped last stdout line as
+                                              detail), fanoutBroadcast()
+                                              (both legs parallel, best-effort).
+                                              Secrets never appear in details.
+  portal/web/src/lib/broadcast.test.ts        14 unit tests: config defaults,
+                                              429 retry, alias vs direct room,
+                                              no-secret leakage, send-failure
+                                              reporting, execFile env wiring,
+                                              ANSI/tag stripping, exit-code
+                                              reporting, best-effort fanout
+  portal/web/src/lib/api.ts                   postBroadcast(text) → POST
+                                              /api/broadcast, AuthError on 401,
+                                              error extraction like postIntercom
+  portal/web/src/lib/types.ts                 FanoutChannelResult / FanoutReport
+  portal/web/src/components/IntercomPanel.tsx optional broadcastEnabled prop
+                                              (default false — existing tests
+                                              render without props and keep
+                                              passing); broadcast box in the
+                                              header area ('Broadcast an alle',
+                                              sr-only label, input + button,
+                                              maxLength 2000); success status
+                                              'Broadcast gesendet — Element ✓ ·
+                                              Mail ✓' / partial failure inline
+                                              / 'Nicht gesendet: …' on error;
+                                              AuthError → existing login CTA
+  portal/web/src/components/PortalShell.tsx   optional broadcastEnabled passthrough
+  portal/web/src/app/page.tsx                 broadcastEnabled =
+                                              serverEnv("INTERCOM_BROADCAST")
+                                              === "1" || "true"
+  scripts/broadcast-fanout.sh                 mail leg: same skeleton as
+                                              booking-notify.sh (header docs,
+                                              set -euo pipefail + set +x, usage
+                                              via sed, --dry-run/--check/
+                                              --env-file/--help), byte-identical
+                                              env-quote-hardening block (pinned
+                                              by tests/00-static/check_env_quote
+                                              .py), ENV_KEYS/ENV_KEEP 'explicit
+                                              environment beats env file',
+                                              recipients: BROADCAST_MAIL_TO wins
+                                              else jq over bootstrap/
+                                              demo-users.json (re-domaining via
+                                              BROADCAST_MAIL_DOMAIN, dedup),
+                                              python3 smtplib heredoc,
+                                              per-recipient + parallel (5
+                                              workers), exit 0/1/2
+  docs/af-int-T4-broadcast.txt                this report
+
+DISCOVERY
+  * /api/announcements (tests/05-e2e/broadcast.py, Epic H) is the
+    PORTAL_ANNOUNCEMENTS env banner feature — unrelated to the intercom;
+    T4 rides the intercom store instead (notes), as tasked.
+  * IntercomPanel delta-polls ?since= every 7 s and prepends the POST
+    response — the broadcast box reuses exactly that prepend pattern, so a
+    broadcast appears instantly without an extra fetch.
+  * The [[...path]] catch-all forwards only a fixed header set; the
+    broadcast route forwards content-type + cookie itself and calls
+    forwardToBackend directly (thin route, fanout lives in lib/broadcast.ts).
+  * portal-web image = Next standalone (node:22-alpine, read-only rootfs,
+    USER nextjs, network_mode service:portal, no python3, no scripts/
+    mount): the SMTP send cannot live in the route — hence the child_process
+    shell-out to scripts/broadcast-fanout.sh. In the image the script is
+    absent by design: the operator mounts it and sets BROADCAST_FANOUT_SCRIPT
+    (dev default walks upward from cwd and finds <repo>/scripts/…).
+  * Stalwart publishes host ports 25/143/587/465/993; 25 is the plain,
+    unauthenticated compose-internal listener (the route/script default),
+    587 expects STARTTLS (unverified context in the script, no SMTP auth —
+    the demo stack has a self-signed cert).
+  * Stalwart principals auto-provision on a user's FIRST SSO login: on a
+    fresh stack only testuser has a mailbox, the other 13 demo users 550
+    '5.1.2 Mailbox does not exist.' — so the script sends per recipient
+    (best-effort) and REPORTS the missing ones instead of failing the leg.
+  * Measured stalwart listener: ~4.5 s per SMTP connection (slow greet);
+    14 sequential connections = 65 s — too slow for the route's execFile
+    budget. 5 parallel workers bring it to ~5 s; script/lib timeouts 20 s
+    per connection / 60 s total.
+  * A 14-RCPT single-message send makes stalwart drop the session
+    ('Connection unexpectedly closed') — per-recipient transactions
+    sidestep this entirely.
+
+PROVISIONING
+  * Recipients default to bootstrap/demo-users.json (13 company users +
+    testuser, demo_email() = localpart@opensme.local), matching
+    provision-demo-users.sh's USERS_JSON.
+  * Only mailboxes whose principal exists receive mail; the operator sees
+    'delivered 1/14 recipient(s)' + the missing list on stderr. After the
+    demo users' first SSO logins the same broadcast reaches all 14.
+
+VERIFICATION (live stack, 2026-11-14, worktree dev server :3100 with
+INTERCOM_BROADCAST=1 BACKEND_URL=http://<portal>:8080; session minted for
+testuser via the portal's own HMAC cookie format)
+  * ./node_modules/.bin/vitest run            22 files / 164 tests green
+                                              (147 baseline + 17 new)
+  * ./node_modules/.bin/tsc --noEmit          clean
+  * bash -n scripts/broadcast-fanout.sh       clean
+  * shellcheck -S warning scripts/…           clean
+  * python3 tests/00-static/check_env_quote.py scripts/broadcast-fanout.sh
+                                              PASS (byte-identical block)
+  * POST /api/broadcast (cookie) → 200 {message:{id:6, author:'Test
+    User', …}, fanout:{element:{ok:true, detail:'event $GT3y1ktSWzl3… →
+    !WnQcxON1h0KdG4dEYyRXqmYYKp1FmXx7SOLdAbRkV9A'}, mail:{ok:true,
+    detail:'broadcast: delivered 1/14 recipient(s)'}}}
+  * Matrix: m.room.message landed in the #support room (room
+    !WnQcxON1…, several events across runs)
+  * Stalwart log (stalwart.log.2026-11-14): 'from = "broadcast@opensme
+    .local", to = ["testuser@opensme.local"], code = 250' + 'Delivery
+    completed' — message queued with id, delivered to the testuser mailbox
+  * Gate off (INTERCOM_BROADCAST unset, second dev instance) → POST
+    /api/broadcast → 404 (surface hidden)
+  * Validation: empty text → 400 'text fehlt…'; 2001 chars → 400 'text
+    zu lang…'; no cookie → 401 propagated from the backend
+  * broadcast-fanout.sh --check: python3 OK, 14 recipients, SMTP NOOP 250;
+    --dry-run lists all recipients; BROADCAST_MAIL_TO override + dedupe
+    verified ('a@x.test, b@y.test ,a@x.test' → 2 recipients)
+
+DESIGN NOTES
+  * Thin route, fat lib: all fanout logic is unit-testable in
+    lib/broadcast.ts (fetch + execFile stubbed); the route only gates,
+    validates, forwards and shapes the response.
+  * Best-effort contract: the note is stored FIRST; Element/mail failures
+    never fail the request — the UI status line names each channel with
+    its detail ('Broadcast gesendet, aber: Element ✗ (…) · Mail ✓').
+  * Element flow mirrors booking-notify.sh 1:1 (login body shape, v3
+    endpoints, txn-id idempotency, alias directory resolve, no auto-create
+    from the route) minus the --loop/state machinery that only the
+    operator script needs.
+  * The env-quote-hardened dotenv loader block is byte-identical across
+    booking-notify.sh / broadcast-fanout.sh (check_env_quote.py pins it).
+  * Secrets discipline: Matrix password/token never appear in details or
+    logs (login failures report only 'HTTP <status>'); the mail leg is
+    secretless (plain port 25 inside the compose network); set +x in both
+    shell and python paths.
+
+KNOWN LIMITATIONS
+  * The deployed portal-web container needs operator wiring to enable the
+    feature (compose is out of scope for this task):
+      1. environment INTERCOM_BROADCAST=1 on portal-web
+      2. mount scripts/broadcast-fanout.sh into the container (read-only,
+         e.g. /opt/opensme/broadcast-fanout.sh) and set
+         BROADCAST_FANOUT_SCRIPT=/opt/opensme/broadcast-fanout.sh
+         (bash + jq + python3 are also required inside the image — none
+         are present today; mounting a small sidecar image or executing
+         via docker exec from a wrapper are the two clean options)
+      3. optional: MATRIX_DOMAIN/MATRIX_ROOM/BROADCAST_MAIL_TO/
+         BROADCAST_SMTP_* overrides — defaults already match the demo stack
+  * 13 of 14 demo mailboxes stay 'missing' until first SSO login
+    (auto-provisioning) — reported, not fatal.
+  * The mail leg assumes unauthenticated port 25; port 587 works with
+    STARTTLS but without SMTP auth (stalwart submission policy may refuse
+    relay — 25 is the supported path).
+  * Without INTERCOM_BROADCAST the route 404s (same observable as the
+    catch-all's '404 hides backend surface' stance).
+
+TASK ID: T4-broadcast-fanout
+BRANCH: tf/T4-broadcast-fanout

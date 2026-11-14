@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import PortalShell from "./PortalShell";
 import type { Service } from "@/lib/types";
 
@@ -123,5 +123,19 @@ describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
     stubFetch(true);
     render(<PortalShell {...base} authenticated={true} pollsEnabled={false} />);
     expect(screen.queryByRole("tab", { name: "Umfragen" })).not.toBeInTheDocument();
+  });
+
+  it("forwards broadcastEnabled to the notes panel (operator broadcast box)", async () => {
+    // pollsEnabled=false: the generic stub answers /api/polls with {} which
+    // crashes PollsPanel on a later tick — irrelevant to the broadcast box.
+    stubFetch(true);
+    render(
+      <PortalShell {...base} authenticated={true} pollsEnabled={false} broadcastEnabled={true} />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Notizen" }));
+    expect(
+      await screen.findByRole("button", { name: "Broadcast an alle" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Broadcast an alle")).toBeInTheDocument();
   });
 });

@@ -87,3 +87,16 @@ export interface AiChatRequest {
 export interface AiChatResponse {
   answer: string;
 }
+
+/** Per-channel result of the server-side broadcast fanout (best-effort). */
+export interface FanoutChannelResult {
+  ok: boolean;
+  /** human-readable outcome, safe to surface in the UI (no secrets). */
+  detail: string;
+}
+
+/** Element (Matrix) + Stalwart mail outcomes for one broadcast. */
+export interface FanoutReport {
+  element: FanoutChannelResult;
+  mail: FanoutChannelResult;
+}

@@ -88,6 +88,44 @@ export async function postIntercom(
   return res.json() as Promise<{ message: IntercomMessage }>;
 }
 
+export interface FanoutChannel {
+  ok: boolean;
+  detail: string;
+}
+
+export interface FanoutResult {
+  element: FanoutChannel;
+  mail: FanoutChannel;
+}
+
+/**
+ * Operator broadcast: stores the note via /api/broadcast and fans it out
+ * server-side (Element + Stalwart mail). Only available when the operator
+ * set INTERCOM_BROADCAST=1 — otherwise the route answers 404 ("HTTP 404").
+ */
+export async function postBroadcast(text: string): Promise<{
+  message: IntercomMessage;
+  fanout: FanoutResult;
+}> {
+  const res = await fetch("/api/broadcast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) {
+    let error = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) error = data.error;
+    } catch {
+      /* keep HTTP fallback */
+    }
+    throw new Error(error);
+  }
+  return res.json() as Promise<{ message: IntercomMessage; fanout: FanoutResult }>;
+}
+
 export async function postIntercomUpload(
   text: string,
   file: File,

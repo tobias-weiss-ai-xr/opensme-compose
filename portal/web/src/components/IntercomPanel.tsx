@@ -5,6 +5,7 @@ import { humanSize, relativeTime } from "@/lib/format";
 import {
   AuthError,
   fetchIntercom,
+  postBroadcast,
   postCloudShare,
   postIntercom,
   postIntercomUpload,
@@ -19,6 +20,11 @@ const POLL_MS = 7000;
 /** Client-side render cap — mirrors the server FIFO cap (INTERCOM_MAX_MESSAGES default). */
 const MAX_RENDERED = 50;
 
+interface IntercomPanelProps {
+  /** Operator broadcast box (INTERCOM_BROADCAST=1) — off by default. */
+  broadcastEnabled?: boolean;
+}
+
 /**
  * Team-notes panel (intercom): short notes with optional cloud attachment.
  * Native fetch against the same-origin API (rewritten to the Rust backend).
@@ -28,14 +34,21 @@ const MAX_RENDERED = 50;
  * every 7s while the tab is visible (visibilitychange triggers an
  * immediate catch-up on show). After sending, the POST response is
  * prepended directly — no extra roundtrip.
+ *
+ * With broadcastEnabled the panel shows a compact operator broadcast box
+ * in the header area: /api/broadcast stores the note AND fans it out to
+ * the Element support room and Stalwart mail (all demo users).
  */
-export default function IntercomPanel() {
+export default function IntercomPanel({ broadcastEnabled = false }: IntercomPanelProps) {
   const [messages, setMessages] = useState<IntercomMessage[]>([]);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<string | null>(null);
+  const [broadcastText, setBroadcastText] = useState("");
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
+  const [broadcastOut, setBroadcastOut] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [cloudPick, setCloudPick] = useState<CloudFileEntry | null>(null);
@@ -185,6 +198,43 @@ export default function IntercomPanel() {
     }
   }
 
+  /**
+   * Operator broadcast: store + fan out via /api/broadcast (server-side).
+   * Per-channel status in German — "Broadcast gesendet — Element ✓ · Mail ✓",
+   * failures named inline; the note itself is stored regardless.
+   */
+  async function broadcast() {
+    const trimmed = broadcastText.trim();
+    if (!trimmed) {
+      setBroadcastOut("Erst einen kurzen Broadcast-Text schreiben.");
+      return;
+    }
+    setBroadcastBusy(true);
+    setBroadcastOut("…");
+    try {
+      const res = await postBroadcast(trimmed);
+      latestRef.current = Math.max(latestRef.current, res.message.id);
+      mergeIncoming([res.message]);
+      setBroadcastText("");
+      const { element, mail } = res.fanout;
+      const channels = [
+        element.ok ? "Element ✓" : `Element ✗ (${element.detail})`,
+        mail.ok ? "Mail ✓" : `Mail ✗ (${mail.detail})`,
+      ];
+      const allOk = element.ok && mail.ok;
+      setBroadcastOut(
+        allOk
+          ? `Broadcast gesendet — ${channels.join(" · ")}`
+          : `Broadcast gesendet, aber: ${channels.join(" · ")}`,
+      );
+    } catch (err) {
+      setBroadcastOut(`Nicht gesendet: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof AuthError) markAuthRequired();
+    } finally {
+      setBroadcastBusy(false);
+    }
+  }
+
   if (authRequired) {
     return (
       <section className="tab-panel" aria-label="Notizen">
@@ -197,6 +247,47 @@ export default function IntercomPanel() {
   return (
     <section className="tab-panel" aria-label="Notizen">
       <h2 className="mb-3 text-lg font-bold">Notizen</h2>
+      {broadcastEnabled && (
+        <div className="bc-row mb-3 rounded-[10px] border border-border bg-card p-4 shadow-sm">
+          <h3 className="font-semibold">Broadcast an alle</h3>
+          <p className="mb-2 text-sm text-dim">
+            Operator-Nachricht an Team-Notizen, Element-Raum und Mail-Postfächer
+            aller Demo-Nutzer:innen
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="sr-only" htmlFor="bc-text">
+              Broadcast an alle
+            </label>
+            <input
+              id="bc-text"
+              className="bc-text w-full rounded-lg border border-border p-2 text-sm"
+              maxLength={2000}
+              placeholder="Broadcast an alle…"
+              value={broadcastText}
+              onChange={(e) => setBroadcastText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void broadcast();
+                }
+              }}
+            />
+            <button
+              className="bc-send shrink-0"
+              type="button"
+              disabled={broadcastBusy}
+              onClick={() => void broadcast()}
+            >
+              Broadcast an alle
+            </button>
+          </div>
+          {broadcastOut && (
+            <p className="mt-2 text-sm text-dim" role="status">
+              {broadcastOut}
+            </p>
+          )}
+        </div>
+      )}
       <div className="func-grid single" style={{ gridTemplateColumns: "minmax(220px, 420px)" }}>
         <div className="bd-1 rounded-[10px] border border-border bg-card p-4 shadow-sm">
           <h3 className="font-semibold">Team-Notizen</h3>

@@ -1,6 +1,12 @@
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import IntercomPanel from "./IntercomPanel";
-import { fetchIntercom, postCloudShare, postIntercom, postIntercomUpload } from "@/lib/api";
+import {
+  fetchIntercom,
+  postBroadcast,
+  postCloudShare,
+  postIntercom,
+  postIntercomUpload,
+} from "@/lib/api";
 import type { IntercomListResponse, IntercomMessage } from "@/lib/types";
 
 const { MockAuthError } = vi.hoisted(() => ({
@@ -18,6 +24,7 @@ vi.mock("@/lib/api", () => ({
   postIntercom: vi.fn(),
   postIntercomUpload: vi.fn(),
   postCloudShare: vi.fn(),
+  postBroadcast: vi.fn(),
   AuthError: MockAuthError,
 }));
 
@@ -26,6 +33,7 @@ const mockedFetch = vi.mocked(fetchIntercom);
 const mockedPost = vi.mocked(postIntercom);
 const mockedUpload = vi.mocked(postIntercomUpload);
 const mockedShare = vi.mocked(postCloudShare);
+const mockedBroadcast = vi.mocked(postBroadcast);
 
 const CLOUD_FILE = {
   name: "kickoff.pdf",
@@ -60,6 +68,7 @@ describe("IntercomPanel", () => {
     mockedPost.mockReset();
     mockedUpload.mockReset();
     mockedShare.mockReset();
+    mockedBroadcast.mockReset();
     vi.useRealTimers();
     setHidden(false);
   });
@@ -442,5 +451,111 @@ describe("IntercomPanel", () => {
       await vi.advanceTimersByTimeAsync(21_000);
     });
     expect(mockedFetch).toHaveBeenCalledTimes(2); // initial + the 401 poll, then dead
+  });
+
+  // ── operator broadcast (INTERCOM_BROADCAST=1) ────────────────────
+
+  it("hides the broadcast box unless broadcastEnabled is set", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    render(<IntercomPanel />);
+    await screen.findByText(/No notes yet/);
+    expect(screen.queryByLabelText("Broadcast an alle")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Broadcast an alle" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("broadcasts: stores the note, prepends it, reports both fanout channels", async () => {
+    mockedFetch.mockResolvedValue(listResponse([msg({ id: 1, text: "Alt" })], 1));
+    render(<IntercomPanel broadcastEnabled />);
+    await screen.findByText("Alt");
+
+    mockedBroadcast.mockResolvedValue({
+      message: msg({ id: 9, text: "Alle an Bord", author: "op" }),
+      fanout: {
+        element: { ok: true, detail: "event $abc → !room:hs" },
+        mail: { ok: true, detail: "broadcast delivered to 14 recipient(s)" },
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
+      target: { value: "  Alle an Bord  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
+
+    await waitFor(() =>
+      expect(mockedBroadcast).toHaveBeenCalledWith("Alle an Bord"),
+    );
+    expect(await screen.findByText("Alle an Bord")).toBeInTheDocument(); // prepended note
+    expect(
+      await screen.findByText("Broadcast gesendet — Element ✓ · Mail ✓"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Broadcast an alle")).toHaveValue("");
+    // notes list untouched apart from the prepended broadcast
+    expect(screen.getByText("Alt")).toBeInTheDocument();
+  });
+
+  it("names a failed fanout channel with its detail, note still stored", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    render(<IntercomPanel broadcastEnabled />);
+    await screen.findByText(/No notes yet/);
+
+    mockedBroadcast.mockResolvedValue({
+      message: msg({ id: 2, text: "Teil-Ok" }),
+      fanout: {
+        element: { ok: false, detail: "send failed (HTTP 403)" },
+        mail: { ok: true, detail: "delivered to 14 recipient(s)" },
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
+      target: { value: "Teil-Ok" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
+
+    expect(
+      await screen.findByText(
+        "Broadcast gesendet, aber: Element ✗ (send failed (HTTP 403)) · Mail ✓",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Teil-Ok")).toBeInTheDocument();
+  });
+
+  it("blocks empty broadcasts with a hint and no API call", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    render(<IntercomPanel broadcastEnabled />);
+    await screen.findByText(/No notes yet/);
+
+    fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Erst einen kurzen Broadcast-Text schreiben.",
+    );
+    expect(mockedBroadcast).not.toHaveBeenCalled();
+  });
+
+  it("surfaces broadcast send errors — including the login CTA on 401", async () => {
+    mockedFetch.mockResolvedValue(listResponse());
+    render(<IntercomPanel broadcastEnabled />);
+    await screen.findByText(/No notes yet/);
+
+    mockedBroadcast.mockRejectedValue(new Error("HTTP 404"));
+    fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
+      target: { value: "Geht nicht raus" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Nicht gesendet: HTTP 404",
+    );
+    expect(screen.getByLabelText("Broadcast an alle")).toHaveValue("Geht nicht raus");
+
+    mockedBroadcast.mockRejectedValue(new AuthError());
+    fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
+    expect(
+      await screen.findByText(
+        "Team-Notizen sind angemeldeten Nutzer:innen vorbehalten",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Broadcast an alle")).not.toBeInTheDocument();
   });
 });

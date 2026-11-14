@@ -20,6 +20,8 @@ interface PortalShellProps {
   feedColumns: FeedColumnSpec[];
   aiEnabled: boolean;
   pollsEnabled: boolean;
+  /** Operator broadcast box in the notes panel (INTERCOM_BROADCAST=1). */
+  broadcastEnabled?: boolean;
   /** True when the visitor holds a valid portal session (SSR probe, session.ts). */
   authenticated: boolean;
 }
@@ -42,6 +44,7 @@ export default function PortalShell({
   feedColumns,
   aiEnabled,
   pollsEnabled,
+  broadcastEnabled = false,
   authenticated,
 }: PortalShellProps) {
   const [tab, setTab] = useState("dienste");
@@ -77,7 +80,7 @@ export default function PortalShell({
         )}
 
         <section className="tab-panel" hidden={tab !== "notizen"} aria-label="Notizen">
-          <IntercomPanel />
+          <IntercomPanel broadcastEnabled={broadcastEnabled} />
         </section>
 
         <section className="mt-10" aria-label="News">
