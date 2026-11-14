@@ -3,14 +3,31 @@
 #
 # Single-command bootstrap that seeds a GraphWiz AI demo tenant
 # inside the running Invoice Ninja stack by sending SQL directly to the
-# MariaDB database container (the FPM image ships no mysql client and
-# artisan offers no database-manipulation commands).
+# MariaDB database container (the FPM image ships no mysql client,
+# artisan offers no database-manipulation commands, and plain `php -r`
+# cannot reach the Laravel models without a booted app).
 # Idempotent and safe to re-run.
+#
+# Schema notes (Invoice Ninja v5 as deployed here):
+#   - Company profile fields (name, address, phone, email, website,
+#     vat_number, colors) live inside the JSON `settings` column of the
+#     `companies` table; there is no `company_settings` table.
+#   - `tax_rates` has no `is_compound`/`type_id` columns.
+#   - `products` has no `name` column: the display name is `product_key`,
+#     the description is `notes`, the default line tax is
+#     `tax_name1`/`tax_rate1`.
+#   - `projects` uses `budgeted_amount`/`task_rate`/`budgeted_hours`
+#     (there are no `budget`/`rate` columns).
+#   - `clients` has no `email` column; contact emails live in
+#     `client_contacts` (with NOT NULL company_id/client_id/user_id/
+#     password).
+#   - `clients`, `products`, `projects`, `tax_rates` all require
+#     `company_id` (+ `user_id` on most), which raw SQL must provide.
 #
 # Usage (from repository root):
 #   ./scripts/provision-invoice-demo.sh              # create demo data
 #   ./scripts/provision-invoice-demo.sh --clean     # remove demo data
-#   ./scripts/provision-invoice-demo.sh --force     # recreate even if already present
+#   ./scripts/provision-invoice-demo.sh --force     # clean + recreate
 #   ./scripts/provision-invoice-demo.sh --dry-run   # show commands only
 #   ./scripts/provision-invoice-demo.sh --project P # use compose project name P
 #
@@ -40,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo "Provision a GraphWiz AI demo tenant in Invoice Ninja."
             echo "Options:"
-            echo "  --force        Re-provision even if already set up"
+            echo "  --force        Clean and re-provision even if already set up"
             echo "  --dry-run      Print commands but do not execute them"
             echo "  --clean        Remove demo objects instead"
             echo "  --project NAME Docker Compose project name (default: opensme)"
@@ -83,34 +100,39 @@ if [ "$DRY_RUN" != true ] && [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
 fi
 
 # Helper: run SQL against the invoiceninja MariaDB database inside the db
-# container. All demo-data SQL goes through this helper.
+# container. All demo-data statements go through this helper.
 sql() {
     local query="$1"
     if [ "$DRY_RUN" = true ]; then
-        printf 'docker exec %q mariadb -u %q -p"***" %q -e %q\n' "$DB" "$DB_USER" "$DB_NAME" "$query" >&2
+        printf 'docker exec %q mariadb --default-character-set=utf8mb4 -u %q -p"***" %q -e %q\n' "$DB" "$DB_USER" "$DB_NAME" "$query" >&2
         return 0
     fi
     if [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
         die "INVOICENINJA_DB_PASSWORD is not set and could not be read from $ENV_FILE"
     fi
     if [ "$VERBOSE" = true ]; then
-        ( set -x; docker exec "$DB" mariadb -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1 )
+        ( set -x; docker exec "$DB" mariadb --default-character-set=utf8mb4 -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1 )
     else
-        docker exec "$DB" mariadb -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1
+        docker exec "$DB" mariadb --default-character-set=utf8mb4 -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -e "$query" 2>&1
     fi
 }
 
-# Helper: run PHP one-liner inside FPM container
-php_exec() {
+# Execute a statement silently; status decides ok/warn reporting.
+sqlq() { sql "$@" >/dev/null; }
+
+# Helper: single-value SELECT. In dry-run mode the planned statement is
+# printed and a placeholder value is returned so the plan still resolves.
+lookup() {
+    local query="$1"
     if [ "$DRY_RUN" = true ]; then
-        printf 'docker exec %q php -r %q\n' "$FPM" "$1" >&2
+        printf 'docker exec %q mariadb --default-character-set=utf8mb4 -u %q -p"***" %q -N -B -e %q\n' "$DB" "$DB_USER" "$DB_NAME" "$query" >&2
+        echo 1
         return 0
     fi
-    if [ "$VERBOSE" = true ]; then
-        ( set -x; docker exec "$FPM" php -r "$1" 2>&1 )
-    else
-        docker exec "$FPM" php -r "$1" 2>&1
+    if [ -z "${INVOICENINJA_DB_PASSWORD:-}" ]; then
+        die "INVOICENINJA_DB_PASSWORD is not set and could not be read from $ENV_FILE"
     fi
+    docker exec "$DB" mariadb --default-character-set=utf8mb4 -u "$DB_USER" -p"$INVOICENINJA_DB_PASSWORD" "$DB_NAME" -N -B -e "$query" 2>/dev/null || true
 }
 
 # Company constants
@@ -123,7 +145,7 @@ COMPANY_PHONE="+49 221 12345678"
 COMPANY_WEBSITE="https://graphwiz.ai"
 COMPANY_VAT="DE123456789"
 
-# Demo clients
+# Demo clients (name|email|legal name|street|postal city|country)
 CLIENTS=(
     "Acme Corporation|acme@example.com|Acme GmbH|Musterstraße 1|10115 Berlin|Germany"
     "Tech Solutions GmbH|info@tech-solutions.io|Tech Solutions GmbH|Startup Alley 42|80335 München|Germany"
@@ -140,7 +162,14 @@ PRODUCTS=(
     "E-Book: AI Guide|Comprehensive AI implementation guide|49.00"
 )
 
-# Demo projects (client|name|budget)
+# Demo tax rates (name|rate)
+TAXES=(
+    "Standard VAT|19.00"
+    "Reduced VAT|7.00"
+    "No VAT|0.00"
+)
+
+# Demo projects (client|name|budget in €)
 PROJECTS=(
     "Acme Corporation|AI Readiness Assessment|12000.00"
     "Acme Corporation|Cloud Migration 2026|48000.00"
@@ -148,11 +177,12 @@ PROJECTS=(
     "Data Systems Inc|AI Training Rollout|8500.00"
 )
 
-COLOR_SCHEME="0e578d"
+COLOR_SCHEME="#0e578d"
+DE_COUNTRY_ID="(SELECT id FROM countries WHERE iso_3166_2 = 'DE' LIMIT 1)"
 
 check_already_provisioned() {
     local name
-    name=$(php_exec "\$c = \\App\\Models\\Company::first(); echo trim(\$c ? \$c->name : '');" 2>/dev/null | tr -d '\n')
+    name=$(lookup "SELECT JSON_VALUE(settings, '$.name') FROM companies WHERE id = 1")
     [[ "$name" == "$COMPANY_NAME" ]]
 }
 
@@ -160,30 +190,56 @@ check_already_provisioned() {
 do_clean() {
     info "Removing demo data…"
 
-    # Delete products
+    # Delete products (display name lives in product_key)
     for p in "${PRODUCTS[@]}"; do
         local name
         name=$(echo "$p" | cut -d'|' -f1)
-        if sql "DELETE FROM products WHERE name = '$name'" >/dev/null; then
+        if sqlq "DELETE FROM products WHERE company_id = 1 AND product_key = '$name'"; then
             ok "Deleted product: $name"
         fi
     done
 
-    # Delete projects and clients
+    # Delete projects, contacts and clients
     for c in "${CLIENTS[@]}"; do
-        local cname
+        local cname cid
         cname=$(echo "$c" | cut -d'|' -f1)
-        local cid
-        cid=$(php_exec "\$cl = \\App\\Models\\Client::where('name','$cname')->first(); echo \$cl ? \$cl->id : 0;" 2>/dev/null | tr -d '\n')
-        [[ -n "$cid" && "$cid" != "0" ]] && sql "DELETE FROM projects WHERE client_id = $cid" >/dev/null
-        if sql "DELETE FROM clients WHERE name = '$cname'" >/dev/null; then
+        cid=$(lookup "SELECT id FROM clients WHERE company_id = 1 AND name = '$cname' LIMIT 1")
+        if [ -n "$cid" ] && [ "$cid" != "0" ]; then
+            sqlq "DELETE FROM client_contacts WHERE company_id = 1 AND client_id = $cid" || true
+            sqlq "DELETE FROM projects WHERE company_id = 1 AND client_id = $cid" || true
+        fi
+        if sqlq "DELETE FROM clients WHERE company_id = 1 AND name = '$cname'"; then
             ok "Deleted client: $cname"
         fi
     done
 
-    # Reset company name
-    sql "UPDATE companies SET name='My Company', email='admin@example.com' WHERE id=1" >/dev/null
-    ok "Demo data removed"
+    # Delete demo tax rates
+    if sqlq "DELETE FROM tax_rates WHERE company_id = 1 AND name IN ('Standard VAT', 'Reduced VAT', 'No VAT')"; then
+        ok "Deleted demo tax rates"
+    fi
+
+    # Reset company profile (fields live in the settings JSON column)
+    if sqlq "
+        UPDATE companies
+        SET settings = JSON_SET(
+                settings,
+                '$.name', 'My Company',
+                '$.email', 'admin@example.com',
+                '$.phone', '',
+                '$.website', '',
+                '$.vat_number', '',
+                '$.address1', '',
+                '$.address2', '',
+                '$.city', '',
+                '$.state', '',
+                '$.postal_code', '',
+                '$.primary_color', '#298AAB'
+            ),
+            updated_at = NOW()
+        WHERE id = 1
+    "; then
+        ok "Demo data removed"
+    fi
 }
 
 ###############################################################################
@@ -196,123 +252,115 @@ do_provision() {
 
     info "Provisioning demo tenant: $COMPANY_NAME"
 
+    # Owning user (first account user, usually the admin)
+    local user_id
+    user_id=$(lookup "SELECT id FROM users ORDER BY id LIMIT 1")
+
+    # Company address split (street / postal city / country lines)
+    local c_addr1 c_postal c_city
+    c_addr1=$(printf '%s\n' "$COMPANY_ADDRESS" | sed -n '1p')
+    c_postal=$(printf '%s\n' "$COMPANY_ADDRESS" | sed -n '2p' | cut -d' ' -f1)
+    c_city=$(printf '%s\n' "$COMPANY_ADDRESS" | sed -n '2p' | cut -d' ' -f2-)
+
     ###########################################################################
-    # 1. Company
+    # 1. Company profile & branding
+    #    Invoice Ninja v5 keeps these fields in the companies.settings JSON.
     ###########################################################################
     info "  → Company profile…"
     sql "
         UPDATE companies
-        SET
-            name = '$COMPANY_NAME',
-            email = '$COMPANY_EMAIL',
-            address = '${COMPANY_ADDRESS//$'\n'/\\n}',
-            phone = '$COMPANY_PHONE',
-            website = '$COMPANY_WEBSITE',
-            vat_number = '$COMPANY_VAT',
-            custom_value1 = '',
-            custom_value2 = ''
+        SET settings = JSON_SET(
+                settings,
+                '$.name', '$COMPANY_NAME',
+                '$.email', '$COMPANY_EMAIL',
+                '$.address1', '$c_addr1',
+                '$.address2', '',
+                '$.city', '$c_city',
+                '$.state', '',
+                '$.postal_code', '$c_postal',
+                '$.country_id', '276',
+                '$.phone', '$COMPANY_PHONE',
+                '$.website', '$COMPANY_WEBSITE',
+                '$.vat_number', '$COMPANY_VAT',
+                '$.primary_color', '$COLOR_SCHEME'
+            ),
+            updated_at = NOW()
         WHERE id = 1
     "
     ok "Company configured"
 
     ###########################################################################
-    # 2. Company Settings / Branding
-    ###########################################################################
-    info "  → Company settings…"
-    # Set color scheme and logo via settings
-    sql "
-        INSERT INTO company_settings (company_id, settings_key, settings_value)
-        VALUES (1, 'invoice_color', '$COLOR_SCHEME')
-        ON DUPLICATE KEY UPDATE settings_value = VALUES(settings_value)
-    " || true
-    ok "Settings saved"
-
-    ###########################################################################
-    # 3. Tax Rates (ensure EUR taxes exist)
+    # 2. Tax Rates (ensure EUR taxes exist)
     ###########################################################################
     info "  → Tax rates…"
-    sql "
-        INSERT IGNORE INTO tax_rates (name, rate, is_compound, type_id)
-        VALUES ('Standard VAT', 19.00, false, 1),
-               ('Reduced VAT', 7.00, false, 1),
-               ('No VAT', 0.00, false, 1)
-    " || true
+    for t in "${TAXES[@]}"; do
+        local tname trate
+        tname=$(echo "$t" | cut -d'|' -f1)
+        trate=$(echo "$t" | cut -d'|' -f2)
+        sqlq "
+            INSERT INTO tax_rates (company_id, user_id, name, rate, created_at, updated_at)
+            SELECT 1, $user_id, '$tname', $trate, NOW(), NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM tax_rates WHERE company_id = 1 AND name = '$tname')
+        " || true
+    done
     ok "Tax rates configured"
 
     ###########################################################################
-    # 4. Clients
+    # 3. Clients (+ primary contact carrying the email)
     ###########################################################################
     info "  → Clients…"
     for c in "${CLIENTS[@]}"; do
-        local name email street city postal country
+        local name email street pcity city postal cid
         name=$(echo "$c" | cut -d'|' -f1)
         email=$(echo "$c" | cut -d'|' -f2)
         street=$(echo "$c" | cut -d'|' -f4)
-        city=$(echo "$c" | cut -d'|' -f5)
-        postal=$(echo "$c" | cut -d'|' -f6)
-        country=$(echo "$c" | cut -d'|' -f7)
-        address="$street\n$postal $city\n$country"
+        pcity=$(echo "$c" | cut -d'|' -f5)
+        postal=$(echo "$pcity" | cut -d' ' -f1)
+        city=$(echo "$pcity" | cut -d' ' -f2-)
 
-        if sql "
-            INSERT INTO clients (id, user_id, assigned_user_id, name, email, address1, address2, city, state, postal_code, country_id, currency_id, custom_value1, custom_value2, custom_value3, custom_value4, is_deleted, balance, paid_to_date, last_login, size_id, industry_id, private_notes, public_notes, website, phone, created_at, updated_at)
-            VALUES (
-                DEFAULT, NULL, NULL, '$name', '$email', '${address//$'\n'/\\n}', '', '$city', '', '$postal', (SELECT id FROM countries WHERE iso_3166_2 = 'DE' LIMIT 1), 1, NULL, NULL, NULL, NULL, 0, 0.00, 0.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NOW(), NOW()
-            )
-            ON DUPLICATE KEY UPDATE
-               name = VALUES(name),
-               email = VALUES(email),
-               address1 = VALUES(address1),
-               city = VALUES(city),
-               postal_code = VALUES(postal_code),
-               country_id = VALUES(country_id),
-               updated_at = NOW()
+        if sqlq "
+            INSERT INTO clients (company_id, user_id, name, address1, address2, city, state, postal_code, country_id, is_deleted, balance, paid_to_date, created_at, updated_at)
+            SELECT 1, $user_id, '$name', '$street', '', '$city', '', '$postal', ${DE_COUNTRY_ID}, 0, 0, 0, NOW(), NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM clients WHERE company_id = 1 AND name = '$name')
         "; then
-            ok "  ✓ $name"
+            cid=$(lookup "SELECT id FROM clients WHERE company_id = 1 AND name = '$name' LIMIT 1")
+            if sqlq "
+                INSERT INTO client_contacts (company_id, user_id, client_id, first_name, email, is_primary, send_email, password, contact_key, created_at, updated_at)
+                SELECT 1, $user_id, $cid, '$name', '$email', 1, 1, '', MD5(CONCAT('contact-', $cid, '-$email')), NOW(), NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM client_contacts WHERE client_id = $cid AND email = '$email')
+            "; then
+                ok "  ✓ $name <$email>"
+            else
+                warn "  ✗ $name (contact)"
+            fi
         else
             warn "  ✗ $name"
         fi
     done
 
     ###########################################################################
-    # 5. Products
+    # 4. Products (product_key is the display name in Invoice Ninja v5)
     ###########################################################################
     info "  → Products…"
-    local tax_id_standard
-    tax_id_standard=$(php_exec "\$t = \\App\\Models\\TaxRate::where('rate', 19.00)->first(); echo \$t ? \$t->id : 1;" 2>/dev/null | tr -d '\n')
-    tax_id_standard=${tax_id_standard:-1}
-
-    local tax_id_reduced
-    tax_id_reduced=$(php_exec "\$t = \\App\\Models\\TaxRate::where('rate', 7.00)->first(); echo \$t ? \$t->id : 2;" 2>/dev/null | tr -d '\n')
-    tax_id_reduced=${tax_id_reduced:-2}
-
-    local tax_id_none
-    tax_id_none=$(php_exec "\$t = \\App\\Models\\TaxRate::where('rate', 0.00)->first(); echo \$t ? \$t->id : 3;" 2>/dev/null | tr -d '\n')
-    tax_id_none=${tax_id_none:-3}
-
     for p in "${PRODUCTS[@]}"; do
-        local name desc price tax_id
+        local name desc price tax_name tax_rate
         name=$(echo "$p" | cut -d'|' -f1)
         desc=$(echo "$p" | cut -d'|' -f2)
         price=$(echo "$p" | cut -d'|' -f3)
 
-        # Use standard VAT for most, reduced for books
+        # Use reduced VAT for books, standard VAT for everything else
         if echo "$name" | grep -qi "ebook\|book\|guide"; then
-            tax_id=$tax_id_reduced
+            tax_name='Reduced VAT'
+            tax_rate=7.00
         else
-            tax_id=$tax_id_standard
+            tax_name='Standard VAT'
+            tax_rate=19.00
         fi
 
-        if sql "
-            INSERT INTO products (id, user_id, name, description, product_key, notes, cost, price, quantity, tax_id, tax_name, created_at, updated_at, product_type_id)
-            VALUES (
-                DEFAULT, NULL, '$name', '$desc', LOWER(REGEXP_REPLACE('${name// /_}', '[^a-zA-Z0-9_-]', '')), '', 0.00, $price, 9999, $tax_id, (SELECT name FROM tax_rates WHERE id = $tax_id LIMIT 1), NOW(), NOW(), 1
-            )
-            ON DUPLICATE KEY UPDATE
-               name = VALUES(name),
-               description = VALUES(description),
-               price = VALUES(price),
-               tax_id = VALUES(tax_id),
-               updated_at = NOW()
+        if sqlq "
+            INSERT INTO products (company_id, user_id, product_key, notes, cost, price, quantity, tax_name1, tax_rate1, is_deleted, created_at, updated_at)
+            SELECT 1, $user_id, '$name', '$desc', 0.00, $price, 9999, '$tax_name', $tax_rate, 0, NOW(), NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM products WHERE company_id = 1 AND product_key = '$name')
         "; then
             ok "  ✓ $name (€$price)"
         else
@@ -321,15 +369,16 @@ do_provision() {
     done
 
     ###########################################################################
-    # 6. Projects
+    # 5. Projects
     ###########################################################################
     info "  → Projects…"
     for c in "${CLIENTS[@]}"; do
-        local cname
+        local cname cid
         cname=$(echo "$c" | cut -d'|' -f1)
-        local cid
-        cid=$(php_exec "\$cl = \\App\\Models\\Client::where('name','$cname')->first(); echo \$cl ? \$cl->id : 0;" 2>/dev/null | tr -d '\n')
-        [[ -z "$cid" || "$cid" == "0" ]] && continue
+        cid=$(lookup "SELECT id FROM clients WHERE company_id = 1 AND name = '$cname' LIMIT 1")
+        if [ -z "$cid" ] || [ "$cid" = "0" ]; then
+            continue
+        fi
 
         # Get matching project def
         for p in "${PROJECTS[@]}"; do
@@ -339,15 +388,10 @@ do_provision() {
             p_budget=$(echo "$p" | cut -d'|' -f3)
 
             if [[ "$p_client" == "$cname" ]]; then
-                if sql "
-                    INSERT INTO projects (id, user_id, client_id, name, private_notes, public_notes, budget, rate, created_at, updated_at, is_deleted)
-                    VALUES (
-                        DEFAULT, NULL, $cid, '$p_name', '', '', $p_budget, 150.00, NOW(), NOW(), 0
-                    )
-                    ON DUPLICATE KEY UPDATE
-                       budget = VALUES(budget),
-                       rate = VALUES(rate),
-                       updated_at = NOW()
+                if sqlq "
+                    INSERT INTO projects (company_id, user_id, client_id, name, task_rate, budgeted_hours, budgeted_amount, public_notes, private_notes, is_deleted, created_at, updated_at)
+                    SELECT 1, $user_id, $cid, '$p_name', 150.00, 0, $p_budget, '', '', 0, NOW(), NOW()
+                    WHERE NOT EXISTS (SELECT 1 FROM projects WHERE company_id = 1 AND name = '$p_name')
                 "; then
                     ok "  ✓ $p_name (€$p_budget)"
                 else
@@ -377,8 +421,9 @@ do_provision() {
 
 if $CLEAN; then
     do_clean
-elif $FORCE || ! check_already_provisioned; then
+elif $FORCE; then
+    do_clean
     do_provision
 else
-    info "Company '$COMPANY_NAME' already provisioned – use --force to recreate or --clean to remove."
+    do_provision
 fi
