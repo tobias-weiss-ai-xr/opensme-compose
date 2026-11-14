@@ -58,6 +58,14 @@ services:
       DB_USER: notes_user
       DB_PASSWORD: ${NOTES_DB_PASSWORD:?NOTES_DB_PASSWORD must be set in .env}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/1
+      # Celery broker defaults to a passwordless redis://redis:6379/0 inside
+      # the impress image — our core Redis requires AUTH, so every task
+      # enqueue 500s (POST /api/v1.0/documents/ → kombu AuthenticationError,
+      # /docs/new/ never loads). Point the broker at the same credentials.
+      # NOTE: the impress settings read this via django-configurations whose
+      # Value.environ_prefix defaults to 'DJANGO' — the plain CELERY_BROKER_URL
+      # env var is IGNORED.
+      DJANGO_CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0
       OIDC_RP_CLIENT_ID: ${NOTES_OIDC_CLIENT_ID:-opensme-notes}
       OIDC_RP_CLIENT_SECRET: ${NOTES_OIDC_CLIENT_SECRET:?NOTES_OIDC_CLIENT_SECRET must be set in .env}
       # Zitadel serves JWKS at /oauth/v2/keys (its discovery jwks_uri) — the
