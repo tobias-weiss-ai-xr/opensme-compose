@@ -1,0 +1,131 @@
+T1-sogo-drafts — SOGo AI draft reply + inbox brief (IMAP APPEND handoff)
+========================================================================
+Campaign: ai-deeper (agentflow, worktree tf/T1-sogo-drafts @ a36c558).
+Zero SOGo modification — the draft reaches the webmail user through the
+mail store itself: the bot composes a German reply, APPENDs it to the
+Drafts mailbox with the \Draft flag, and it shows up in SOGo under
+„Entwürfe" for review & sending.
+
+DELIVERABLES
+------------
+1. scripts/ai-room-bot.py (extended in place, still stdlib-only — the
+   bind-mounted opensme-ai-bot container picks it up on restart; no new
+   file, no rebuild):
+     * '!entwurf <empfänger>: <stichpunkte>'  → LLM composes a German
+       business e-mail (dedicated DRAFT_SYSTEM_PROMPT, contract: first
+       line 'Betreff: …', then blank line, then Anrede/2-4 Absätze/
+       Grußformel; tolerant split_draft_answer falls back to
+       subject „Entwurf" when the model skips the line) → RFC-5322
+       message built with email.message.EmailMessage (From = bot mail
+       identity, To, Subject, Date, Message-ID, text/plain utf-8 body,
+       CRLF line endings per RFC 3501) → imaplib APPEND '"Drafts"' with
+       flags (\Draft) → room reply:
+       „✉️ Entwurf liegt in SOGo unter „Entwürfe“ — An: … · Betreff: ….
+        Bitte dort prüfen und senden."
+       Missing mailbox handled: first APPEND answered NO [TRYCREATE] →
+       automatic CREATE → single retry (works on virgin accounts).
+     * '!brief' → inbox brief posted back: total + unread counts
+       (EXAMINE INBOX readonly + SEARCH UNSEEN) plus the newest
+       AI_BRIEF_LIMIT (default 8) items as
+       „<n>. <dd.mm. hh:mm> — <Absender>: <Betreff>" — headers fetched
+       with BODY.PEEK so nothing is ever marked read; list is newest
+       first, truncated with a „(+N ältere nicht angezeigt)" tail.
+     * Dispatch: handle_event now routes '!entwurf'/'!brief' bodies to
+       handle_command BEFORE the '!ai' trigger; existing guards
+       unchanged (own sender == login user_id ignored, '📅' booking
+       announcements ignored, m.text only, PUT send with fresh UUID
+       txn). Bare '!entwurf' / missing ':' → German usage text with a
+       full example; unknown '!briefx' → „Unbekannter Befehl …".
+     * --ask/--serve '!ai' path untouched in behaviour; gateway core
+       refactored into gateway_completion() (raises GatewayError with
+       the German hint) + gateway_chat() wrapper (catches → plain
+       answer), so '!entwurf' can react to gateway failures distinctly.
+     * --check extended: prints imap host/user/drafts/password-set and
+       honestly reports reachability + login outcome (problems → exit 1).
+     * New env (all optional, defaults complete):
+         IMAP_HOST=stalwart, IMAP_PORT=143, IMAP_MAIL_DOMAIN=opensme.local
+         IMAP_USER=<MATRIX_USER>@<IMAP_MAIL_DOMAIN> (used as-is if it
+           already contains '@')
+         IMAP_PASSWORD (unset → falls back to MATRIX_PASSWORD, see
+           below — that fallback is rejected by the live directory)
+         IMAP_DRAFTS=Drafts (SOGo label: „Entwürfe")
+         AI_BRIEF_LIMIT=8
+
+2. docs/af-ai-T4-sogo.txt — this report (repo-root EXACT path; scope
+   scripts/, docs/ respected; nothing written anywhere else).
+
+LIVE-VERIFIED FACTS (stack running, 2026-11-15)
+-----------------------------------------------
+* Stalwart IMAP (stalwart:143 in opensme-net, 143:143 on host) reachable
+  from the ai-bot netns; [imap.auth] allow-plain-text=true, plain IMAP4
+  (no TLS needed on the compose network) works with imaplib.
+* CRITICAL: Stalwart's directory is the OIDC bridge — PLAIN/LOGIN
+  accepts ONLY app passwords (webmail itself authenticates via XOAUTH2).
+  Verified live: LOGIN with the account password (MATRIX_PASSWORD,
+  baseline eval2026) is answered AUTHENTICATIONFAILED for every
+  identity form (testuser, testuser@opensme.local,
+  testuser@mail.home.opensme.graphwiz.ai, @home.opensme.graphwiz.ai).
+  Hence IMAP_PASSWORD (app password, seeded once via
+  scripts/stalwart-app-password.sh) is the real credential;
+  MATRIX_PASSWORD stays only as documented fallback with a precise
+  German rejection message in-room.
+* Bot mail identity: testuser@opensme.local — matches the SOGo6 users
+  row (c_uid/mail) and the e2e SSO stories (tests/05-e2e/stories.py
+  logs webmail in with username=testuser@opensme.local), so the
+  IMAP_USER default lands on the right mailbox.
+* --check inside opensme-ai-bot (extended script docker-cp'd to
+  container /tmp — the deployed :ro bind-mount was NOT touched):
+  matrix login OK (@testuser, room resolved), gateway OK (HTTP 200,
+  72 models, glm-5.3-flash present), imap reachable, login rejected
+  with AUTHENTICATIONFAILED → German app-password hint, exit 1
+  (honest audit, no secrets printed).
+* '!brief' + '!entwurf' live error paths from the container netns:
+  both surface the exact German guidance; the '!entwurf' gateway leg
+  (LLM composition) succeeded live before the IMAP leg rejected.
+
+HERMETIC VERIFICATION (no live credentials needed)
+--------------------------------------------------
+Mini IMAP server harness (/tmp/opencode/test_t1_bot.py, stdlib sockets,
+speaks LOGIN/CREATE/APPEND+literal-continuation/EXAMINE/SEARCH/FETCH/
+LOGOUT incl. the NO [TRYCREATE] case) — 22/22 PASS:
+  parsing (Betreff/Subject/fallback), usage + unknown-command paths,
+  gateway-unconfigured hint, full !entwurf happy path (TRYCREATE →
+  CREATE → retry, \Draft flag, no \Seen, From/To/Subject/Date/
+  Message-ID, utf-8 body, CRLF-only wire format, login identity), full
+  !brief happy path (counts „3 Nachrichten, 2 ungelesen", newest-first
+  sender/subject lines, dd.mm. hh:mm dates), auth-failure hint.
+python3 -W error::SyntaxWarning -m py_compile scripts/ai-room-bot.py OK.
+
+DEPLOY / OPERATOR NEXT STEPS (outside this task's file scope)
+-------------------------------------------------------------
+1. Seed once: scripts/stalwart-app-password.sh
+   testuser@opensme.local ai-bot  (needs the user's first webmail SSO
+   login so an OIDC session exists in redis; secret printed once).
+2. services/ai-bot.yml environment (out of scope here, 2 lines):
+     IMAP_USER: ${AI_BOT_IMAP_USER:-testuser@opensme.local}
+     IMAP_PASSWORD: ${STALWART_APP_PASSWORD_TESTUSER:-}
+3. rsync scripts/ai-room-bot.py to the deployed repo, `up -d ai-bot`
+   (no rebuild — bind mount). Smoke: '!brief' in #support.
+4. First '!entwurf' run creates Drafts („Entwürfe") automatically if
+   the mailbox does not exist yet.
+
+LIMITATIONS / NOTES
+-------------------
+* No end-to-end room round-trip was replayed live: the running bot
+  process still serves the pre-T1 script (restarting the deployed
+  container is operator work). The dispatch addition is 3 lines in
+  handle_event and uses the same send_text path that has served '!ai'
+  in production; command semantics are fully covered by the harness.
+* Drafts land in the BOT account's mailbox (testuser) — per design the
+  user opens SOGo as that account to review & send. Per-recipient
+  delegation (IMAP proxyauth into the requester's mailbox) is a
+  possible v2 once app-password handling per user exists.
+* '!brief' is deterministic (no LLM call) by design — works even with
+  the gateway key unset; „key items" = newest senders/subjects.
+* Host-side stalwart admin REST returned 401 (store-held password
+  differs from deployed .env) — not needed for this task; noted so the
+  app-password seeding step is done with the documented script, not
+  the admin API.
+
+TASK ID: T1-sogo-drafts
+BRANCH: tf/T1-sogo-drafts

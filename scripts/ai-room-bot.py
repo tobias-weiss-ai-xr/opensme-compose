@@ -18,10 +18,20 @@ Design (verified against the live stack, 2026-11-15):
   * Secrets (MATRIX_PASSWORD, LITELLM_API_KEY) are read from the environment
     only and never printed; tokens stay in memory.
 
+Room commands (all answered in-room, German):
+  !ai <question>   LLM answer via the LiteLLM gateway
+  !entwurf <empfänger>: <stichpunkte>
+                   LLM composes a German reply draft → RFC-5322 message is
+                   APPENDed to the bot account's Drafts mailbox with the
+                   \\Draft flag → shows up in SOGo under „Entwürfe"; the
+                   user reviews and sends it there. Zero SOGo modification.
+  !brief           inbox brief posted back: unread count + newest items
+                   (headers only, BODY.PEEK — nothing is marked read)
+
 Modes:
-  --serve          long-poll /sync and answer '!ai <question>' (default loop)
+  --serve          long-poll /sync and answer the room commands (default loop)
   --ask QUESTION   one-shot gateway answer, print to stdout, exit
-  --check          audit: Matrix login + room resolution + gateway reach
+  --check          audit: Matrix login + room resolution + gateway reach + IMAP
 
 Environment (all optional, defaults complete):
   MATRIX_DOMAIN    server_name                       default matrix.home.opensme.graphwiz.ai
@@ -33,13 +43,30 @@ Environment (all optional, defaults complete):
   LITELLM_API_KEY  gateway bearer key                default unset → gateway calls fail cleanly
   AI_BOT_MODEL     gateway model id                  default glm-5.3-flash
   AI_BOT_PREFIX    trigger prefix                    default '!ai '
+  IMAP_HOST        Stalwart IMAP host                default stalwart (published 143:143 on host)
+  IMAP_PORT        its port                          default 143
+  IMAP_MAIL_DOMAIN mail domain of the bot account    default opensme.local
+  IMAP_USER        IMAP login                        default <MATRIX_USER>@<IMAP_MAIL_DOMAIN>
+                                                     (used as-is when it already contains '@')
+  IMAP_PASSWORD    Stalwart APP password for IMAP    default unset → falls back to MATRIX_PASSWORD.
+                                                     NOTE: the OIDC-backed directory REJECTS the
+                                                     normal account password for PLAIN/LOGIN — seed
+                                                     an app password once via
+                                                     scripts/stalwart-app-password.sh and pass it here.
+  IMAP_DRAFTS      Drafts mailbox name               default Drafts (SOGo label: „Entwürfe")
+  AI_BRIEF_LIMIT   '!brief' newest-items limit       default 8
 """
 
 from __future__ import annotations
 
 import argparse
+import email
+import email.policy
+import email.utils
+import imaplib
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -47,6 +74,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from email.message import EmailMessage
 
 # ── configuration (env → defaults, mirrors booking-notify.sh) ───────────────
 
@@ -60,16 +88,43 @@ LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "")
 AI_BOT_MODEL = os.environ.get("AI_BOT_MODEL", "glm-5.3-flash")
 AI_BOT_PREFIX = os.environ.get("AI_BOT_PREFIX", "!ai")
 TRIGGER = AI_BOT_PREFIX + " "
+ENTWURF_CMD = "!entwurf"      # '!entwurf <empfänger>: <stichpunkte>'
+BRIEF_CMD = "!brief"          # '!brief' → inbox brief in the room
 SYNC_POLL_MS = 29000          # just under the 30s container-healthcheck horizon
 GATEWAY_TIMEOUT = 120         # glm-class upstreams answer in <5s; generous budget
 SYSTEM_PROMPT = (
     "Du bist ein knapper deutscher KI-Assistent im openSME-Portal "
     "(openSME Muster GmbH). Antworte präzise und in höchstens fünf Sätzen."
 )
+DRAFT_SYSTEM_PROMPT = (
+    "Du bist Assistenz der openSME Muster GmbH und verfasst kurze, sachliche, "
+    "höfliche deutsche geschäftliche E-Mails. Gib in der ERSTEN Zeile exakt "
+    "'Betreff: ' gefolgt von einem knappen Betreff aus, danach eine Leerzeile, "
+    "danach den E-Mail-Text mit passender Anrede, 2-4 kurzen Absätzen und "
+    "Grußformel. Kein Markdown, keine Platzhalter, keine erfundenen Fakten."
+)
 
 # booking-notify.sh announces confirmed calrs bookings as the SAME account;
 # their bodies always start with this prefix — never answer them.
 BOOKING_MARKER = "📅"
+
+# ── IMAP handoff (Stalwart) — drafts land in SOGo under „Entwürfe" ──────────
+# Verified against the live stack (2026-11-15): Stalwart's directory is the
+# OIDC bridge — PLAIN/LOGIN accepts ONLY app passwords (webmail itself uses
+# XOAUTH2). The normal account password (MATRIX_PASSWORD) is therefore only a
+# last-resort fallback that will fail with AUTHENTICATIONFAILED; seed an app
+# password via scripts/stalwart-app-password.sh and pass IMAP_PASSWORD.
+IMAP_HOST = os.environ.get("IMAP_HOST", "stalwart")
+IMAP_PORT = int(os.environ.get("IMAP_PORT", "143"))
+IMAP_MAIL_DOMAIN = os.environ.get("IMAP_MAIL_DOMAIN", "opensme.local")
+_default_imap_user = (
+    MATRIX_USER if "@" in MATRIX_USER else f"{MATRIX_USER}@{IMAP_MAIL_DOMAIN}"
+)
+IMAP_USER = os.environ.get("IMAP_USER", _default_imap_user)
+IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
+IMAP_DRAFTS = os.environ.get("IMAP_DRAFTS", "Drafts")   # SOGo label: „Entwürfe"
+AI_BRIEF_LIMIT = int(os.environ.get("AI_BRIEF_LIMIT", "8"))
+IMAP_TIMEOUT = 15
 
 _SSL_CTX = ssl.create_default_context()
 
@@ -144,23 +199,183 @@ def send_text(token: str, room_id: str, text: str) -> None:
 
 # ── LiteLLM gateway ─────────────────────────────────────────────────────────
 
-def gateway_chat(question: str) -> str:
+class GatewayError(Exception):
+    """Gateway unusable — the message is a user-facing German hint."""
+
+
+def gateway_completion(system: str, question: str) -> str:
+    """One gateway call; raises GatewayError with an in-room German hint."""
     if not LITELLM_API_KEY:
-        return "KI-Service ist nicht konfiguriert (LITELLM_API_KEY fehlt)."
+        raise GatewayError("KI-Service ist nicht konfiguriert (LITELLM_API_KEY fehlt).")
     try:
         _, data = http_json("POST", f"{LITELLM_BASE}/chat/completions", bearer=LITELLM_API_KEY, body={
             "model": AI_BOT_MODEL,
             "stream": False,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system},
                 {"role": "user", "content": question},
             ],
         }, timeout=GATEWAY_TIMEOUT)
         choice = (data.get("choices") or [{}])[0] if isinstance(data, dict) else {}
         answer = (choice.get("message") or {}).get("content", "")
-        return answer.strip() or "KI-Service hat ohne Antwort geantwortet."
+        answer = answer.strip()
+        if not answer:
+            raise GatewayError("KI-Service hat ohne Antwort geantwortet.")
+        return answer
+    except GatewayError:
+        raise
     except Exception:
-        return "KI-Service ist gerade nicht erreichbar — später nochmal versuchen."
+        raise GatewayError("KI-Service ist gerade nicht erreichbar — später nochmal versuchen.") from None
+
+
+def gateway_chat(question: str, system: str = SYSTEM_PROMPT) -> str:
+    """gateway_completion, but every failure becomes a plain German answer."""
+    try:
+        return gateway_completion(system, question)
+    except GatewayError as exc:
+        return str(exc)
+
+
+# ── IMAP handoff (stdlib imaplib only) ──────────────────────────────────────
+
+class ImapError(Exception):
+    """IMAP unusable — the message is a user-facing German hint."""
+
+
+_IMAP_NO_CREDS = (
+    "📬 Kein IMAP-Zugang konfiguriert: IMAP_PASSWORD (Stalwart-App-Passwort) "
+    "fehlt — einmalig mit scripts/stalwart-app-password.sh anlegen und der "
+    "Umgebung des ai-bot Containers hinzufügen."
+)
+_IMAP_AUTH_FAILED = (
+    "📬 IMAP-Login abgelehnt: Stalwart akzeptiert für IMAP nur App-Passwörter "
+    "(das normale Konto-Kennwort funktioniert bei PLAIN/LOGIN nicht). "
+    "App-Passwort anlegen (scripts/stalwart-app-password.sh) und als "
+    "IMAP_PASSWORD setzen."
+)
+
+
+def _ellipsize(text: str, limit: int) -> str:
+    text = " ".join(text.split())          # flatten IMAP folded headers
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def imap_connect_and_login() -> imaplib.IMAP4:
+    """IMAP4 connect + LOGIN as the bot's mail identity; raises ImapError."""
+    try:
+        conn = imaplib.IMAP4(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT)
+    except OSError as exc:
+        raise ImapError(
+            f"📬 Postfach gerade nicht erreichbar ({IMAP_HOST}:{IMAP_PORT}) — später nochmal versuchen."
+        ) from exc
+    password = IMAP_PASSWORD or MATRIX_PASSWORD   # account pw only a fallback:
+                                                  # the OIDC directory rejects it
+    if not password:
+        raise ImapError(_IMAP_NO_CREDS)
+    try:
+        typ, _ = conn.login(IMAP_USER, password)
+    except imaplib.IMAP4.error as exc:
+        if "AUTHENTICATIONFAILED" in str(exc).upper():
+            raise ImapError(_IMAP_AUTH_FAILED) from exc
+        raise ImapError(f"📬 IMAP-Fehler: {_ellipsize(str(exc), 90)}") from exc
+    if typ != "OK":
+        raise ImapError(_IMAP_AUTH_FAILED)
+    return conn
+
+
+def imap_append_draft(recipient: str, subject: str, body: str) -> int:
+    """APPEND a RFC-5322 draft to the Drafts mailbox with \\Draft; → size."""
+    msg = EmailMessage()
+    msg["From"] = IMAP_USER
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg_id_domain = IMAP_USER.rsplit("@", 1)[-1] or IMAP_MAIL_DOMAIN
+    msg["Message-ID"] = email.utils.make_msgid(domain=msg_id_domain)
+    msg.set_content(body)
+    raw = msg.as_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")  # CRLF per RFC 3501
+    mailbox = f'"{IMAP_DRAFTS}"'
+    conn = imap_connect_and_login()
+    try:
+        for attempt in (0, 1):
+            try:
+                typ, dat = conn.append(mailbox, r"(\Draft)", None, raw)
+            except imaplib.IMAP4.error as exc:
+                if attempt == 0 and "TRYCREATE" in str(exc).upper():
+                    conn.create(mailbox)       # first draft ever — mailbox missing
+                    continue
+                raise ImapError(f"📬 Entwurf konnte nicht gespeichert werden ({_ellipsize(str(exc), 90)}.") from exc
+            if typ == "OK":
+                return len(raw)
+            text = " ".join(str(part) for part in (dat or []))
+            if attempt == 0 and "TRYCREATE" in text.upper():
+                conn.create(mailbox)
+                continue
+            raise ImapError(f"📬 Entwurf konnte nicht gespeichert werden ({_ellipsize(text, 90)}.")
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+    raise ImapError("📬 Entwurf konnte nicht gespeichert werden (unbekannter IMAP-Zustand).")
+
+
+def _short_addr(header_value: object) -> str:
+    """'Display Name <a@b>' → 'Display Name' (or the bare addr-spec)."""
+    try:
+        addresses = header_value.addresses      # email.policy.default header
+        if addresses:
+            first = addresses[0]
+            return first.display_name or first.addr_spec
+    except AttributeError:
+        pass
+    return str(header_value or "")
+
+
+def _short_date(header_value: object) -> str:
+    try:
+        parsed = email.utils.parsedate_to_datetime(str(header_value))
+        return parsed.strftime("%d.%m. %H:%M")
+    except Exception:
+        return "—"
+
+
+def imap_inbox_brief(limit: int) -> str:
+    """Unread count + newest items (BODY.PEEK only — flags untouched)."""
+    conn = imap_connect_and_login()
+    try:
+        typ, sel = conn.select("INBOX", readonly=True)
+        if typ != "OK":
+            raise ImapError("📬 INBOX konnte nicht geöffnet werden.")
+        total = int(sel[0] or b"0")
+        typ, unseen_ids = conn.search(None, "UNSEEN")
+        unseen = len((unseen_ids[0] or b"").split()) if typ == "OK" else 0
+        typ, all_ids = conn.search(None, "ALL")
+        id_list = (all_ids[0] or b"").split() if typ == "OK" else []
+        items: list[tuple[str, str, str]] = []
+        for msg_id in reversed(id_list[-max(1, limit):]):
+            typ, data = conn.fetch(msg_id, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+            if typ != "OK":
+                continue
+            for part in data or []:
+                if isinstance(part, tuple) and len(part) >= 2 and isinstance(part[1], (bytes, bytearray)):
+                    headers = email.message_from_bytes(bytes(part[1]), policy=email.policy.default)
+                    items.append((
+                        _short_date(headers.get("Date")),
+                        _ellipsize(_short_addr(headers.get("From")) or "?", 28),
+                        _ellipsize(str(headers.get("Subject") or "(ohne Betreff)"), 64),
+                    ))
+        head = f"📬 {IMAP_USER}: {total} Nachrichten, {unseen} ungelesen"
+        if not items:
+            return head + " — kein Inhalt." if total == 0 else head + "\n(Header konnten nicht gelesen werden.)"
+        lines = "\n".join(f"{i}. {d} — {f}: {s}" for i, (d, f, s) in enumerate(items, 1))
+        more = f"\n(+{max(0, total - limit)} ältere nicht angezeigt)" if total > limit else ""
+        return f"{head}\nNeueste zuerst:\n{lines}{more}"
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
 
 
 # ── modes ───────────────────────────────────────────────────────────────────
@@ -199,6 +414,25 @@ def cmd_check() -> int:
                   f"target {AI_BOT_MODEL} {'present' if AI_BOT_MODEL in ids else 'NOT in catalog'})")
         except Exception as exc:
             problems.append(f"gateway unreachable: {exc}")
+    print(f"imap:       host={IMAP_HOST}:{IMAP_PORT} user={IMAP_USER} drafts={IMAP_DRAFTS} "
+          f"password={'set' if (IMAP_PASSWORD or MATRIX_PASSWORD) else 'MISSING'}")
+    try:
+        conn = imap_connect_and_login()
+        try:
+            typ, sel = conn.select("INBOX", readonly=True)
+            if typ == "OK":
+                print(f"imap:       OK (INBOX open, {int(sel[0] or b'0')} messages)")
+            else:
+                problems.append("imap: INBOX select failed")
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+    except ImapError as exc:
+        problems.append(f"imap: {_ellipsize(str(exc), 110)}")
+    except Exception as exc:
+        problems.append(f"imap unreachable: {exc}")
     if problems:
         for p in problems:
             print(f"problem:    {p}")
@@ -215,7 +449,7 @@ def cmd_serve() -> int:
     _, initial = http_json("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/sync"
                            f"?timeout=0&filter={{\"room\":{{\"timeline\":{{\"limit\":1}}}}}}", bearer=token, timeout=60)
     since = initial.get("next_batch")
-    print("ai-room-bot: caught up with sync, listening for '!ai <question>'", flush=True)
+    print("ai-room-bot: caught up with sync, listening for '!ai <question>', '!entwurf …', '!brief'", flush=True)
 
     while True:
         try:
@@ -237,6 +471,69 @@ def cmd_serve() -> int:
             time.sleep(3)
 
 
+# ── room commands: !entwurf / !brief ────────────────────────────────────────
+
+ENTWURF_USAGE = (
+    "Benutzung: !entwurf <empfänger>: <stichpunkte>\n"
+    "Beispiel: !entwurf kunde@example.com: Dank für das Gespräch, "
+    "Angebot bis Freitag zusagen, Rückfrage zum Budget"
+)
+
+
+def split_draft_answer(answer: str) -> tuple[str, str]:
+    """>LLM output → (subject, body); expects a leading 'Betreff:' line."""
+    lines = answer.strip().splitlines()
+    for i, line in enumerate(lines):
+        match = re.match(r"^(?:betreff|subject)\s*[:：]\s*(.*)$", line.strip(), re.IGNORECASE)
+        if match:
+            subject = match.group(1).strip() or "Entwurf"
+            body = "\n".join(lines[i + 1:]).strip()
+            return subject, body or answer.strip()
+    return "Entwurf", answer.strip()
+
+
+def cmd_entwurf(args: str) -> str:
+    """'!entwurf <empfänger>: <stichpunkte>' → draft in SOGo unter „Entwürfe"."""
+    if ":" not in args:
+        return ENTWURF_USAGE
+    recipient, points = (part.strip() for part in args.split(":", 1))
+    if not recipient or not points:
+        return ENTWURF_USAGE
+    try:
+        answer = gateway_completion(DRAFT_SYSTEM_PROMPT,
+                                    f"Empfänger: {recipient}\nStichpunkte:\n{points}")
+    except GatewayError as exc:
+        return str(exc)
+    subject, body = split_draft_answer(answer)
+    try:
+        imap_append_draft(recipient, subject, body)
+    except ImapError as exc:
+        return str(exc)
+    return (f"✉️ Entwurf liegt in SOGo unter „Entwürfe“ — An: {recipient} · "
+            f"Betreff: {subject}. Bitte dort prüfen und senden.")
+
+
+def cmd_brief() -> str:
+    """'!brief' → unread count + newest inbox items, posted back."""
+    try:
+        return imap_inbox_brief(AI_BRIEF_LIMIT)
+    except ImapError as exc:
+        return str(exc)
+
+
+def handle_command(body: str) -> str:
+    """Dispatch '!entwurf'/'!brief' bodies (already own/booking filtered)."""
+    if body.startswith(ENTWURF_CMD):
+        rest = body[len(ENTWURF_CMD):].strip()
+        return cmd_entwurf(rest) if rest else ENTWURF_USAGE
+    if body.startswith(BRIEF_CMD):
+        rest = body[len(BRIEF_CMD):]
+        if not rest.strip():
+            return cmd_brief()
+    return ("Unbekannter Befehl: " + body.split()[0]
+            + " — unterstützt werden !ai, !entwurf, !brief.")
+
+
 def handle_event(token: str, own_user_id: str, room_id: str, ev: dict) -> None:
     if ev.get("type") != "m.room.message":
         return
@@ -248,6 +545,9 @@ def handle_event(token: str, own_user_id: str, room_id: str, ev: dict) -> None:
     if not body or sender == own_user_id:      # own loop guard
         return
     if body.startswith(BOOKING_MARKER):        # booking-notify announcements
+        return
+    if body.startswith(ENTWURF_CMD) or body.startswith(BRIEF_CMD):
+        send_text(token, room_id, handle_command(body))
         return
     question = ""
     if body == AI_BOT_PREFIX:
@@ -261,9 +561,11 @@ def handle_event(token: str, own_user_id: str, room_id: str, ev: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="openSME '!ai' Matrix bot (LiteLLM gateway)")
-    parser.add_argument("--serve", action="store_true", help="long-poll sync and answer '!ai <question>'")
+    parser.add_argument("--serve", action="store_true",
+                        help="long-poll sync and answer '!ai', '!entwurf <empfänger>: <stichpunkte>', '!brief'")
     parser.add_argument("--ask", metavar="QUESTION", help="one-shot gateway answer to stdout")
-    parser.add_argument("--check", action="store_true", help="audit Matrix login, room resolution, gateway reach")
+    parser.add_argument("--check", action="store_true",
+                        help="audit Matrix login, room resolution, gateway reach, IMAP access")
     args = parser.parse_args()
     if args.ask:
         return cmd_ask(args.ask)
