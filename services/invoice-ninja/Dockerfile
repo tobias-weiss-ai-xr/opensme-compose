@@ -14,6 +14,7 @@ USER root
 RUN apk add --no-cache --virtual .build-deps \
         postgresql-dev \
         composer \
+        git \
     && docker-php-ext-install pdo_pgsql \
     && apk del .build-deps
 
