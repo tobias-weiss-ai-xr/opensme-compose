@@ -80,10 +80,14 @@ export interface OllamaChatOptions {
 }
 
 /**
- * One Ollama chat roundtrip: POST {url}/api/chat, non-streaming, and
- * resolve with the assistant message content. Every failure mode is
- * normalized into LlmError (timeout, unreachable, HTTP error, non-JSON
- * body, empty answer) — callers only ever see the graceful message.
+ * One Ollama chat roundtrip, resolving with the assistant message content.
+ * The call is STREAMING (stream:true, NDJSON chat chunks): response headers
+ * arrive immediately, so slow CPU inference never trips undici's default
+ * 300 s headersTimeout — only the overall AbortSignal budget applies. A
+ * single JSON object body (stream:false backends / test mocks) parses the
+ * same way. Every failure mode is normalized into LlmError (timeout,
+ * unreachable, HTTP error, non-JSON body, empty answer) — callers only
+ * ever see the graceful message.
  */
 export async function ollamaChat(
   messages: ChatMessage[],
@@ -97,7 +101,7 @@ export async function ollamaChat(
     res = await doFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: aiModel(), messages, stream: false }),
+      body: JSON.stringify({ model: aiModel(), messages, stream: true }),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
     });
@@ -123,14 +127,21 @@ export async function ollamaChat(
     }
     throw new LlmError(`KI-Antwort fehlgeschlagen (${detail})`);
   }
-  let data: { message?: { content?: unknown } };
-  try {
-    data = (await res.json()) as { message?: { content?: unknown } };
-  } catch {
-    throw new LlmError("KI-Antwort nicht verständlich (kein JSON)");
+  const raw = await res.text();
+  let content = "";
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj: { message?: { content?: unknown } };
+    try {
+      obj = JSON.parse(trimmed) as { message?: { content?: unknown } };
+    } catch {
+      throw new LlmError("KI-Antwort nicht verständlich (kein JSON)");
+    }
+    const piece = obj?.message?.content;
+    if (typeof piece === "string") content += piece;
   }
-  const content = data?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
+  if (!content.trim()) {
     throw new LlmError("KI lieferte eine leere Antwort");
   }
   return content.trim();

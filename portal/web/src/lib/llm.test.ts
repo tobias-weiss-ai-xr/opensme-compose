@@ -113,7 +113,7 @@ describe("ollamaChat", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       model: "llama3.2",
       messages: MESSAGES,
-      stream: false,
+      stream: true,
     });
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
