@@ -35,6 +35,8 @@ services:
     <<: *service-defaults
     image: ghcr.io/berriai/litellm:main-stable
     container_name: opensme-litellm
+    ports:
+      - "127.0.0.1:4000:4000"   # host-side scripts (classifier, bot --check); authenticated endpoint
     restart: unless-stopped
     command: ["--config", "/etc/litellm/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
     volumes:

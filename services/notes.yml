@@ -85,6 +85,19 @@ services:
       COLLABORATION_SERVER_SECRET: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
       Y_PROVIDER_API_BASE_URL: http://notes-y-provider:4444
       Y_PROVIDER_API_KEY: ${NOTES_COLLABORATION_SECRET:?NOTES_COLLABORATION_SECRET must be set in .env}
+      # ── Native AI (La Suite impress ships a full AI stack, disabled by
+      # default in the image). Wire it to our LiteLLM gateway so the
+      # in-editor AI menu (summarize/correct/rephrase/translate/emojify)
+      # works authenticated via Zitadel SSO. Model must exist in the
+      # gateway catalog (glm-5.3-flash). BlockNote variant stays off
+      # (flaky + AGPL); legacy path is the stable one.
+      AI_FEATURE_ENABLED: "true"
+      AI_FEATURE_LEGACY_ENABLED: "true"
+      AI_FEATURE_BLOCKNOTE_ENABLED: "false"
+      AI_ALLOW_REACH_FROM: "authenticated"
+      AI_MODEL: ${AI_MODEL:-glm-5.3-flash}
+      OPENAI_SDK_BASE_URL: http://litellm:4000/v1
+      OPENAI_SDK_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY must be set in .env}
       AWS_S3_ENDPOINT_URL: "http://minio:9000"
       NO_PROXY: ${CLOUD_NO_PROXY:-localhost,127.0.0.1,opencloud,minio,zitadel,traefik,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
       no_proxy: ${CLOUD_NO_PROXY:-localhost,127.0.0.1,opencloud,minio,zitadel,traefik,172.19.0.17,.opensme.local,.opensme.graphwiz.ai}
