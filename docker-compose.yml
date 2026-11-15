@@ -397,6 +397,7 @@ services:
       CHAT_URL: ${CHAT_URL:-}
       NOTES_URL: ${NOTES_URL:-}
       SURVEYS_URL: ${SURVEYS_URL:-}
+      WEBUI_URL: ${WEBUI_URL:-}
       CALENDAR_URL: ${CALENDAR_URL:-}
       VC_URL: ${VC_URL:-}
       PORTAL_ANNOUNCEMENTS: ${PORTAL_ANNOUNCEMENTS:-}
@@ -528,6 +529,7 @@ services:
       INTERCOM_BROADCAST: ${INTERCOM_BROADCAST:-}
       OLLAMA_URL: ${OLLAMA_URL:-}
       AI_MODEL: ${AI_MODEL:-}
+      WEBUI_URL: ${WEBUI_URL:-}
       # Portal sign-in for the authenticated surfaces (intercom/polls):
       # HMAC session key + the OIDC RP client registered by
       # scripts/zitadel-client.sh --app portal (rotation path: demo/demo-live).

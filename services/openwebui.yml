@@ -1,0 +1,73 @@
+# ── Global defaults ──────────────────────────────────
+# Inherited by every service in this file via: <<: *service-defaults
+x-service-defaults: &service-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+  init: true
+  security_opt:
+    - no-new-privileges:true
+
+# ═══════════════════════════════════════════════════════════════
+# openSME — OpenWebUI (AI chat frontend)
+# ═══════════════════════════════════════════════════════════════
+# Chat UI in the openEduSuite pattern: one AI surface for the whole
+# suite, wired to the LiteLLM gateway (services/litellm.yml) — NOT to
+# Ollama directly. Ollama is only a fallback and sits behind the
+# gateway's router (automatic per-request failover), so it never
+# appears as a separate provider here.
+#
+# Include via: COMPOSE_FILE=…:services/litellm.yml:monitoring/ollama.yml:services/openwebui.yml
+#
+# Requires in .env:
+#   LITELLM_MASTER_KEY   gateway auth (shared with services/litellm.yml)
+#
+# First start: sign up once — the first account becomes admin; then set
+# ENABLE_SIGNUP=false in .env and recreate to lock the instance down.
+# SSO via Zitadel OIDC is a documented follow-up (OPENWEBUI_OAUTH_* env).
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  openwebui:
+    <<: *service-defaults
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: opensme-openwebui
+    restart: unless-stopped
+    volumes:
+      - openwebui-data:/app/backend/data
+    environment:
+      # models = LiteLLM gateway (upstream catalog + automatic Ollama fallback)
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY required (gateway auth)}
+      ENABLE_OLLAMA_API: "false"
+      WEBUI_URL: ${WEBUI_URL:-https://ai.${OPENSME_DOMAIN:-home.opensme.graphwiz.ai}}
+      ENABLE_SIGNUP: ${OPENWEBUI_ENABLE_SIGNUP:-true}
+      TZ: ${TZ:-Europe/Berlin}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ai.rule=Host(`${AI_DOMAIN:-ai.${OPENSME_DOMAIN:-home.opensme.graphwiz.ai}}`)"
+      - "traefik.http.routers.ai.tls=true"
+      - "traefik.http.routers.ai.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ai.entrypoints=websecure"
+      - "traefik.http.services.ai.loadbalancer.server.port=8080"
+    networks:
+      - opensme-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+volumes:
+  openwebui-data:

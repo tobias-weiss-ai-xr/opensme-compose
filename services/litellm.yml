@@ -1,0 +1,64 @@
+# ── Global defaults ──────────────────────────────────
+# Inherited by every service in this file via: <<: *service-defaults
+x-service-defaults: &service-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+  init: true
+  security_opt:
+    - no-new-privileges:true
+
+# ═══════════════════════════════════════════════════════════════
+# openSME — LiteLLM gateway (AI model front door)
+# ═══════════════════════════════════════════════════════════════
+# OpenAI-compatible endpoint that mirrors the LiteLLM upstream catalog
+# (LITELLM_UPSTREAM_BASE_URL — the operator's existing proxy) and adds
+# LOCAL Ollama as an automatic fallback for every model. OpenWebUI and
+# any OpenAI-speaking client wire against this single endpoint:
+#
+#   http://litellm:4000/v1   (auth: LITELLM_MASTER_KEY)
+#
+# The model list is GENERATED from the upstream /v1/models catalog by
+# scripts/gen-litellm-config.sh — edit upstreams there, not by hand.
+#
+# Requires in .env:
+#   LITELLM_MASTER_KEY       gateway auth (openssl rand -hex 24)
+#   LITELLM_UPSTREAM_BASE_URL  operator LiteLLM proxy base URL (LAN)
+#   LITELLM_UPSTREAM_API_KEY   upstream bearer key
+# Companion: monitoring/ollama.yml (the local fallback backend).
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  litellm:
+    <<: *service-defaults
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: opensme-litellm
+    restart: unless-stopped
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./services/litellm/config.yaml:/etc/litellm/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY required (openssl rand -hex 24)}
+      LITELLM_UPSTREAM_BASE_URL: ${LITELLM_UPSTREAM_BASE_URL:?LITELLM_UPSTREAM_BASE_URL required (operator proxy)}
+      LITELLM_UPSTREAM_API_KEY: ${LITELLM_UPSTREAM_API_KEY:?LITELLM_UPSTREAM_API_KEY required}
+      TZ: ${TZ:-Europe/Berlin}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:4000/health/liveliness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - opensme-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+# opensme-net is declared (named) in docker-compose.yml — overlays attach.

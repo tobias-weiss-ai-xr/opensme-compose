@@ -127,6 +127,14 @@ catalog:
     service: limesurvey
     router: surveys
 
+  - id: ai
+    tile: KI-Chat
+    url_env: WEBUI_URL
+    domain_env: null
+    host_prefix: ai
+    service: openwebui
+    router: ai
+
   - id: calendar
     tile: Calendar
     url_env: CALENDAR_URL

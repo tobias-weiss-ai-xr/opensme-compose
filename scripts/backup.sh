@@ -83,7 +83,7 @@ KNOWN_VOLUMES=(
   calrs-data radicale-config radicale-data
   camunda-data
   dev-agent-state dev-maintenance-bot-state predictive-agent-state
-  taskfleet-state
+  taskfleet-state openwebui-data
   # Deliberately excluded (re-downloadable model cache, too large to
   # back up): ai-models ollama-models — guarded by
   # tests/00-static/check_backup.py
