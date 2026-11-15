@@ -17,8 +17,13 @@ RUN apk add --no-cache --virtual .build-deps \
     && docker-php-ext-install pdo_pgsql \
     && apk del .build-deps
 
-# Install the OIDC Socialite provider
-RUN composer require socialiteproviders/oidc --no-interaction --no-update && \
+# Install the OIDC Socialite provider. Upstream :5 (>= 2026-11 digest)
+# ships a path repository (../admin-api) in composer.json that only exists
+# in their build env — any composer command aborts with "The url supplied
+# for the path (../admin-api) repository does not exist". Strip path repos
+# first (JSON round-trip keeps formatting stable enough for composer).
+RUN php -r '$c=json_decode(file_get_contents("composer.json"),true);$c["repositories"]=array_values(array_filter($c["repositories"]??[],function($r){return ($r["type"]??"")!=="path";}));file_put_contents("composer.json",json_encode($c,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));' && \
+    composer require socialiteproviders/oidc --no-interaction --no-update && \
     composer update socialiteproviders/oidc --no-interaction
 
 # Install runtime tools for the entrypoint
