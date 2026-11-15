@@ -76,7 +76,7 @@ _SSL_CTX = ssl.create_default_context()
 
 # ── tiny HTTP helper (JSON in/out, secrets never logged) ────────────────────
 
-def http_json(method: str, url: str, *, token: str | None = None,
+def http_json(method: str, url: str, *, bearer: str | None = None,
               body: dict | None = None, timeout: int = 30) -> tuple[int, object]:
     """Return (status, decoded-JSON-or-raw-string). Transport errors raise."""
     req = urllib.request.Request(url, method=method)
@@ -85,8 +85,8 @@ def http_json(method: str, url: str, *, token: str | None = None,
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         req.add_header("Content-Type", "application/json")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
+    if bearer:
+        req.add_header("Authorization", f"Bearer {bearer}")
     with urllib.request.urlopen(req, data=data, timeout=timeout, context=_SSL_CTX) as resp:
         raw = resp.read().decode("utf-8", "replace")
     try:
@@ -128,7 +128,7 @@ def resolve_room(token: str) -> str:
     if MATRIX_ROOM.startswith("!"):
         return MATRIX_ROOM
     alias = urllib.parse.quote(MATRIX_ROOM, safe="")
-    code, data = http_json_tolerant("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/directory/room/{alias}", token=token)
+    code, data = http_json_tolerant("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/directory/room/{alias}", bearer=token)
     room_id = data.get("room_id") if isinstance(data, dict) else None
     if code != 200 or not room_id:
         raise SystemExit(f"ai-room-bot: cannot resolve room alias {MATRIX_ROOM} (HTTP {code})")
@@ -139,7 +139,7 @@ def send_text(token: str, room_id: str, text: str) -> None:
     txn = uuid.uuid4().hex
     http_json_tolerant("PUT", f"{MATRIX_HOMESERVER}/_matrix/client/v3/rooms/"
                        f"{urllib.parse.quote(room_id, safe='')}/send/m.room.message/{txn}",
-                       token=token, body={"msgtype": "m.text", "body": text}, timeout=15)
+                       bearer=token, body={"msgtype": "m.text", "body": text}, timeout=15)
 
 
 # ── LiteLLM gateway ─────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ def gateway_chat(question: str) -> str:
     if not LITELLM_API_KEY:
         return "KI-Service ist nicht konfiguriert (LITELLM_API_KEY fehlt)."
     try:
-        _, data = http_json("POST", f"{LITELLM_BASE}/chat/completions", token=LITELLM_API_KEY, body={
+        _, data = http_json("POST", f"{LITELLM_BASE}/chat/completions", bearer=LITELLM_API_KEY, body={
             "model": AI_BOT_MODEL,
             "stream": False,
             "messages": [
@@ -192,7 +192,7 @@ def cmd_check() -> int:
     gateway_ok = False
     if LITELLM_API_KEY:
         try:
-            code, data = http_json_tolerant("GET", f"{LITELLM_BASE}/models", token=LITELLM_API_KEY)
+            code, data = http_json_tolerant("GET", f"{LITELLM_BASE}/models", bearer=LITELLM_API_KEY)
             ids = [m.get("id") for m in data.get("data", [])] if isinstance(data, dict) else []
             gateway_ok = code == 200 and bool(ids)
             print(f"gateway:    {'OK' if gateway_ok else 'FAIL'} (HTTP {code}, {len(ids)} models, "
@@ -213,7 +213,7 @@ def cmd_serve() -> int:
     print(f"ai-room-bot: serving as {user_id} in {room_id} (model {AI_BOT_MODEL} @ {LITELLM_BASE})", flush=True)
 
     _, initial = http_json("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/sync"
-                           f"?timeout=0&filter={{\"room\":{{\"timeline\":{{\"limit\":1}}}}}}", token=token, timeout=60)
+                           f"?timeout=0&filter={{\"room\":{{\"timeline\":{{\"limit\":1}}}}}}", bearer=token, timeout=60)
     since = initial.get("next_batch")
     print("ai-room-bot: caught up with sync, listening for '!ai <question>'", flush=True)
 
@@ -221,7 +221,7 @@ def cmd_serve() -> int:
         try:
             _, data = http_json("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/sync"
                                 f"?timeout={SYNC_POLL_MS}&since={urllib.parse.quote(since, safe='')}",
-                                token=token, timeout=SYNC_POLL_MS // 1000 + 30)
+                                bearer=token, timeout=SYNC_POLL_MS // 1000 + 30)
             since = data.get("next_batch", since)
             joined = (data.get("rooms") or {}).get("join") or {}
             for rroom, room in joined.items():
