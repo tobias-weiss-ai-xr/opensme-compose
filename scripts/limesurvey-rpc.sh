@@ -115,23 +115,32 @@ rpc() {
 # must abort the whole script (subshell dies would be swallowed otherwise).
 rpc_key() {
   RPC_ID=$((RPC_ID + 1))
-  local key
+  local key payload
   key="$(get_key)"
-  jq -nc --arg k "$key" --arg m "$1" --argjson rest "${2:-[]}" \
-    --argjson id "$RPC_ID" '{method: $m, params: ([$k] + $rest), id: $id}' |
-    curl -fsS --max-time "$CURL_MAX_TIME" -X POST \
-      -H 'Content-Type: application/json' --data @- "$RPC_URL"
+  # Inline --data (NOT --data @-): a piped body makes curl use chunked
+  # transfer-encoding, which the PHP/Yii RPC controller cannot read — it
+  # sees an empty body and answers an empty HTTP 200. Inline data sends a
+  # Content-Length, which LS parses correctly.
+  payload="$(jq -nc --arg k "$key" --arg m "$1" --argjson rest "${2:-[]}" \
+    --argjson id "$RPC_ID" '{method: $m, params: ([$k] + $rest), id: $id}')"
+  curl -fsS --max-time "$CURL_MAX_TIME" -X POST \
+    -H 'Content-Type: application/json' --data "$payload" "$RPC_URL"
 }
 
 # get_key — acquire a session key; dies with LimeSurvey's status message.
-# Verified LS6 behavior: wrong credentials answer HTTP 200 text/html with an
-# EMPTY body; a rejected key arrives as result:{status:"Invalid session key"}.
+# Verified LS6 behavior: get_session_key REQUIRES the object form
+# {username, password} — the positional array form answers HTTP 200 with an
+# EMPTY body. Same for wrong credentials (empty 200 body); a rejected key
+# arrives as result:{status:"Invalid session key"}.
 get_key() {
-  local res rtype
-  res="$(jq -nc --arg u "$RPC_USER" --arg p "$RPC_PASSWORD" \
-      '{method: "get_session_key", params: [$u, $p], id: 0}' |
-    curl -fsS --max-time "$CURL_MAX_TIME" -X POST \
-      -H 'Content-Type: application/json' --data @- "$RPC_URL")"
+  local res payload rtype
+  # Inline --data (NOT --data @-): see rpc_key — chunked bodies arrive
+  # empty at the PHP RPC controller. id MUST be non-zero: LS treats a
+  # falsy JSON-RPC id as a notification and answers an EMPTY 200 body.
+  payload="$(jq -nc --arg u "$RPC_USER" --arg p "$RPC_PASSWORD" \
+      '{method: "get_session_key", params: {username: $u, password: $p}, id: 1}')"
+  res="$(curl -fsS --max-time "$CURL_MAX_TIME" -X POST \
+      -H 'Content-Type: application/json' --data "$payload" "$RPC_URL")"
   [ -n "$res" ] || die "Keine Antwort vom Umfragen-Service — Benutzer/Passwort prüfen ($RPC_URL)."
   rtype="$(printf '%s' "$res" | jq -r '.result | type' 2>/dev/null || true)"
   if [ "$rtype" != "string" ]; then

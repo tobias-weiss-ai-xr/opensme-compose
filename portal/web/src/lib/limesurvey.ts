@@ -96,7 +96,7 @@ export function createLimesurveyClient(config: LimeSurveyConfig) {
   let sessionKey: string | null = null;
   let sessionRequest: Promise<string> | null = null;
 
-  async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+  async function rpc<T>(method: string, params: unknown): Promise<T> {
     let res: Response;
     try {
       res = await fetchImpl(config.rpcUrl, {
@@ -118,8 +118,11 @@ export function createLimesurveyClient(config: LimeSurveyConfig) {
     try {
       envelope = (await res.json()) as RpcEnvelope<T>;
     } catch {
-      // Verified LS6 quirk: bad admin credentials answer 200 text/html with
-      // an EMPTY body (the controller dies before emitting JSON).
+      // Verified LS6 quirk: a POSITIONAL-ARRAY get_session_key (legacy
+      // XML-RPC form) and bad admin credentials both answer HTTP 200 with
+      // an EMPTY body (the controller dies before emitting JSON). The login
+      // must use the object form {username, password} — keyed methods accept
+      // both forms.
       throw new LimeSurveyError(
         "Umfragen-RPC: ungültige Antwort (leer oder kein JSON — bei der Anmeldung meist falsche Anmeldedaten)",
       );
@@ -133,10 +136,10 @@ export function createLimesurveyClient(config: LimeSurveyConfig) {
   /** Single-flight session-key acquisition — one in-flight request max. */
   function requestSessionKey(): Promise<string> {
     if (!sessionRequest) {
-      sessionRequest = rpc<unknown>("get_session_key", [
-        config.user,
-        config.password,
-      ])
+      sessionRequest = rpc<unknown>("get_session_key", {
+        username: config.user,
+        password: config.password,
+      })
         .then((result) => {
           if (typeof result === "string" && result.length > 0) {
             sessionKey = result;

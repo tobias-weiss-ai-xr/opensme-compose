@@ -77,7 +77,7 @@ describe("createLimesurveyClient", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].url).toBe("https://surveys.example/admin/remotecontrol");
     expect(calls[0].body.method).toBe("get_session_key");
-    expect(calls[0].body.params).toEqual(["admin", "secret-pass"]);
+    expect(calls[0].body.params).toEqual({ username: "admin", password: "secret-pass" });
     expect(calls[1].body.method).toBe("list_surveys");
     expect(calls[1].body.params).toEqual(["SESSION-KEY-1"]);
   });
