@@ -46,7 +46,7 @@ describe("broadcastConfig", () => {
     expect(cfg.matrixUser).toBe("testuser");
     expect(cfg.matrixPassword).toBe("eval2026");
     expect(cfg.matrixRoom).toBe("#support:matrix.home.opensme.graphwiz.ai");
-    expect(cfg.smtpHost).toBe("127.0.0.1");
+    expect(cfg.smtpHost).toBe("stalwart");
     expect(cfg.smtpPort).toBe("25");
     expect(cfg.subject).toBe("[openSME] Broadcast an alle");
     expect(cfg.fanoutScript).toMatch(/scripts[/\\]broadcast-fanout\.sh$/);
