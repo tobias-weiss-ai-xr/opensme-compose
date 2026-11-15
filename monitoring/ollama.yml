@@ -40,7 +40,8 @@ services:
       OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
       TZ: ${TZ:-Europe/Berlin}
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:11434/api/tags || exit 1"]
+      # NOTE: the ollama image ships no curl — probe via the CLI instead
+      test: ["CMD", "ollama", "ls"]
       interval: 30s
       timeout: 10s
       retries: 5
