@@ -4,32 +4,23 @@
 # openSME customizations:
 # - pdo_pgsql: PostgreSQL support (uses MariaDB in openSME but keeps build flexible)
 # - nc: netcat for database reachability checks in entrypoint
-# - socialiteproviders/oidc: OIDC Socialite provider for Zitadel SSO
 # - ca-certificates: TLS trust anchors for OIDC backchannel
+#
+# NOTE: no composer packages are installed. The OIDC Socialite provider is
+# built into Invoice Ninja itself (app/Libraries/OAuth/Providers/Oidc/) —
+# the former `composer require socialiteproviders/oidc` was a no-op for SSO
+# and now fails on current :5 digests (upstream composer.json ships a path
+# repository (../admin-api) that only exists in their build env, and the
+# packagist package was removed anyway).
 FROM invoiceninja/invoiceninja:5
 
 USER root
 
-# Install build dependencies and PHP extensions, then the OIDC provider in
-# the same step — .build-deps (git, composer) must still be installed while
-# composer resolves the VCS repositories.
+# Install build dependencies and PHP extensions
 RUN apk add --no-cache --virtual .build-deps \
         postgresql-dev \
-        composer \
-        git \
     && docker-php-ext-install pdo_pgsql \
-    && git config --global url."https://github.com/".insteadOf "git@github.com:" \
-    && php -r '$c=json_decode(file_get_contents("composer.json"),true);$c["repositories"]=array_values(array_filter($c["repositories"]??[],function($r){return ($r["type"]??"")!=="path";}));file_put_contents("composer.json",json_encode($c,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));' \
-    && COMPOSER_ALLOW_SUPERUSER=1 composer require socialiteproviders/oidc --no-interaction --no-update \
-    && COMPOSER_ALLOW_SUPERUSER=1 composer update socialiteproviders/oidc --no-interaction --prefer-dist \
     && apk del .build-deps
-
-# Install the OIDC Socialite provider. Upstream :5 (>= 2026-11 digest)
-# ships a path repository (../admin-api) in composer.json that only exists
-# in their build env — any composer command aborts with "The url supplied
-# for the path (../admin-api) repository does not exist". Strip path repos
-# first; the remaining public VCS repos must clone over https (no SSH
-# credentials exist in the build).
 
 # Install runtime tools for the entrypoint
 RUN apk add --no-cache \
