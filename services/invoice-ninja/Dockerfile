@@ -10,12 +10,18 @@ FROM invoiceninja/invoiceninja:5
 
 USER root
 
-# Install build dependencies and PHP extensions
+# Install build dependencies and PHP extensions, then the OIDC provider in
+# the same step — .build-deps (git, composer) must still be installed while
+# composer resolves the VCS repositories.
 RUN apk add --no-cache --virtual .build-deps \
         postgresql-dev \
         composer \
         git \
     && docker-php-ext-install pdo_pgsql \
+    && git config --global url."https://github.com/".insteadOf "git@github.com:" \
+    && php -r '$c=json_decode(file_get_contents("composer.json"),true);$c["repositories"]=array_values(array_filter($c["repositories"]??[],function($r){return ($r["type"]??"")!=="path";}));file_put_contents("composer.json",json_encode($c,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));' \
+    && COMPOSER_ALLOW_SUPERUSER=1 composer require socialiteproviders/oidc --no-interaction --no-update \
+    && COMPOSER_ALLOW_SUPERUSER=1 composer update socialiteproviders/oidc --no-interaction --prefer-dist \
     && apk del .build-deps
 
 # Install the OIDC Socialite provider. Upstream :5 (>= 2026-11 digest)
@@ -24,10 +30,6 @@ RUN apk add --no-cache --virtual .build-deps \
 # for the path (../admin-api) repository does not exist". Strip path repos
 # first; the remaining public VCS repos must clone over https (no SSH
 # credentials exist in the build).
-RUN git config --global url."https://github.com/".insteadOf "git@github.com:" && \
-    php -r '$c=json_decode(file_get_contents("composer.json"),true);$c["repositories"]=array_values(array_filter($c["repositories"]??[],function($r){return ($r["type"]??"")!=="path";}));file_put_contents("composer.json",json_encode($c,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));' && \
-    COMPOSER_ALLOW_SUPERUSER=1 composer require socialiteproviders/oidc --no-interaction --no-update && \
-    COMPOSER_ALLOW_SUPERUSER=1 composer update socialiteproviders/oidc --no-interaction --prefer-dist
 
 # Install runtime tools for the entrypoint
 RUN apk add --no-cache \
