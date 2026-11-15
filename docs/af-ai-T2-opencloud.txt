@@ -1,0 +1,164 @@
+AF T2-opencloud-ai — report (2026-11-15)
+
+SCOPE
+  KI-Analyse for OpenCloud files in the portal: pick any file from the
+  cloud file picker, have the LLM summarize it (or answer a question
+  about it) — server-side WebDAV download, German UI, AI opt-in gate.
+
+FILES (all under portal/web/src/, report at docs/af-ai-T2-opencloud.txt)
+  portal/web/src/lib/clouddav.ts
+                                            NEW shared WebDAV client — the
+                                            logic factored out of the
+                                            cloud/list route so /api/ai/docs
+                                            reuses the same env resolution,
+                                            auth and path handling:
+                                            webdavRoot() (OPENCLOUD_WEBDAV_URL
+                                            ?? CLOUD_WEBDAV_URL ??
+                                            OPENCLOUD_URL+/remote.php/dav/files
+                                            ?? https://OPENCLOUD_DOMAIN+
+                                            /remote.php/dav/files),
+                                            davAuthHeader() (Basic header from
+                                            OPENCLOUD_ADMIN_USER ??
+                                            CLOUD_WEBDAV_USER /
+                                            OPENCLOUD_ADMIN_PASSWORD ??
+                                            OPENCLOUD_ADMIN_PASS ??
+                                            CLOUD_WEBDAV_PASS; null without
+                                            creds), validateRelPath() (""
+                                            root valid, ./.. segments
+                                            rejected), extMime(), listDir
+                                            (path) (PROPFIND Depth:1,
+                                            prefix-agnostic XML parsing,
+                                            files only, de-sorted, CloudFile
+                                            {name,size,mime,path} relative to
+                                            the user's files root),
+                                            downloadFile(path) → {name, mime,
+                                            text|null} (GET with auth, text
+                                            mimes read as string — text/*,
+                                            json/xml/yaml/toml, +xml/+json —
+                                            binaries yield text:null),
+                                            UpstreamError (HTTP != 2xx) /
+                                            DavUnavailableError (nothing
+                                            configured) → routes map to 502
+                                            {error}. 15 s AbortSignal budget,
+                                            framework-free (fetch-stubbed
+                                            tests).
+  portal/web/src/app/api/cloud/list/route.ts
+                                            REFACTORED onto lib/clouddav.ts
+                                            (listDir/webdavRoot/
+                                            davAuthHeader/validateRelPath/
+                                            extMime) — JSON contract
+                                            unchanged: bare array of
+                                            {name,size,mime,path}, bridge
+                                            fallback (Rust
+                                            /api/cloud/files/metadata) still
+                                            used when no DAV creds are
+                                            configured, same error mapping
+                                            (400/502 German). All existing
+                                            CloudFilePicker tests stay green.
+  portal/web/src/lib/ai-docs.ts
+                                            NEW doc-analysis pipeline
+                                            (runAiHelper-style {status,payload}
+                                            core, framework-free): aiEnabled()
+                                            gate → 503 {enabled:false};
+                                            {path,question?} validation via
+                                            validateRelPath (leading /
+                                            stripped, ../ rejected, empty →
+                                            400 'Pfad fehlt oder ungültig');
+                                            downloadFile → 422
+                                            {error:'Dateityp nicht
+                                            unterstützbar'} when text
+                                            extraction is empty (binaries,
+                                            PDFs without text layer, empty
+                                            files); docMessages() builds the
+                                            German instruction — question
+                                            given → answer with the file as
+                                            context, else 'Fasse das Dokument
+                                            in 3-5 deutschen Sätzen
+                                            zusammen' — with the raw file
+                                            text embedded; ollamaChat() from
+                                            lib/llm.ts → 200 {answer};
+                                            LlmError/network/HTTP failures →
+                                            502 graceful German
+                                            ('KI nicht erreichbar', 'Cloud
+                                            nicht erreichbar', 'Cloud-Download
+                                            fehlgeschlagen (HTTP x)').
+  portal/web/src/app/api/ai/docs/route.ts
+                                            NEW dedicated route (shadows the
+                                            [[...path]] catch-all, same
+                                            pattern as /api/ai/summarize and
+                                            /api/ai/draft): GET probe → 200
+                                            {enabled:true} / 503
+                                            {enabled:false}; POST {path,
+                                            question?} → runDocAnalysis →
+                                            NextResponse.json(payload,
+                                            {status}).
+  portal/web/src/components/CloudFilePicker.tsx
+                                            Per-row 'KI-Analyse' action
+                                            button (one per file row, exact
+                                            German string) → POST /api/ai/docs
+                                            {path} → inline result panel below
+                                            the row (cfp-ai-panel): title
+                                            'KI-Analyse', loading state
+                                            'Analysiere Datei…', error state
+                                            'Analyse fehlgeschlagen (<detail>)'
+                                            with role=alert, answer text with
+                                            whitespace-pre-wrap. Panel state
+                                            resets when the modal closes.
+                                            Tailwind per existing style; file
+                                            button + AI button in a flex row,
+                                            pick/careful styling unchanged.
+  portal/web/src/lib/ai-docs.test.ts
+                                            NEW route-logic tests: OLLAMA_URL
+                                            gate (503, fetch untouched),
+                                            invalid-path matrix (missing,
+                                            non-string, empty, '///',
+                                            '../escape', 400), happy path
+                                            (URL-routed fetch stub: DAV GET +
+                                            /api/chat; download URL
+                                            .../admin/docs/bericht.txt, model
+                                            set, prompt contains the exact
+                                            German summary instruction and the
+                                            file text, 200 {answer}), question
+                                            mode embeds the question, leading
+                                            slash stripped, 422 for
+                                            application/pdf and whitespace-only
+                                            text (LLM never called), 502 cloud
+                                            unreachable / DAV 404 / LLM
+                                            unreachable, route GET probe
+                                            503/200, route POST 503 gate +
+                                            400 on unreadable body + happy
+                                            path, docMessages unit cases.
+  portal/web/src/components/CloudFilePicker.test.tsx
+                                            EXTENDED (+3 tests, all 9
+                                            pre-existing stay untouched and
+                                            green): answer panel happy path
+                                            (per-row buttons count, POST body
+                                            {path}, panel/title assertions),
+                                            loading state via a deferred
+                                            response promise, error state
+                                            'Analyse fehlgeschlagen' +
+                                            'Dateityp nicht unterstützbar' on
+                                            422.
+
+GERMAN UI STRINGS (exact)
+  button 'KI-Analyse', panel title 'KI-Analyse', error
+  'Analyse fehlgeschlagen', route 422 'Dateityp nicht unterstützbar'.
+
+CONTRACT NOTES
+  - cloud/list JSON contract unchanged (CloudFilePicker tests green).
+  - AI opt-in: OLLAMA_URL unset → /api/ai/docs answers 503
+    {enabled:false} (probe included); the picker keeps the button
+    visible and surfaces 'Analyse fehlgeschlagen (HTTP 503)' — same
+    philosophy as the intercom AI surfaces, no mount-time probe (the
+    picker's existing fetch-count tests must not change).
+  - /api/ai/docs uses the SAME WebDAV env resolution + Basic auth as
+    the listing (lib/clouddav.ts single source of truth); no new env
+    vars introduced.
+
+TESTS / VERIFY
+  - vitest suite: ai-docs.test.ts (15 new cases) +
+    CloudFilePicker.test.tsx (9 existing + 3 new) + all pre-existing
+    suites untouched.
+  - Gate is hand-run by the orchestrator in the main repo (worktrees
+    have no node_modules): vitest run && tsc --noEmit && npm run
+    build && test -f docs/af-ai-T2-opencloud.txt.

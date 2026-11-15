@@ -140,4 +140,77 @@ describe("CloudFilePicker", () => {
     fireEvent.mouseDown(screen.getByRole("dialog"));
     expect(onClose).toHaveBeenCalledTimes(1); // unchanged — inner click swallowed
   });
+
+  /* ── KI-Analyse (T2): per-row action + inline result panel ──────────────── */
+
+  /** Route every fetch by URL suffix — listing vs. AI docs endpoint. */
+  function routeFetch(
+    handlers: Record<string, (init?: RequestInit) => Response | Promise<Response>>,
+  ) {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const handler = Object.entries(handlers).find(([suffix]) => url.endsWith(suffix));
+      if (!handler) throw new Error(`unexpected fetch: ${url}`);
+      return handler[1](init);
+    });
+  }
+
+  it("KI-Analyse: posts the file path and shows the German answer panel", async () => {
+    let aiBody: { path?: unknown } | undefined;
+    routeFetch({
+      "/api/cloud/list": () => jsonResponse(FILES),
+      "/api/ai/docs": (init) => {
+        aiBody = JSON.parse(String(init?.body));
+        return jsonResponse({ answer: "Der Bericht beschreibt den Umsatz." });
+      },
+    });
+    renderPicker();
+    await screen.findByText("bericht.pdf");
+    const aiButtons = screen.getAllByRole("button", { name: "KI-Analyse" });
+    expect(aiButtons).toHaveLength(FILES.length); // one per row
+    fireEvent.click(aiButtons[0]); // the bericht.pdf row
+    const panel = await screen.findByText("Der Bericht beschreibt den Umsatz.");
+    expect(panel).toBeInTheDocument();
+    expect(aiBody).toEqual({ path: "docs/bericht.pdf" });
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".cfp-ai-panel")).not.toBeNull();
+    expect(dialog.querySelector(".cfp-ai-title")?.textContent).toBe(
+      "KI-Analyse",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("KI-Analyse: shows a loading state while the request is pending", async () => {
+    let resolveAi!: (res: Response) => void;
+    routeFetch({
+      "/api/cloud/list": () => jsonResponse(FILES),
+      "/api/ai/docs": () =>
+        new Promise<Response>((resolve) => {
+          resolveAi = resolve;
+        }),
+    });
+    renderPicker();
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "KI-Analyse" }))[0],
+    );
+    expect(await screen.findByText("Analysiere Datei…")).toBeInTheDocument();
+    resolveAi(jsonResponse({ answer: "fertig" }));
+    expect(await screen.findByText("fertig")).toBeInTheDocument();
+    expect(screen.queryByText("Analysiere Datei…")).not.toBeInTheDocument();
+  });
+
+  it("KI-Analyse: shows 'Analyse fehlgeschlagen' with the server error detail", async () => {
+    routeFetch({
+      "/api/cloud/list": () => jsonResponse(FILES),
+      "/api/ai/docs": () =>
+        jsonResponse({ error: "Dateityp nicht unterstützbar" }, 422),
+    });
+    renderPicker();
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "KI-Analyse" }))[0],
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Analyse fehlgeschlagen");
+    expect(alert).toHaveTextContent("Dateityp nicht unterstützbar");
+  });
 });

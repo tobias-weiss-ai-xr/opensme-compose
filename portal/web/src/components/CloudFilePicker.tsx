@@ -30,6 +30,10 @@ function fileEmoji(mime: string): string {
  * Modal file picker for the cloud (WebDAV) — flat listing of one
  * directory via GET /api/cloud/list. Picking hands the raw entry to
  * onSelect; share-link creation stays the parent's job. German UI.
+ *
+ * Every row carries a 'KI-Analyse' action (T2): POST /api/ai/docs
+ * summarizes/answers questions about the file, shown in an inline
+ * result panel below the row (loading / error / answer states).
  */
 export default function CloudFilePicker({
   open,
@@ -39,6 +43,11 @@ export default function CloudFilePicker({
   const [files, setFiles] = useState<CloudFileEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // KI-Analyse state — one inline panel at a time, keyed by file path.
+  const [aiPath, setAiPath] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,9 +73,48 @@ export default function CloudFilePicker({
     }
   }, []);
 
+  const runAi = useCallback(async (file: CloudFileEntry) => {
+    setAiPath(file.path);
+    setAiLoading(true);
+    setAiError(null);
+    setAiAnswer(null);
+    try {
+      const res = await fetch("/api/ai/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: file.path }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        let message = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) message = data.error;
+        } catch {
+          /* keep HTTP fallback */
+        }
+        throw new Error(message);
+      }
+      const data = (await res.json()) as { answer?: unknown };
+      setAiAnswer(typeof data?.answer === "string" ? data.answer : "");
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
+
   // (Re)load on every open — the cloud listing is never cached client-side.
+  // Closing resets the KI-Analyse panel so a stale answer never reappears.
   useEffect(() => {
-    if (open) void load();
+    if (open) {
+      void load();
+    } else {
+      setAiPath(null);
+      setAiLoading(false);
+      setAiError(null);
+      setAiAnswer(null);
+    }
   }, [open, load]);
 
   useEffect(() => {
@@ -138,19 +186,50 @@ export default function CloudFilePicker({
           <ul className="cfp-list max-h-[50vh] list-none overflow-y-auto">
             {files!.map((f) => (
               <li key={f.path} className="mb-1">
-                <button
-                  type="button"
-                  className="cfp-item w-full rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-accent/10"
-                  onClick={() => {
-                    onSelect(f);
-                    onClose();
-                  }}
-                >
-                  <span aria-hidden="true">{fileEmoji(f.mime)}</span> {f.name}
-                  {humanSize(f.size) ? (
-                    <span className="text-dim"> ({humanSize(f.size)})</span>
-                  ) : null}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="cfp-item min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-accent/10"
+                    onClick={() => {
+                      onSelect(f);
+                      onClose();
+                    }}
+                  >
+                    <span aria-hidden="true">{fileEmoji(f.mime)}</span> {f.name}
+                    {humanSize(f.size) ? (
+                      <span className="text-dim"> ({humanSize(f.size)})</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    className="cfp-ai shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
+                    onClick={() => void runAi(f)}
+                  >
+                    KI-Analyse
+                  </button>
+                </div>
+                {aiPath === f.path && (
+                  <div className="cfp-ai-panel mt-1 rounded-lg border border-border p-2">
+                    <p className="cfp-ai-title mb-1 text-xs font-semibold uppercase tracking-wide text-dim">
+                      KI-Analyse
+                    </p>
+                    {aiLoading && (
+                      <p className="cfp-ai-loading text-sm text-dim">
+                        Analysiere Datei…
+                      </p>
+                    )}
+                    {aiError && (
+                      <p role="alert" className="cfp-ai-error text-sm">
+                        Analyse fehlgeschlagen ({aiError})
+                      </p>
+                    )}
+                    {aiAnswer !== null && !aiLoading && !aiError && (
+                      <p className="cfp-ai-answer whitespace-pre-wrap text-sm">
+                        {aiAnswer}
+                      </p>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
