@@ -1,18 +1,33 @@
 /**
  * Server-side LLM abstraction for the AI helper surfaces (thread summary,
- * draft-reply suggestion) — Ollama-compatible, chat-API style.
+ * draft-reply suggestion) — OpenAI-compatible gateway first, Ollama as
+ * the fallback, chat-API style on both legs.
  *
- * POST {OLLAMA_URL:-http://ai:11434}/api/chat with { model, messages,
- * stream:false } is the Ollama chat contract; any compatible gateway that
- * speaks the same shape works. The model comes from AI_MODEL (OLLAMA_MODEL
- * as the analysis-stack fallback, "llama3.1" as last resort).
+ * Gateway leg (preferred): openaiChat() POSTs
+ * {OPENAI_BASE_URL:-http://litellm:4000/v1}/chat/completions with
+ * Authorization: Bearer OPENAI_API_KEY and { model: openaiModel()
+ * (OPENAI_MODEL, default "glm-5.3-flash"), messages, stream:false }.
+ * The LiteLLM gateway answers in seconds — non-streaming is fine, well
+ * under undici's 300 s headersTimeout.
  *
- * AI is an operator opt-in: OLLAMA_URL unset means the surfaces stay
- * disabled (aiEnabled() === false → routes answer 503 {enabled:false},
- * the UI hides the buttons). No live LLM exists on every host — every
- * failure path (unreachable, timeout, non-JSON, empty answer) resolves
- * into a graceful LlmError that the routes surface as 502 with a plain
- * German message instead of leaking stack traces or URLs.
+ * Ollama leg (fallback): ollamaChat() POSTs
+ * {OLLAMA_URL:-http://ai:11434}/api/chat with { model, messages,
+ * stream:true } — STREAMING (NDJSON) so slow CPU inference never trips
+ * undici's 300 s headersTimeout. The model comes from AI_MODEL
+ * (OLLAMA_MODEL as the analysis-stack fallback, "llama3.1" as last
+ * resort).
+ *
+ * The dispatch (aiChat) prefers the gateway when OPENAI_API_KEY is set
+ * (aiGatewayEnabled()) and silently degrades to ollamaChat when the
+ * gateway is unset or its call fails.
+ *
+ * AI is an operator opt-in: with neither OPENAI_API_KEY nor OLLAMA_URL
+ * set the surfaces stay disabled (aiEnabled() === false → routes answer
+ * 503 {enabled:false}, the UI hides the buttons). No live LLM exists on
+ * every host — every failure path (unreachable, timeout, non-JSON, empty
+ * answer) resolves into a graceful LlmError that the routes surface as
+ * 502 with a plain German message instead of leaking stack traces or
+ * URLs.
  *
  * Framework-free (no next/* imports) so the whole module is directly
  * unit-testable with a stubbed global fetch (llm.test.ts).
@@ -51,9 +66,15 @@ export class ThreadFetchError extends Error {
   }
 }
 
-/** True when the operator configured an Ollama endpoint (AI opt-in). */
+/**
+ * True when the operator configured any LLM backend — the OpenAI-compatible
+ * gateway (OPENAI_API_KEY) or an Ollama endpoint (OLLAMA_URL). Route gate:
+ * false → 503 {enabled:false}.
+ */
 export function aiEnabled(): boolean {
-  return serverEnv("OLLAMA_URL").trim() !== "";
+  return (
+    serverEnv("OPENAI_API_KEY").trim() !== "" || serverEnv("OLLAMA_URL").trim() !== ""
+  );
 }
 
 /** Chat endpoint base — spec default http://ai:11434 (compose `ai` service). */
@@ -64,6 +85,26 @@ export function ollamaUrl(): string {
 /** Model name for /api/chat — AI_MODEL, OLLAMA_MODEL fallback, llama3.1. */
 export function aiModel(): string {
   return serverEnv("AI_MODEL") || serverEnv("OLLAMA_MODEL") || "llama3.1";
+}
+
+/**
+ * True when the operator configured the OpenAI-compatible gateway
+ * (LiteLLM) — the fast leg the dispatch prefers.
+ */
+export function aiGatewayEnabled(): boolean {
+  return serverEnv("OPENAI_API_KEY").trim() !== "";
+}
+
+/** Gateway chat endpoint base — LiteLLM default http://litellm:4000/v1. */
+export function openaiBaseUrl(): string {
+  return serverEnv("OPENAI_BASE_URL", "http://litellm:4000/v1")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+/** Model name for /v1/chat/completions — OPENAI_MODEL, glm-5.3-flash. */
+export function openaiModel(): string {
+  return serverEnv("OPENAI_MODEL") || "glm-5.3-flash";
 }
 
 /** Per-request budget for one LLM call (summaries/drafts can be slow). */
@@ -145,6 +186,110 @@ export async function ollamaChat(
     throw new LlmError("KI lieferte eine leere Antwort");
   }
   return content.trim();
+}
+
+export interface OpenaiChatOptions {
+  /** Endpoint override — tests only; production uses openaiBaseUrl(). */
+  url?: string;
+  /** Fetch override — tests only; production uses global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * One OpenAI-compatible chat roundtrip (LiteLLM gateway), resolving with
+ * the assistant message content. Non-streaming (stream:false): the
+ * gateway answers in seconds, so response headers arrive well under
+ * undici's 300 s headersTimeout — only the overall AbortSignal budget
+ * applies. Every failure mode is normalized into LlmError exactly like
+ * ollamaChat (timeout, unreachable, HTTP error, non-JSON body, empty
+ * answer) — callers only ever see the graceful message.
+ */
+export async function openaiChat(
+  messages: ChatMessage[],
+  options: OpenaiChatOptions = {},
+): Promise<string> {
+  const url = `${options.url ?? openaiBaseUrl()}/chat/completions`;
+  const doFetch = options.fetchImpl ?? fetch;
+  const timeoutMs = aiTimeoutMs();
+  let res: Response;
+  try {
+    res = await doFetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serverEnv("OPENAI_API_KEY")}`,
+      },
+      body: JSON.stringify({ model: openaiModel(), messages, stream: false }),
+      signal: AbortSignal.timeout(timeoutMs),
+      cache: "no-store",
+    });
+  } catch (err) {
+    // Same structural name check as ollamaChat — DOMException is not
+    // `instanceof Error` in some runtimes, so timeout aborts are
+    // recognized everywhere.
+    const name = (err as { name?: unknown } | null)?.name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new LlmError(
+        `KI nicht erreichbar (Timeout nach ${Math.round(timeoutMs / 1000)} s)`,
+        err,
+      );
+    }
+    throw new LlmError("KI nicht erreichbar", err);
+  }
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const data = (await res.json()) as { error?: unknown };
+      const msg = data?.error;
+      if (typeof msg === "string" && msg) {
+        detail = msg;
+      } else if (
+        msg &&
+        typeof msg === "object" &&
+        typeof (msg as { message?: unknown }).message === "string" &&
+        (msg as { message?: unknown }).message
+      ) {
+        // OpenAI-style error shape: { error: { message: "..." } }
+        detail = (msg as { message: string }).message;
+      }
+    } catch {
+      /* keep the HTTP fallback */
+    }
+    throw new LlmError(`KI-Antwort fehlgeschlagen (${detail})`);
+  }
+  const raw = await res.text();
+  let data: { choices?: Array<{ message?: { content?: unknown } }> };
+  try {
+    data = JSON.parse(raw) as { choices?: Array<{ message?: { content?: unknown } }> };
+  } catch {
+    throw new LlmError("KI-Antwort nicht verständlich (kein JSON)");
+  }
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new LlmError("KI lieferte eine leere Antwort");
+  }
+  return content.trim();
+}
+
+/**
+ * Chat dispatch for the helper pipeline — gateway first, ollama fallback:
+ * uses openaiChat() when the gateway is configured (aiGatewayEnabled());
+ * on an unset gateway OR a failed gateway call it degrades to ollamaChat()
+ * (dialled only when OLLAMA_URL is actually configured — never a default
+ * endpoint the operator never set). Log-less and error-tolerant: a
+ * gateway outage silently degrades to ollama; when both legs fail the
+ * last LlmError propagates and runAiHelper maps it to 502.
+ */
+export async function aiChat(messages: ChatMessage[]): Promise<string> {
+  if (aiGatewayEnabled()) {
+    try {
+      return await openaiChat(messages);
+    } catch (err) {
+      if (serverEnv("OLLAMA_URL").trim() === "") throw err;
+      return ollamaChat(messages);
+    }
+  }
+  return ollamaChat(messages);
 }
 
 /** Thread transcript budget — enough context, still a sane prompt size. */
@@ -296,7 +441,7 @@ export async function runAiHelper(
   }
 
   const transcript = buildTranscript(messages, threadId);
-  const chat = input.chat ?? ollamaChat;
+  const chat = input.chat ?? aiChat;
   try {
     const content =
       kind === "summary"

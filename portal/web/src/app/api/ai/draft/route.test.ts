@@ -34,6 +34,7 @@ function urlRoutedFetch(handlers: Record<string, (init?: RequestInit) => Respons
 
 describe("POST/GET /api/ai/draft", () => {
   beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "http://ai:11434");
     vi.stubEnv("BACKEND_URL", "http://portal:8080");
   });
@@ -43,12 +44,24 @@ describe("POST/GET /api/ai/draft", () => {
   });
 
   it("GET probe: 503 {enabled:false} without OLLAMA_URL, 200 {enabled:true} with", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "");
     expect((await GET()).status).toBe(503);
     await expect((await GET()).json()).resolves.toEqual({ enabled: false });
     vi.stubEnv("OLLAMA_URL", "http://ai:11434");
     expect((await GET()).status).toBe(200);
     await expect((await GET()).json()).resolves.toEqual({ enabled: true });
+  });
+
+  it("GET probe: 200 {enabled:true} with only the gateway key, 503 when both unset", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-litellm");
+    vi.stubEnv("OLLAMA_URL", "");
+    expect((await GET()).status).toBe(200);
+    await expect((await GET()).json()).resolves.toEqual({ enabled: true });
+    vi.stubEnv("OPENAI_API_KEY", "");
+    expect((await GET()).status).toBe(503);
+    await expect((await GET()).json()).resolves.toEqual({ enabled: false });
+    expect((await POST(post({ threadId: 4 }))).status).toBe(503); // gate fires before the body
   });
 
   it("POST: 503 {enabled:false} when the AI gate is off", async () => {

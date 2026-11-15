@@ -3,10 +3,11 @@ import { aiEnabled, runAiHelper } from "@/lib/llm";
 
 /**
  * POST /api/ai/draft — LLM draft-reply suggestion for an intercom note
- * (T6). Same contract as /api/ai/summarize: OLLAMA_URL gate (503
- * {enabled:false} hides the surface) → {threadId} → thread fetch with
- * the caller's session → transcript (target note marked) → Ollama
- * /api/chat → 200 {draft}. Shared pipeline lives in lib/llm.ts.
+ * (T6). Same contract as /api/ai/summarize: AI gate — OPENAI_API_KEY or
+ * OLLAMA_URL configured, else 503 {enabled:false} which hides the
+ * surface → {threadId} → thread fetch with the caller's session →
+ * transcript (target note marked) → LLM chat (gateway first, ollama
+ * fallback) → 200 {draft}. Shared pipeline lives in lib/llm.ts.
  */
 
 export const runtime = "nodejs";

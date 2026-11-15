@@ -1,0 +1,115 @@
+AF AI T3-llm-gateway — report (2026-11-15)
+
+FILES
+  portal/web/src/lib/llm.ts                 gateway-first LLM chat: aiEnabled()
+                                            now true when OPENAI_API_KEY OR
+                                            OLLAMA_URL is set (routes keep
+                                            answering 503 {enabled:false} when
+                                            both are unset); new
+                                            aiGatewayEnabled() (OPENAI_API_KEY
+                                            non-empty), openaiBaseUrl()
+                                            (OPENAI_BASE_URL →
+                                            http://litellm:4000/v1, trailing
+                                            slashes stripped), openaiModel()
+                                            (OPENAI_MODEL → glm-5.3-flash),
+                                            openaiChat() (POST
+                                            {base}/chat/completions, Bearer
+                                            OPENAI_API_KEY + Content-Type,
+                                            {model, messages, stream:false} —
+                                            gateway answers in <2 s, no
+                                            streaming needed —
+                                            AbortSignal.timeout(aiTimeoutMs()),
+                                            parses choices[0].message.content
+                                            trimmed; every failure normalized
+                                            to the same graceful LlmError
+                                            shapes as ollamaChat: timeout,
+                                            unreachable, HTTP error (plain
+                                            string or OpenAI-style
+                                            {error:{message}}), non-JSON,
+                                            empty answer), aiChat() dispatch
+                                            (prefers the gateway when
+                                            OPENAI_API_KEY is set, falls back
+                                            to ollamaChat when the key is
+                                            unset OR the gateway call failed;
+                                            error-tolerant and log-less — the
+                                            last attempt's error propagates),
+                                            runAiHelper() default chat is now
+                                            aiChat; all existing export
+                                            signatures unchanged
+  portal/web/src/lib/llm.test.ts            all 26 pre-existing tests kept
+                                            green (hermetic OPENAI_API_KEY=''
+                                            stubs where env could leak); new
+                                            'gateway-first dispatch' suite:
+                                            aiEnabled/aiGatewayEnabled gate
+                                            semantics (both unset → routes
+                                            503), openaiModel/openaiBaseUrl
+                                            defaults and overrides, openaiChat
+                                            contract (URL
+                                            …/v1/chat/completions, Bearer
+                                            header, stream:false body, trimmed
+                                            content) and failure
+                                            normalization (timeout, fetch
+                                            failed, HTTP {error:{message}},
+                                            non-JSON, blank content), and the
+                                            three dispatch behaviors: prefers
+                                            the gateway (ollama untouched),
+                                            falls back to ollama when the
+                                            gateway call fails, rethrows the
+                                            gateway error when no ollama is
+                                            configured (never dials the
+                                            default endpoint)
+  portal/web/src/app/api/ai/summarize/      +3 tests: gateway-only probe
+  route.test.ts                             answers 200 {enabled:true}, both
+                                            env unset → probe 503
+                                            {enabled:false}, POST through the
+                                            gateway (Bearer header, stream:false
+                                            body) → 200 {summary}
+  portal/web/src/app/api/ai/draft/          +1 test: gateway-only probe 200 →
+  route.test.ts                             both unset → probe and POST 503
+                                            (gate fires before the body is
+                                            read)
+  portal/web/src/app/api/ai/summarize/      docstring-only updates (AI gate
+  route.ts, draft/route.ts                  wording); no behavior change —
+                                            the 503 {enabled:false} gate
+                                            simply now also honors
+                                            OPENAI_API_KEY via aiEnabled()
+  docker-compose.yml                        portal-web environment: two new
+                                            lines — OPENAI_API_KEY:
+                                            ${LITELLM_MASTER_KEY:-} and
+                                            OPENAI_BASE_URL:
+                                            ${OPENAI_BASE_URL:-http://litellm:4000/v1}
+
+DESIGN NOTES
+  * Gateway-first, ollama-fallback: the LiteLLM gateway speaks the
+    OpenAI-compatible /v1/chat/completions contract (Bearer
+    LITELLM_MASTER_KEY, bare model names like glm-5.3-flash) and answers
+    in <2 s, so openaiChat() uses stream:false and plain JSON parsing;
+    ollamaChat() (stream:true NDJSON) stays untouched as the fallback
+    when OPENAI_API_KEY is unset or the gateway call fails.
+  * One dispatch point: only runAiHelper's default chat changed
+    (ollamaChat → aiChat); routes, prompts and the {status, payload}
+    contract are unchanged, and explicit input.chat injections still win.
+  * Operator opt-in unchanged in spirit: both env unset → aiEnabled()
+    false → 503 {enabled:false}; with only LITELLM_MASTER_KEY set the
+    surface goes live via the gateway; OLLAMA_URL alone keeps the old
+    local-model path.
+  * LlmError shapes identical across both legs (same German user
+    messages, technical detail on the error for server logs), so the
+    routes' 502 mapping and the UI messaging need no branching.
+  * The compose wiring maps LITELLM_MASTER_KEY → OPENAI_API_KEY without
+    renaming anything inside the portal — swap OPENAI_BASE_URL to any
+    OpenAI-compatible endpoint and the code follows.
+
+KNOWN LIMITATIONS
+  * No live LiteLLM reachable from this host — the gateway contract is
+    pinned against fetch mocks (URL, Bearer header, body shape,
+    choices[0].message.content parsing); first live deployment should
+    smoke-test with LITELLM_MASTER_KEY set on portal-web.
+  * openaiChat() reuses aiTimeoutMs() (default 120 s) for symmetry, even
+    though the gateway is expected to answer in <2 s.
+  * Fallback is single-shot: a failed gateway call is retried once via
+    ollama, not in a loop; if both legs fail, the ollama error (the last
+    attempt) surfaces.
+
+TASK ID: T3-llm-gateway
+BRANCH: tf/T3-llm-gateway

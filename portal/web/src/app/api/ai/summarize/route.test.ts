@@ -2,10 +2,11 @@ import { GET, POST } from "./route";
 import type { IntercomMessage } from "@/lib/types";
 
 /**
- * Route tests for /api/ai/summarize: the OLLAMA_URL gate (503
- * {enabled:false} hides the surface, GET probe answers {enabled:true}),
- * validation, session hop to the intercom backend, and the mocked-LLM
- * happy path — all fetch via a URL-routed stub (no live AI).
+ * Route tests for /api/ai/summarize: the AI gate (OPENAI_API_KEY or
+ * OLLAMA_URL; 503 {enabled:false} hides the surface, GET probe answers
+ * {enabled:true}), validation, session hop to the intercom backend, and
+ * the mocked-LLM happy path — all fetch via a URL-routed stub (no live
+ * AI). Gateway leg (LiteLLM, /v1/chat/completions) covered separately.
  */
 
 function note(partial: Partial<IntercomMessage> & { id: number; text: string }): IntercomMessage {
@@ -36,6 +37,7 @@ function urlRoutedFetch(handlers: Record<string, (init?: RequestInit) => Respons
 
 describe("POST/GET /api/ai/summarize", () => {
   beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "http://ai:11434");
     vi.stubEnv("BACKEND_URL", "http://portal:8080");
   });
@@ -151,5 +153,57 @@ describe("POST/GET /api/ai/summarize", () => {
     expect(res.status).toBe(502);
     const data = (await res.json()) as { error?: string };
     expect(data.error).toBe("KI nicht erreichbar");
+  });
+
+  it("GET probe: 200 {enabled:true} with only the gateway key set", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-litellm");
+    vi.stubEnv("OLLAMA_URL", "");
+    expect((await GET()).status).toBe(200);
+    await expect((await GET()).json()).resolves.toEqual({ enabled: true });
+  });
+
+  it("gateway AND ollama both unset → 503 {enabled:false} (GET probe + POST)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OLLAMA_URL", "");
+    const probe = await GET();
+    expect(probe.status).toBe(503);
+    await expect(probe.json()).resolves.toEqual({ enabled: false });
+    const res = await POST(post({ threadId: 7 }));
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ enabled: false });
+  });
+
+  it("POST: happy path via the gateway — Bearer auth, stream:false body", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-litellm");
+    vi.stubEnv("OLLAMA_URL", "");
+    let gwInit: RequestInit | undefined;
+    vi.stubGlobal(
+      "fetch",
+      urlRoutedFetch({
+        "/api/intercom": () =>
+          new Response(JSON.stringify({ messages: NOTES, latest: 7 }), { status: 200 }),
+        "/chat/completions": (init) => {
+          gwInit = init;
+          return new Response(
+            JSON.stringify({
+              choices: [{ message: { role: "assistant", content: "Bob deployt." } }],
+            }),
+            { status: 200 },
+          );
+        },
+      }),
+    );
+    const res = await POST(post({ threadId: 7 }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ summary: "Bob deployt." });
+    expect(new Headers(gwInit?.headers).get("authorization")).toBe("Bearer sk-litellm");
+    const body = JSON.parse(String(gwInit?.body)) as {
+      model: string;
+      messages: { content: string }[];
+      stream: boolean;
+    };
+    expect(body.stream).toBe(false);
+    expect(body.model).toBeTruthy();
+    expect(body.messages[1].content).toContain("Deploy steht");
   });
 });

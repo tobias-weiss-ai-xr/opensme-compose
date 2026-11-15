@@ -1,7 +1,9 @@
 import {
   LlmError,
   ThreadFetchError,
+  aiChat,
   aiEnabled,
+  aiGatewayEnabled,
   aiModel,
   aiTimeoutMs,
   buildTranscript,
@@ -9,6 +11,9 @@ import {
   fetchIntercomThread,
   ollamaChat,
   ollamaUrl,
+  openaiBaseUrl,
+  openaiChat,
+  openaiModel,
   runAiHelper,
   summarizeMessages,
 } from "./llm";
@@ -47,7 +52,8 @@ describe("AI gate + config (OLLAMA_URL / AI_MODEL)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("is disabled when OLLAMA_URL is unset or blank", () => {
+  it("is disabled when OLLAMA_URL is unset or blank (gateway unset too)", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "");
     expect(aiEnabled()).toBe(false);
     vi.stubEnv("OLLAMA_URL", "   ");
@@ -165,6 +171,151 @@ describe("ollamaChat", () => {
   });
 });
 
+describe("gateway-first dispatch (LiteLLM / OpenAI-compatible)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const MESSAGES: ChatMessage[] = [
+    { role: "system", content: "Sei knapp." },
+    { role: "user", content: "Fasse zusammen." },
+  ];
+
+  it("aiGatewayEnabled follows OPENAI_API_KEY; aiEnabled covers both backends", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OLLAMA_URL", "");
+    expect(aiGatewayEnabled()).toBe(false);
+    expect(aiEnabled()).toBe(false); // both unset → routes answer 503 {enabled:false}
+    vi.stubEnv("OPENAI_API_KEY", "sk-litellm");
+    expect(aiGatewayEnabled()).toBe(true);
+    expect(aiEnabled()).toBe(true); // gateway alone enables AI
+    vi.stubEnv("OPENAI_API_KEY", "   ");
+    expect(aiGatewayEnabled()).toBe(false); // blank key is no configuration
+    vi.stubEnv("OLLAMA_URL", "http://ai:11434");
+    expect(aiEnabled()).toBe(true); // ollama alone enables AI
+  });
+
+  it("openaiModel defaults to glm-5.3-flash and honors OPENAI_MODEL", () => {
+    vi.stubEnv("OPENAI_MODEL", "");
+    expect(openaiModel()).toBe("glm-5.3-flash");
+    vi.stubEnv("OPENAI_MODEL", "deepseek-v4-pro");
+    expect(openaiModel()).toBe("deepseek-v4-pro");
+  });
+
+  it("openaiBaseUrl defaults to http://litellm:4000/v1 and strips trailing slashes", () => {
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    expect(openaiBaseUrl()).toBe("http://litellm:4000/v1");
+    vi.stubEnv("OPENAI_BASE_URL", "http://gw:4000/v1///");
+    expect(openaiBaseUrl()).toBe("http://gw:4000/v1");
+  });
+
+  it("openaiChat POSTs the OpenAI chat contract and resolves choices[0].message.content", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    vi.stubEnv("OPENAI_MODEL", "glm-5.3-flash");
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        choices: [{ message: { role: "assistant", content: "  Kurze Zusammenfassung.  " } }],
+      }),
+    );
+    await expect(openaiChat(MESSAGES, { fetchImpl })).resolves.toBe("Kurze Zusammenfassung.");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://litellm:4000/v1/chat/completions");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer sk-test");
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+    expect(JSON.parse(String(init.body))).toEqual({
+      model: "glm-5.3-flash",
+      messages: MESSAGES,
+      stream: false,
+    });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("openaiChat normalizes failures like ollamaChat (timeout/unreachable/HTTP/non-JSON/empty)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    const timeouts = vi.fn(async () => {
+      throw new DOMException("The operation timed out", "TimeoutError");
+    });
+    await expect(openaiChat(MESSAGES, { fetchImpl: timeouts })).rejects.toMatchObject({
+      name: "LlmError",
+      message: expect.stringContaining("Timeout"),
+    });
+    const unreachable = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    await expect(openaiChat(MESSAGES, { fetchImpl: unreachable })).rejects.toMatchObject({
+      name: "LlmError",
+      message: "KI nicht erreichbar",
+    });
+    const httpError = vi.fn(async () =>
+      jsonResponse(
+        { error: { message: "model not found", type: "invalid_request_error" } },
+        404,
+      ),
+    );
+    await expect(openaiChat(MESSAGES, { fetchImpl: httpError })).rejects.toMatchObject({
+      name: "LlmError",
+      message: "KI-Antwort fehlgeschlagen (model not found)",
+    });
+    const garbage = vi.fn(async () => new Response("gateway garbage", { status: 200 }));
+    await expect(openaiChat(MESSAGES, { fetchImpl: garbage })).rejects.toMatchObject({
+      name: "LlmError",
+      message: expect.stringContaining("kein JSON"),
+    });
+    const empty = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "   " } }] }),
+    );
+    await expect(openaiChat(MESSAGES, { fetchImpl: empty })).rejects.toMatchObject({
+      name: "LlmError",
+      message: "KI lieferte eine leere Antwort",
+    });
+  });
+
+  it("dispatch prefers the gateway when OPENAI_API_KEY is set (ollama untouched)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    vi.stubEnv("OLLAMA_URL", "http://ai:11434");
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({ choices: [{ message: { content: "Gateway-Antwort" } }] }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+    await expect(aiChat(MESSAGES)).resolves.toBe("Gateway-Antwort");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("/chat/completions");
+  });
+
+  it("dispatch falls back to ollama when the gateway call fails", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    vi.stubEnv("OLLAMA_URL", "http://ai:11434");
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/chat/completions")) {
+        throw new TypeError("fetch failed"); // gateway down
+      }
+      return jsonResponse({ message: { content: "Ollama-Antwort" } });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await expect(aiChat(MESSAGES)).resolves.toBe("Ollama-Antwort");
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(urls[0]).toContain("/chat/completions");
+    expect(urls[1]).toContain("/api/chat");
+  });
+
+  it("dispatch rethrows the gateway error when no ollama is configured", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    vi.stubEnv("OLLAMA_URL", "");
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await expect(aiChat(MESSAGES)).rejects.toMatchObject({
+      name: "LlmError",
+      message: "KI nicht erreichbar",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // never dials the default ollama endpoint
+  });
+});
+
 describe("fetchIntercomThread", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -252,6 +403,7 @@ describe("buildTranscript + prompts", () => {
 
 describe("runAiHelper (shared summarize/draft pipeline)", () => {
   beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "http://ai:11434");
     vi.stubEnv("BACKEND_URL", "http://portal:8080");
   });

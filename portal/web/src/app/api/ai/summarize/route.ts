@@ -5,11 +5,12 @@ import { aiEnabled, runAiHelper } from "@/lib/llm";
  * POST /api/ai/summarize — LLM summary of an intercom thread (T6).
  *
  * Dedicated route, takes precedence over the [[...path]] catch-all.
- * Pipeline (lib/llm.ts): OLLAMA_URL gate → {threadId} validation →
+ * Pipeline (lib/llm.ts): AI gate → {threadId} validation →
  * intercom thread fetch with the caller's session → transcript →
- * Ollama /api/chat → 200 {summary}.
+ * LLM chat (LiteLLM gateway first, ollama fallback) → 200 {summary}.
  *
- * AI is an operator opt-in: with OLLAMA_URL unset every request (probe
+ * AI is an operator opt-in: with neither OPENAI_API_KEY nor OLLAMA_URL
+ * set every request (probe
  * GET included) is answered 503 {enabled:false} — the IntercomPanel
  * probes this and hides the 'Zusammenfassen' button, no error spam.
  */
