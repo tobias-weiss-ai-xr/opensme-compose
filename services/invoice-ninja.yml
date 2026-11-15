@@ -276,9 +276,9 @@ services:
       # host-only compose.internal.yml to override these labels
     healthcheck:
       # env -u: never let host-injected proxy env redirect the health probe.
-      # Use --spider to avoid writing to disk and --max-redirect=0 to
-      # avoid following the SSO redirect (we just want nginx to answer).
-      test: ["CMD-SHELL", "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -q --spider --max-redirect=0 -O /dev/null http://127.0.0.1:80/health"]
+      # BusyBox wget has no --max-redirect; the SPA /health path answers
+      # 200 directly (no SSO redirect), so a plain spider suffices.
+      test: ["CMD-SHELL", "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -q --spider -O /dev/null http://127.0.0.1:80/health"]
       interval: 30s
       timeout: 5s
       retries: 5

@@ -63,4 +63,6 @@ fi
 echo "[invoiceninja-entrypoint] Setup complete, delegating to upstream..."
 
 # ── Delegate to upstream container entrypoint ──────────────────
-exec /entrypoint "$@"
+# Base image declares ENTRYPOINT ["docker-entrypoint"] CMD ["supervisord"]
+# (the path /entrypoint no longer exists on current :5 digests).
+exec docker-entrypoint "$@"
