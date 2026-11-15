@@ -66,6 +66,9 @@ services:
     restart: unless-stopped
     profiles: ["invoice"]
     entrypoint: ["/invoiceninja-entrypoint.sh"]
+    # compose does not inherit the image CMD when entrypoint is overridden —
+    # without this the container starts with no command and exits 0 in a loop.
+    command: ["supervisord"]
     environment:
       APP_URL: "https://invoices.${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
       # HOSTING NOTE: on live chains opensme-coexist.yml overrides APP_URL

@@ -16,8 +16,11 @@ FROM invoiceninja/invoiceninja:5
 
 USER root
 
-# Install build dependencies and PHP extensions
-RUN apk add --no-cache --virtual .build-deps \
+# Install build dependencies and PHP extensions. postgresql-libs stays
+# installed (runtime libpq.so.5 for pdo_pgsql); only the -dev headers are
+# virtualised and removed again.
+RUN apk add --no-cache postgresql-libs \
+    && apk add --no-cache --virtual .build-deps \
         postgresql-dev \
     && docker-php-ext-install pdo_pgsql \
     && apk del .build-deps
