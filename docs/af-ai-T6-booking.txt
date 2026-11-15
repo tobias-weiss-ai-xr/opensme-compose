@@ -1,0 +1,127 @@
+T3-booking-agenda — AI meeting-prep brief on booking notifications
+===================================================================
+Campaign: ai-deeper (agentflow, worktree tf/T3-booking-agenda).
+Extends scripts/booking-notify.sh: before a confirmed booking is posted
+to the #support Element room, the LiteLLM gateway turns the booking
+fields (guest name, event type, notes) into a one-line German guest
+context + 3-5 agenda bullets that are appended to the m.room.message
+body. The Matrix notification itself never depends on the LLM — ANY
+gateway failure (key unset, network unreachable, timeout, malformed or
+empty answer) degrades to a static fallback agenda built from the same
+fields, so bookings are still announced.
+
+FILES
+  scripts/booking-notify.sh
+    header docs            7 new env vars documented (LITELLM_MASTER_KEY,
+                           LLM_GATEWAY_URL, LLM_MODEL, LLM_NETWORK,
+                           LLM_HELPER_IMAGE, LLM_TIMEOUT); secrets
+                           paragraph covers the key (docker -e, not argv,
+                           not logs); new "AI meeting-prep brief" design
+                           note; usage() sed range extended so --help
+                           covers the full header
+    ENV_KEYS               the 6 new vars join the explicit-env-beats-env-
+                           -file list (docker semantics preserved)
+    defaults block         LITELLM_MASTER_KEY (default empty → fallback
+                           agenda) with explicit `export` (bare `docker
+                           run -e` reads it from the environment — never
+                           the process list); LLM_* defaults;
+                           LLM_BASE gateway origin derived for probes
+                           (LLM_GATEWAY_URL keeps its /v1/ prefix);
+                           LLM_PY — the helper program: stdlib python
+                           (urllib) POST to the OpenAI-compatible
+                           /v1/chat/completions, stream:false, Bearer key
+                           from the container env, parses
+                           choices[0].message.content, prints ONLY the
+                           content on stdout, one-line diagnostic on
+                           stderr + exit 1 on any failure
+    db_bookings            bookings row now also carries 'notes'
+                           (coalesce(b.notes,'')) — the schema has notes
+                           TEXT (nullable), no location column
+    llm_complete (new)     runs the python helper container: docker run
+                           --rm -i --network $LLM_NETWORK
+                           python:3.12-alpine, script via python3 -c
+                           (static code), request body on stdin,
+                           non-zero on failure
+    fallback_brief (new)   static German agenda mirroring the LLM output
+                           contract (Kontext line + Agenda bullets),
+                           notes trimmed/flattened, 200-char cap
+    ai_brief (new)         prompts LLM_MODEL (system: exact output format
+                           contract, German) with the booking fields
+                           (300-char notes cap); ALWAYS prints a brief
+                           and returns 0 — callers never branch
+    booking_message        optional 2nd arg: appends the
+                           "🤖 Meeting-Prep (<model>):" section when
+                           non-empty; base block unchanged
+    send_booking           generates the brief before rendering the body
+    cmd_dry_run            preview includes the same brief (dry-run
+                           stays strictly read-only — the gateway call
+                           mutates nothing locally)
+    cmd_check              2 new probes through the same helper path:
+                           unauthenticated /health/liveliness (network
+                           reachability) and authenticated GET /v1/models
+                           asserting LLM_MODEL is actually served; key
+                           unset → warn, NOT a failed check (degraded
+                           mode is a valid configuration)
+  docs/af-ai-T6-booking.txt  this report (repo-root EXACT path)
+
+DESIGN NOTES
+  * Helper leg, not host: litellm:4000 is reachable from the opensme-net
+    docker network only (verified: host curl fails, helper container
+    answers), so the gateway call runs in a python:3.12-alpine container
+    (image already present on the host; carries python3 without apk).
+  * Secrets discipline unchanged: LITELLM_MASTER_KEY travels via bare
+    `docker run -e LITELLM_MASTER_KEY` after an explicit export — the
+    key never appears in argv, logs, or the sqlite/curl data paths; the
+    helper prints only the model's answer.
+  * Output contract: model answers "Kontext: …" then "Agenda:" with
+    3-5 "- " bullets (German — house style of the other AI surfaces:
+    ai-room-bot replies, SOGo drafts); bash normalizes (blank lines
+    dropped, section capped at 12 lines) before embedding, so even a
+    chatty model cannot blow up the Matrix body.
+  * Notification independence: ai_brief is total (fallback on every
+    failure path, including scratch-file and jq failures), so posting,
+    state tracking and txnId idempotency behave exactly as before.
+  * Retry semantics: the brief is regenerated per attempt — a failed
+    send retries with a fresh (possibly different) brief next pass;
+    the booking id in the state file is what guarantees never-announce-
+    twice, unchanged.
+
+VERIFIED (live stack, 2026-11-15)
+  * bash -n + shellcheck -S warning: clean.
+  * --check: all checks green incl. both new gateway probes (helper on
+    opensme-net; /v1/models lists glm-5.3-flash among 72 models).
+  * dry-run: a real pending booking (created through the calrs public
+    booking page, with notes) previewed the full body incl. the live-
+    gateway 🤖 Meeting-Prep section referencing the actual notes.
+  * apply: the booking was posted to #support (event
+    $8ylt5i6MPMYFt64h_laKszIQogevfBfJTZFDIJ8qP_g); the room message read
+    back via /_matrix/client/v3/rooms/<id>/messages shows the unchanged
+    base block + the 🤖 Meeting-Prep (glm-5.3-flash) section with a
+    one-line guest context and 5 agenda bullets derived from the
+    booking notes; pass complete: 1 posted, 0 failed.
+  * idempotency: immediate second apply pass → 0 posted, 0 failed.
+  * fallback paths (harness with stubbed helpers): key unset → static
+    template + warn; unreachable gateway path → one-line python
+    diagnostic + static template; empty-notes row renders the generic
+    bullet (jq -j avoids the trailing-newline trap that made every
+    notes-less booking look "with notes").
+
+KNOWN LIMITATIONS
+  * Briefs are German while the fixed notification skeleton stays
+    English — deliberate: all AI-generated content in this stack
+    (bot replies, SOGo drafts) is German for the German SME demo.
+  * LLM output is nondeterministic between retries of the same booking.
+  * LLM_GATEWAY_URL must keep the /v1/ prefix — LLM_BASE (probe origin)
+    is derived by stripping the shortest /v1/* suffix, with a fallback
+    to http://litellm:4000.
+  * No per-call cost/latency guard beyond LLM_TIMEOUT; the short prompt
+    answered in ~7.5 s live (glm-5.3-flash, stream:false).
+  * Test residue: two e2e bookings ("T3 brief e2e", "T3 apply e2e")
+    were created via the public booking page for live verification and
+    then flipped to status='cancelled' directly in the calrs db (the
+    dashboard admin password is interactive-only and not stored in any
+    env file). Their VEVENTs remain in the Radicale booking store —
+    inert demo data, same category as earlier e2e leftovers.
+
+TASK ID: T3-booking-agenda
+BRANCH: tf/T3-booking-agenda

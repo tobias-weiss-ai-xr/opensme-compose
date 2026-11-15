@@ -34,11 +34,26 @@
 #   MATRIX_ROOM_INVITE  optional comma-separated mxids invited at creation
 #   CALENDAR_CONTAINER  calrs container         (default opensme-calendar)
 #   HELPER_IMAGE        sqlite/file helper image (default alpine:3.19)
+#   LITELLM_MASTER_KEY  LiteLLM gateway bearer key for the AI meeting-prep
+#                       brief (default unset → static fallback agenda;
+#                       the key is NEVER printed or logged)
+#   LLM_GATEWAY_URL     OpenAI-compatible chat-completions URL (default
+#                       http://litellm:4000/v1/chat/completions — reachable
+#                       from the opensme-net docker network only, so the
+#                       call runs in a helper container, never on the host)
+#   LLM_MODEL           gateway model             (default glm-5.3-flash)
+#   LLM_NETWORK         docker network for the gateway helper container
+#                       (default opensme-net)
+#   LLM_HELPER_IMAGE    gateway helper image carrying python3
+#                       (default python:3.12-alpine)
+#   LLM_TIMEOUT         gateway call timeout in s (default 45)
 #
 # Secrets (MATRIX_PASSWORD, access tokens) are NEVER printed: the login
 # body and every POST body travel via stdin/temp files, the access token
 # is passed to curl through an -H @file (0600, removed on exit) so it
 # never appears on the process list, and `set +x` forbids tracing.
+# LITELLM_MASTER_KEY reaches the gateway helper through `docker run -e`
+# (container environment — not argv, not logs).
 #
 # Verified design notes (live stack, 2026-11-14):
 #   * Synapse 1.162.0 answers /_matrix/client/v3/... but NOT the legacy
@@ -54,6 +69,14 @@
 #     written through the same helper container — a plain file, so no
 #     sqlite write locks against the live calrs process). Bookings whose
 #     id is in the state file are never announced twice.
+#   * AI meeting-prep brief (2026-11-15): before a confirmed booking is
+#     posted, the LiteLLM gateway turns its fields (guest name, event
+#     type, notes) into a one-line guest context + 3-5 agenda bullets
+#     appended to the m.room.message body. The gateway call runs inside
+#     a python:3.12-alpine helper attached to opensme-net (the host
+#     cannot reach litellm:4000); ANY gateway failure (key unset, network
+#     down, timeout, bad answer) degrades to a static fallback agenda —
+#     the notification itself never depends on the LLM.
 #   * No `docker compose` dependency on purpose: compose config
 #     interpolation on the deployed tree requires profile vars (e.g.
 #     LIVEKIT_API_SECRET) that a bare checkout .env does not carry; the
@@ -76,7 +99,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 1
 
 usage() {
-  sed -n '2,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,86p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 MODE="apply"          # apply | dry-run | check
@@ -163,7 +186,9 @@ env_quote_load() {
 # explicit environment beats the env file (docker semantics): capture
 # the operator's values BEFORE sourcing and re-apply them afterwards
 ENV_KEYS=(MATRIX_DOMAIN MATRIX_HOMESERVER MATRIX_USER MATRIX_PASSWORD
-          MATRIX_ROOM MATRIX_ROOM_INVITE CALENDAR_CONTAINER HELPER_IMAGE)
+          MATRIX_ROOM MATRIX_ROOM_INVITE CALENDAR_CONTAINER HELPER_IMAGE
+          LITELLM_MASTER_KEY LLM_GATEWAY_URL LLM_MODEL LLM_NETWORK
+          LLM_HELPER_IMAGE LLM_TIMEOUT)
 declare -A ENV_KEEP=()
 for v in "${ENV_KEYS[@]}"; do
   [[ -n "${!v:-}" ]] && ENV_KEEP["$v"]="${!v}"
@@ -193,6 +218,47 @@ CALENDAR_CONTAINER="${CALENDAR_CONTAINER:-opensme-calendar}"
 HELPER_IMAGE="${HELPER_IMAGE:-alpine:3.19}"
 STATE_FILE="/data/booking-notify.state"   # inside the calrs-data volume
 DB_FILE="/data/calrs.db"                  # = /var/lib/calrs/calrs.db in calrs
+
+# ── AI meeting-prep brief (LiteLLM gateway via an opensme-net helper) ──────
+LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY:-}"
+export LITELLM_MASTER_KEY   # bare `docker run -e` reads it from the env —
+                            # never on the process list
+LLM_GATEWAY_URL="${LLM_GATEWAY_URL:-http://litellm:4000/v1/chat/completions}"
+LLM_MODEL="${LLM_MODEL:-glm-5.3-flash}"
+LLM_NETWORK="${LLM_NETWORK:-opensme-net}"
+LLM_HELPER_IMAGE="${LLM_HELPER_IMAGE:-python:3.12-alpine}"
+LLM_TIMEOUT="${LLM_TIMEOUT:-45}"
+# gateway origin for probes — LLM_GATEWAY_URL should keep the /v1/ prefix
+LLM_BASE="${LLM_GATEWAY_URL%/v1/*}"
+[[ -n "$LLM_BASE" && "$LLM_BASE" != "$LLM_GATEWAY_URL" ]] || LLM_BASE="http://litellm:4000"
+
+# gateway helper program (stdin = chat-completions JSON body, stdout =
+# the assistant message content only). Static code, no secrets — passed
+# as `python3 -c`; the request body travels on stdin, the bearer key in
+# the container environment.
+LLM_PY=$(cat <<'PY'
+import os, sys, json, urllib.request
+try:
+    key = os.environ.get("LITELLM_MASTER_KEY", "")
+    url = os.environ.get("LLM_GATEWAY_URL",
+                         "http://litellm:4000/v1/chat/completions")
+    timeout = float(os.environ.get("LLM_TIMEOUT", "45") or "45")
+    body = sys.stdin.read()
+    req = urllib.request.Request(
+        url, data=body.encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + key},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        out = json.loads(resp.read().decode("utf-8"))
+    content = ((out.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+    sys.stdout.write(content.strip() + "\n")
+except Exception as exc:
+    # one-line diagnostic on stderr; the caller falls back to the static brief
+    print("gateway: %s: %s" % (type(exc).__name__, str(exc)[:160]), file=sys.stderr)
+    sys.exit(1)
+PY
+)
 
 CALRS_MOUNT="/var/lib/calrs"
 
@@ -241,7 +307,8 @@ state_add() {
 db_bookings() {
   printf '%s\n' \
     "select json_object('id',b.id,'name',b.guest_name,'email',b.guest_email," \
-    "'tz',b.guest_timezone,'start',b.start_at,'event',coalesce(e.title,''))" \
+    "'tz',b.guest_timezone,'start',b.start_at,'event',coalesce(e.title,'')," \
+    "'notes',coalesce(b.notes,''))" \
     "from bookings b left join event_types e on e.id=b.event_type_id" \
     "where b.status='confirmed' order by b.created_at, b.id;" \
     | helper_sh ro "apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 ${DB_FILE}" 2>/dev/null \
@@ -421,12 +488,14 @@ ensure_joined() {
   return 1
 }
 
-# send_booking <booking-id> — POST the notification as m.room.message.
-# PUT with the booking id as txnId makes retries idempotent (server-side
-# dedupe); body travels via a 0600 temp file.
+# send_booking <booking-id> <json-row> — POST the notification (with the
+# AI meeting-prep brief section) as m.room.message. PUT with the booking
+# id as txnId makes retries idempotent (server-side dedupe); bodies
+# travel via 0600 temp files.
 send_booking() {
-  local bid="$1" msg f
-  msg="$(booking_message "$2")"
+  local bid="$1" row="$2" msg f brief
+  brief="$(ai_brief "$row" || true)"
+  msg="$(booking_message "$row" "$brief")"
   f="$(scratch_file)" || { err "no scratch file for message body"; return 1; }
   jq -n --arg body "$msg" '{msgtype:"m.text", body:$body}' >"$f"
   if mx_req PUT "/_matrix/client/v3/rooms/$(urlenc "$ROOM_ID")/send/m.room.message/bnotify-$(urlenc "$bid")" "$f"; then
@@ -437,9 +506,11 @@ send_booking() {
   return 1
 }
 
-# booking_message <json-row> — render the notification body
+# booking_message <json-row> [brief] — render the notification body; the
+# optional second argument (AI meeting-prep brief) is appended as its own
+# section when non-empty
 booking_message() {
-  local row="$1" name email tz start event
+  local row="$1" brief="${2:-}" name email tz start event
   name="$(jq -r '.name' <<<"$row")"
   email="$(jq -r '.email' <<<"$row")"
   tz="$(jq -r '.tz' <<<"$row")"
@@ -447,6 +518,97 @@ booking_message() {
   event="$(jq -r '.event // ""' <<<"$row")"
   printf '📅 New calrs booking confirmed\nGuest: %s <%s>\nEvent: %s\nWhen: %s (%s)\nBooking: %s\n' \
     "$name" "$email" "${event:-—}" "$start" "$tz" "$(jq -r '.id' <<<"$row")"
+  if [[ -n "$brief" ]]; then
+    printf '\n🤖 Meeting-Prep (%s):\n%s\n' "$LLM_MODEL" "$brief"
+  fi
+}
+
+# ── AI meeting-prep brief (LiteLLM gateway, OpenAI-compatible) ─────────────
+# The short prompt answers in <10 s live. The call is best-effort: ANY
+# failure (key unset, network unreachable, timeout, malformed/empty
+# answer) degrades to a static agenda built from the booking fields, so
+# the Matrix notification itself never depends on the LLM.
+
+# llm_complete <body-file> — POST the chat-completions JSON body to the
+# gateway through the python helper container on LLM_NETWORK (the host
+# cannot reach litellm:4000). stdout = assistant message content only;
+# diagnostics go to stderr; non-zero on any failure.
+llm_complete() {
+  local out
+  out="$(docker run --rm -i --network "$LLM_NETWORK" \
+      -e LITELLM_MASTER_KEY \
+      -e LLM_GATEWAY_URL="$LLM_GATEWAY_URL" \
+      -e LLM_TIMEOUT="$LLM_TIMEOUT" \
+      "$LLM_HELPER_IMAGE" python3 -c "$LLM_PY" <"$1")" || return 1
+  [[ -n "$out" ]] || return 1
+  printf '%s\n' "$out"
+}
+
+# fallback_brief <json-row> — static agenda used whenever the gateway is
+# unavailable; mirrors the LLM output contract (Kontext line + Agenda
+# bullets) so downstream rendering needs no branching
+fallback_brief() {
+  local row="$1" name email tz start event notes
+  name="$(jq -r '.name // ""' <<<"$row")"
+  email="$(jq -r '.email // ""' <<<"$row")"
+  tz="$(jq -r '.tz // ""' <<<"$row")"
+  start="$(jq -r '.start // ""' <<<"$row")"
+  event="$(jq -r '.event // ""' <<<"$row")"
+  notes="$(tr '\n\t' '  ' <<<"$(jq -j '.notes // ""' <<<"$row")")"
+  notes="$(printf '%s' "$notes" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  notes="${notes:0:200}"
+  printf 'Kontext: %s%s (Zeitzone %s) — %s am %s.\n' \
+    "${name:-Unbekannter Gast}" "${email:+ <$email>}" "${tz:-?}" \
+    "${event:-Termin}" "$start"
+  printf 'Agenda:\n'
+  printf -- '- Begrüßung und kurze Vorstellung\n'
+  if [[ -n "$notes" ]]; then
+    printf -- '- Ziele und Schwerpunkte klären (Gast-Notiz: %s)\n' "$notes"
+  else
+    printf -- '- Ziele und Erwartungen des Gasts klären\n'
+  fi
+  printf -- '- Offene Fragen sammeln\n'
+  printf -- '- Nächste Schritte und Termine vereinbaren\n'
+}
+
+# ai_brief <json-row> — one-line guest context + 3-5 agenda bullets for
+# the booking, generated by LLM_MODEL through the gateway. ALWAYS prints
+# a brief (static fallback on any failure) and returns 0 — callers never
+# need to branch.
+ai_brief() {
+  local row="$1" name email notes prompt body_file brief
+  name="$(jq -r '.name // ""' <<<"$row")"
+  email="$(jq -r '.email // ""' <<<"$row")"
+  notes="$(tr '\n\t' '  ' <<<"$(jq -j '.notes // ""' <<<"$row")")"
+  notes="$(printf '%s' "$notes" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  notes="${notes:0:300}"
+  if [[ -z "$LITELLM_MASTER_KEY" ]]; then
+    warn "LITELLM_MASTER_KEY unset — AI brief falls back to the static template"
+    fallback_brief "$row"
+    return 0
+  fi
+  prompt="$(printf 'Booking-Daten: Gast: %s%s; Zeitzone: %s; Termin: %s; Start: %s; Notizen: %s' \
+    "${name:-?}" "${email:+ <$email>}" \
+    "$(jq -r '.tz // ""' <<<"$row")" \
+    "$(jq -r '.event // ""' <<<"$row")" \
+    "$(jq -r '.start // ""' <<<"$row")" \
+    "${notes:-keine}")"
+  body_file="$(scratch_file)" || { fallback_brief "$row"; return 0; }
+  jq -n --arg model "$LLM_MODEL" \
+    --arg sys 'Du bereitest das Meeting-Vorab-Briefing für ein Support-Team auf. Antworte auf Deutsch und NUR im geforderten Format: eine Zeile Gästekontext mit Präfix "Kontext: ", dann eine Zeile "Agenda:" gefolgt von 3-5 Stichpunkten als Zeilen mit "- ". Plain text — keine Überschrift, keine Einleitung, kein Markdown.' \
+    --arg user "$prompt" \
+    '{model:$model, stream:false, messages:[{role:"system",content:$sys},{role:"user",content:$user}]}' \
+    >"$body_file" || { fallback_brief "$row"; return 0; }
+  if brief="$(llm_complete "$body_file")"; then
+    # normalize: drop blank lines, cap the section at 12 lines
+    brief="$(printf '%s\n' "$brief" | sed '/^[[:space:]]*$/d' | head -12)"
+    if [[ -n "$brief" ]]; then
+      printf '%s\n' "$brief"
+      return 0
+    fi
+  fi
+  warn "gateway call failed — using the static fallback brief"
+  fallback_brief "$row"
 }
 
 # pending_bookings — print confirmed bookings (JSON lines) that are NOT
@@ -560,7 +722,7 @@ cmd_dry_run() {
     while IFS= read -r row; do
       [[ -z "$row" ]] && continue
       printf '  ── booking %s ──\n' "$(jq -r '.id' <<<"$row")"
-      booking_message "$row" | sed 's/^/  │ /'
+      booking_message "$row" "$(ai_brief "$row")" | sed 's/^/  │ /'
     done <<<"$pending"
   fi
   return 0
@@ -603,6 +765,12 @@ cmd_check() {
   check "booking db readable (sqlite helper)" db_has_rows
   check "state file writable on calrs-data volume" state_probe
   check "homeserver reachable (/_matrix/client/versions)" hs_versions
+  check "LLM gateway reachable from ${LLM_NETWORK} (helper container)" llm_gateway_probe
+  if [[ -n "$LITELLM_MASTER_KEY" ]]; then
+    check "LLM gateway auth + model (${LLM_MODEL} listed)" llm_auth_probe
+  else
+    warn "check: LITELLM_MASTER_KEY unset — AI brief uses the static fallback template (not a failure)"
+  fi
   if mx_login_quiet; then
     ok "check: login (password auth)"
     logged_in=true
@@ -639,6 +807,29 @@ state_probe() {
     | helper_sh rw "cat > /data/.booking-notify-probe && rm -f /data/.booking-notify-probe"
 }
 hs_versions() { mx_code_probe_path "/_matrix/client/versions" 200; }
+
+# LLM gateway probes — through the same helper path as the real brief
+# (a container on LLM_NETWORK; the host cannot reach litellm:4000)
+llm_gateway_probe() {
+  docker run --rm --network "$LLM_NETWORK" \
+    -e LLM_BASE="$LLM_BASE" "$LLM_HELPER_IMAGE" \
+    python3 -c 'import os, urllib.request; urllib.request.urlopen(os.environ["LLM_BASE"] + "/health/liveliness", timeout=10)' \
+    >/dev/null 2>&1
+}
+llm_auth_probe() {
+  # authenticated /v1/models: verifies the bearer key AND that LLM_MODEL
+  # is actually served by the gateway
+  docker run --rm --network "$LLM_NETWORK" \
+    -e LITELLM_MASTER_KEY -e LLM_BASE="$LLM_BASE" -e LLM_MODEL="$LLM_MODEL" \
+    "$LLM_HELPER_IMAGE" \
+    python3 -c 'import os, urllib.request, json
+req = urllib.request.Request(os.environ["LLM_BASE"] + "/v1/models",
+    headers={"Authorization": "Bearer " + os.environ.get("LITELLM_MASTER_KEY", "")})
+r = urllib.request.urlopen(req, timeout=10)
+ids = [m.get("id") for m in json.loads(r.read().decode("utf-8")).get("data", [])]
+raise SystemExit(0 if os.environ.get("LLM_MODEL", "") in ids else 1)' \
+    >/dev/null 2>&1
+}
 mx_code_probe_path() {
   local path="$1" want="$2"
   local code
