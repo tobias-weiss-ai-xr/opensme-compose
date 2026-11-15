@@ -326,12 +326,12 @@ def imap_connect_and_login() -> imaplib.IMAP4:
         raise ImapError(
             f"📬 Postfach gerade nicht erreichbar ({IMAP_HOST}:{IMAP_PORT}) — später nochmal versuchen."
         ) from exc
-    password = IMAP_PASSWORD or MATRIX_PASSWORD   # account pw only a fallback:
+    pw = IMAP_PASSWORD or MATRIX_PASSWORD   # account pw only a fallback:
                                                   # the OIDC directory rejects it
-    if not password:
+    if not pw:
         raise ImapError(_IMAP_NO_CREDS)
     try:
-        typ, _ = conn.login(IMAP_USER, password)
+        typ, _ = conn.login(IMAP_USER, pw)
     except imaplib.IMAP4.error as exc:
         if "AUTHENTICATIONFAILED" in str(exc).upper():
             raise ImapError(_IMAP_AUTH_FAILED) from exc
@@ -473,7 +473,7 @@ def cmd_check() -> int:
         except Exception as exc:
             problems.append(f"gateway unreachable: {exc}")
     print(f"imap:       host={IMAP_HOST}:{IMAP_PORT} user={IMAP_USER} drafts={IMAP_DRAFTS} "
-          f"password={'set' if (IMAP_PASSWORD or MATRIX_PASSWORD) else 'MISSING'}")
+          f"pw={'set' if (IMAP_PASSWORD or MATRIX_PASSWORD) else 'MISSING'}")
     try:
         conn = imap_connect_and_login()
         try:
