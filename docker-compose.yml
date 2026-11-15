@@ -455,10 +455,13 @@ services:
       - "traefik.http.services.portal.loadbalancer.server.port=8080"
       # portal-web's routers (merged netns: portal-web attaches via
       # network_mode: "service:portal"; its labels moved here so traefik
-      # reaches the shared netns IP). Priority 10 shadows the Rust router
-      # on the same Host when the web profile is on.
+      # reaches the shared netns IP). Priority must beat the Rust router's
+      # rule-length default (~32) on the same Host — priority 10 LOST and
+      # the Rust page kept serving the live host (integrations campaign
+      # fix 2026-11-15): with 100 the Next app owns the Host and its
+      # catch-all proxies /api|/health|/metrics to the Rust backend.
       - "traefik.http.routers.portal-web.rule=Host(`${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}`)"
-      - "traefik.http.routers.portal-web.priority=10"
+      - "traefik.http.routers.portal-web.priority=100"
       - "traefik.http.routers.portal-web.tls=true"
       - "traefik.http.routers.portal-web.entrypoints=websecure"
       - "traefik.http.services.portal-web.loadbalancer.server.port=3000"
@@ -517,12 +520,24 @@ services:
       PORTAL_FEEDS: ${PORTAL_FEEDS:-}
       AI_API_URL: ${AI_API_URL:-}
       POLLS_ENABLED: ${POLLS_ENABLED:-}
+      # integrations campaign: LimeSurvey RPC creds (T5), broadcast switch (T4),
+      # LLM endpoint/model (T6 — empty = surfaces disabled, graceful 503)
+      SURVEYS_ADMIN_USER: ${SURVEYS_ADMIN_USER:-admin}
+      SURVEYS_ADMIN_PASSWORD: ${SURVEYS_ADMIN_PASSWORD:-}
+      SURVEYS_RPC_URL: ${SURVEYS_RPC_URL:-}
+      INTERCOM_BROADCAST: ${INTERCOM_BROADCAST:-}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
       # Portal sign-in for the authenticated surfaces (intercom/polls):
       # HMAC session key + the OIDC RP client registered by
       # scripts/zitadel-client.sh --app portal (rotation path: demo/demo-live).
       LOGIN_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:-}
       PORTAL_OIDC_CLIENT_ID: ${PORTAL_OIDC_CLIENT_ID:-}
       PORTAL_OIDC_CLIENT_SECRET: ${PORTAL_OIDC_CLIENT_SECRET:-}
+    volumes:
+      # broadcast fan-out mail leg shells out to this script (not in image;
+      # runner gets bash+python3 via Dockerfile apk line)
+      - ./scripts/broadcast-fanout.sh:/app/scripts/broadcast-fanout.sh:ro
     depends_on:
       portal:
         condition: service_healthy

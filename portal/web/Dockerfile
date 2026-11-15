@@ -21,6 +21,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# broadcast fan-out mail leg shells out to bash + python3 (smtp/smtplib)
+RUN apk add --no-cache bash python3
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 COPY --from=builder /app/public ./public
 # standalone output carries its own node_modules + .next
