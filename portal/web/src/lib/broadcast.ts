@@ -83,7 +83,7 @@ export function broadcastConfig(
     matrixPassword: env.MATRIX_PASSWORD || env.E2E_TESTUSER_PASSWORD || "eval2026",
     matrixRoom: env.MATRIX_ROOM || `#support:${domain}`,
     mailTo: env.BROADCAST_MAIL_TO || "",
-    smtpHost: env.BROADCAST_SMTP_HOST || "127.0.0.1",
+    smtpHost: env.BROADCAST_SMTP_HOST || "stalwart",
     smtpPort: env.BROADCAST_SMTP_PORT || "25",
     mailFrom: env.BROADCAST_MAIL_FROM || "",
     subject: env.BROADCAST_SUBJECT || "[openSME] Broadcast an alle",

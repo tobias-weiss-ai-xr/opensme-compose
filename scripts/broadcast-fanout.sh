@@ -2,11 +2,11 @@
 # scripts/broadcast-fanout.sh — Broadcast mail fanout via Stalwart SMTP
 # ══════════════════════════════════════════════════════════════════════
 # Sends one broadcast mail (BROADCAST_SUBJECT/BROADCAST_BODY) to all demo
-# users through the Stalwart SMTP listener (default 127.0.0.1:25). This
+# users through the Stalwart SMTP listener (default stalwart:25). This
 # is the mail leg of the portal broadcast fanout: the Next.js route
 # portal/web/src/app/api/broadcast/route.ts shells out to this script
-# (no python3/SMTP stack inside the portal-web image, which shares the
-# portal container's network namespace — hence 127.0.0.1 works).
+# (no python3/SMTP stack inside the portal-web image; stalwart is
+# reached by its compose-internal name, not 127.0.0.1).
 #
 # Modes:
 #   broadcast-fanout.sh            one send pass (apply); requires
@@ -163,7 +163,9 @@ done
 unset ENV_KEEP
 
 # ── defaults (complete even without any env file) ───────────────────────────
-BROADCAST_SMTP_HOST="${BROADCAST_SMTP_HOST:-127.0.0.1}"
+# stalwart is reachable on opensme-net (the portal-web container shares its
+# netns with the Rust portal, NOT with stalwart — so 127.0.0.1 is wrong).
+BROADCAST_SMTP_HOST="${BROADCAST_SMTP_HOST:-stalwart}"
 BROADCAST_SMTP_PORT="${BROADCAST_SMTP_PORT:-25}"
 BROADCAST_SUBJECT="${BROADCAST_SUBJECT:-[openSME] Broadcast an alle}"
 BROADCAST_BODY="${BROADCAST_BODY:-}"
