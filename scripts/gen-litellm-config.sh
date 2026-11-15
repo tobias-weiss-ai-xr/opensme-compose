@@ -20,10 +20,11 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${REPO_ROOT}/services/litellm/config.yaml"
-BASE="${LITELLM_UPSTREAM_BASE_URL:-http://192.168.42.20:4000}"
+BASE="${LITELLM_UPSTREAM_BASE_URL:-}"
 KEY="${LITELLM_UPSTREAM_API_KEY:-${LITELLM_API_KEY:-}}"
 FALLBACK_MODEL="${OLLAMA_MODEL:-llama3.2:1b}"
 
+[[ -n "$BASE" ]] || { echo "gen-litellm-config: need LITELLM_UPSTREAM_BASE_URL (operator LiteLLM proxy, see .env)" >&2; exit 1; }
 [[ -n "$KEY" ]] || { echo "gen-litellm-config: need LITELLM_UPSTREAM_API_KEY or LITELLM_API_KEY" >&2; exit 1; }
 
 python3 - "$BASE" "$KEY" "$FALLBACK_MODEL" > "${OUT}.tmp" <<'PY'

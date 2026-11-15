@@ -1,0 +1,62 @@
+# ── Global defaults ──────────────────────────────────
+# Inherited by every service in this file via: <<: *service-defaults
+x-service-defaults: &service-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+  init: true
+  security_opt:
+    - no-new-privileges:true
+
+# ── AI room bot — Matrix '!ai' answers via the LiteLLM gateway ──────────────
+# scripts/ai-room-bot.py watches #support:<matrix domain> and answers
+# '!ai <question>' by calling the LiteLLM gateway (opensme-litellm →
+# upstream models, ollama llama3.2:1b as fallback).
+#
+# Include via (canonical chain +):
+#   -f services/litellm.yml -f services/ai-bot.yml
+#
+# No traefik labels (listens to Matrix only), no tiles entry, no new
+# volumes (script is bind-mounted read-only) — backup.sh unaffected.
+#
+# Credentials reuse existing conventions:
+#   LITELLM_API_KEY  ← LITELLM_MASTER_KEY (gateway auth)
+#   MATRIX_PASSWORD  ← E2E_TESTUSER_PASSWORD (else eval2026 baseline),
+#                      same account convention as scripts/booking-notify.sh
+
+services:
+  ai-bot:
+    <<: *service-defaults
+    image: python:3.12-alpine
+    container_name: opensme-ai-bot
+    restart: unless-stopped
+    command: ["python3", "-u", "/usr/local/bin/ai-room-bot.py", "--serve"]
+    volumes:
+      - ./scripts/ai-room-bot.py:/usr/local/bin/ai-room-bot.py:ro
+    environment:
+      MATRIX_DOMAIN: ${MATRIX_DOMAIN:-matrix.home.opensme.graphwiz.ai}
+      MATRIX_USER: ${AI_BOT_MATRIX_USER:-testuser}
+      MATRIX_PASSWORD: ${E2E_TESTUSER_PASSWORD:-eval2026}
+      MATRIX_ROOM: ${AI_BOT_MATRIX_ROOM:-#support:matrix.home.opensme.graphwiz.ai}
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:-}
+      LITELLM_BASE: ${AI_BOT_LITELLM_BASE:-http://litellm:4000/v1}
+      AI_BOT_MODEL: ${AI_BOT_MODEL:-glm-5.3-flash}
+    healthcheck:
+      # trivial liveness: homeserver reachable from the container netns
+      test: ["CMD-SHELL", "python3 -c \"import os,urllib.request;urllib.request.urlopen('https://'+os.environ['MATRIX_DOMAIN']+'/_matrix/client/versions',timeout=6).read()\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - opensme-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M

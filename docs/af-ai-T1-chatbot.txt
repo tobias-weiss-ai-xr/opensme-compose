@@ -1,0 +1,88 @@
+T1-ai-chat-bot — Matrix '!ai' room bot via the LiteLLM gateway
+==============================================================
+Campaign: ai-integrations (agentflow) · recovered by hand after both af
+attempts died on worker-side LLM socket timeouts (litellm.APIConnectionError
+×21, no worktree writes ever produced) — implemented directly against the
+validated recovery playbook.
+
+DELIVERABLES
+------------
+1. scripts/ai-room-bot.py (~250 lines, stdlib-only: urllib/json/os/ssl)
+   Modes:
+     --serve          long-poll /_matrix/client/v3/sync (29 s), answer
+                      '!ai <question>' in the configured room
+     --ask QUESTION   one-shot gateway answer to stdout
+     --check          audit: homeserver reach, Matrix login, room resolve,
+                      gateway /v1/models + target model presence
+   Key behaviours:
+     * v3 client API ONLY — Synapse 1.162.0 rejects legacy /r0/ (and /r3/
+       does not exist); mirrors scripts/booking-notify.sh conventions.
+     * Account: MATRIX_USER default testuser — the SAME account
+       booking-notify.sh posts with. Announcements are recognised by their
+       '📅' body prefix and never answered; own events (sender == login
+       user_id) are ignored → no reply feedback loop.
+     * Reply send: PUT .../send/m.room.message/<uuid-txnId> (idempotent).
+     * Gateway: POST {LITELLM_BASE}/chat/completions Bearer LITELLM_API_KEY,
+       model AI_BOT_MODEL (default glm-5.3-flash), stream:false (fast
+       upstream; the slow-path ollama fallback stays behind the gateway's
+       default_fallbacks = llama3.2:1b).
+     * Secrets only via env, never printed; tokens held in memory.
+
+2. services/ai-bot.yml — python:3.12-alpine, bind-mounts the script
+   :ro to /usr/local/bin/ai-room-bot.py, opensme-net member, x-service-
+   defaults anchor (json-file 50m×3, init, no-new-privileges), 0.5 CPU /
+   256 MB, trivial healthcheck (homeserver /_matrix/client/versions from
+   the container netns). Env wiring reuses existing keys:
+     LITELLM_API_KEY  ← ${LITELLM_MASTER_KEY:-}
+     MATRIX_PASSWORD  ← ${E2E_TESTUSER_PASSWORD:-eval2026}  (booking-notify
+                        convention; deployed .env needs NO new keys)
+   NO traefik labels, NO tiles entry, NO new volumes → backup.sh and the
+   portal function catalog are untouched by design.
+
+LIVE PROOF (2026-11-15, deployed stack)
+---------------------------------------
+* Container: opensme-ai-bot Up (healthy) within seconds; serve log:
+    ai-room-bot: serving as @testuser:matrix.home.opensme.graphwiz.ai in
+    !WnQcxON1h0KdG4dEYyRXqmYYKp1FmXx7SOLdAbRkV9A (model glm-5.3-flash …)
+    ai-room-bot: caught up with sync, listening for '!ai <question>'
+* --ask one-shot (docker exec): "Nenne in einem Satz die Hauptstadt von
+  Deutschland." → "Die Hauptstadt von Deutschland ist Berlin."
+* --check inside the container: matrix api reachable, login OK
+  (@testuser:…), room alias resolved, gateway OK (HTTP 200, 72 models,
+  glm-5.3-flash present) → check: OK
+* End-to-end round-trip in #support: @tweiss (2nd demo account, invited +
+  joined for the test) sent '!ai Nenne in einem Satz, wofür du gut bist.'
+  → bot answered as @testuser within ~10–20 s:
+    "Ich bin dein KI-Assistent im openSME-Portal und helfe dir bei Fragen
+     rund um die openSME Muster GmbH sowie bei allgemeinen Anliegen
+     schnell und präzise weiter."
+* compose config --quiet with the full -f chain incl. services/ai-bot.yml:
+  CONFIG-OK.
+
+ENV KEYS (defaults inline in ai-bot.yml; .env changes NOT required)
+-------------------------------------------------------------------
+  MATRIX_DOMAIN (default matrix.home.opensme.graphwiz.ai)
+  AI_BOT_MATRIX_USER (default testuser)
+  E2E_TESTUSER_PASSWORD (optional override for the bot account password)
+  AI_BOT_MATRIX_ROOM (default #support:matrix.home.opensme.graphwiz.ai)
+  LITELLM_MASTER_KEY (exists in deployed .env — becomes the gateway key)
+  AI_BOT_LITELLM_BASE (default http://litellm:4000/v1)
+  AI_BOT_MODEL (default glm-5.3-flash)
+
+OPS NOTES
+---------
+* The bot and booking-notify.sh share the testuser account by convention;
+  the '📅' prefix filter keeps announcements out of the Q&A loop.
+* Room membership: a DEMO account must be a member of #support before it
+  can use '!ai' (invites from testuser work; directory lookups 403 for
+  non-members — that is Matrix semantics, not a bot defect).
+* Restart the bot after changing AI_BOT_MODEL/LITELLM keys:
+  docker compose ... up -d ai-bot  (script is bind-mounted :ro — code
+  changes need a container restart, no image rebuild).
+
+GATE
+----
+python3 -m py_compile scripts/ai-room-bot.py  → OK
+--help / --ask / --check exercised live (see above)
+files: scripts/ai-room-bot.py, services/ai-bot.yml, docs/af-ai-T1-chatbot.txt
+GATE-T1-OK
