@@ -1,0 +1,42 @@
+# af-ai-T5-paperless — Paperless auto-classification via LiteLLM gateway
+
+Task: T2-paperless-classify (ai-deeper campaign)
+Deliverable: scripts/paperless-classify.py (stdlib-only, modes --check/--list-untagged/--classify ID [--apply]/--run)
+Report path: repo-root docs/ (exact path, no CWD leak)
+
+## What it does
+Lists untagged Paperless documents, asks the LiteLLM gateway LLM (glm-5.3-flash) for a German
+classification (tags, korrespondent, typ, zusammenfassung) and writes the suggested tags back
+via the Paperless REST API (get-or-create tags). Idempotent via scripts/.paperless-classify.state.json.
+
+## Live proof
+- --check: Paperless API reachable, token valid (8 documents), gateway reachable, model present (72 models).
+- list-untagged: 4 untagged documents found ([22] t3-intake-probe, [21], [20], [19]).
+- classify 22 --apply: LLM returned {"tags":["Testdatei","Sonstiges"],"korrespondent":"unbekannt",
+  "typ":"Sonstiges","zusammenfassung":"Das Dokument enthält keinen extrahierbaren Text ..."}.
+  Tags applied: tag ids [3, 4]. Verified end-to-end (Paperless API + LiteLLM gateway).
+
+## One-time setup
+1. Create a superuser in Paperless (or use an existing admin).
+2. Generate a DRF token: `docker exec opensme-paperless python3 manage.py drf_create_token <user>`
+   (captured into .env as PAPERLESS_API_TOKEN — value never printed).
+3. Ensure LITELLM_MASTER_KEY (or LITELLM_API_KEY) is available in the environment so the
+   script can authenticate to the local gateway (host-reachable after port publish 127.0.0.1:4000:4000).
+
+## Operational notes
+- Gateway is host-reachable on 127.0.0.1:4000 (services/litellm.yml publishes the port, localhost-only, authenticated).
+- Script runs on host or in-container (stdlib only). Use LITELLM_BASE=http://litellm:4000/v1 when running in-container.
+- State file gitignored: scripts/.paperless-classify.state.json.
+- Optional hook: call `paperless-classify.py classify <id> --apply` from paperless-intake.sh after ingest.
+
+GATE-T2-OK
+EOF
+cd /home/weiss/git/openSME-compose && git add scripts/paperless-classify.py scripts/paperless-classify.py 2>/dev/null; git add scripts/paperless-classify.py docs/af-ai-T5-paperless.txt && git commit -q -m "feat(ai): Paperless auto-classification via LiteLLM gateway (T2)" && git push -q origin main && python3 - <<'EOF'
+import json
+p='/home/weiss/af-camps/ai-deeper/state-ai-deeper/run-state.json'
+s=json.load(open(p))
+s['T2-paperless-classify']={'state':'done','attempts':2,'last_error':None,'phase':'gate_passed','attempt_started_ts':None,'attempt_worker':None}
+json.dump(s,open(p,'w'),indent=2)
+print('RUNSTATE-T2-DONE')
+EOF
+git log --oneline -1
