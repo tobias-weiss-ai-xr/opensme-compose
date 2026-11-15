@@ -1,0 +1,130 @@
+AF AI T4 — bot join-on-invite + Notes (impress) AI discovery (2026-11-15)
+
+PART A — ai-room-bot.py join-on-invite (implemented)
+════════════════════════════════════════════════════
+scripts/ai-room-bot.py, --serve mode:
+
+  join_room(token, room_id)
+      POST /_matrix/client/v3/join/<roomId> (Synapse 1.162.0 v3 API, body {})
+      via http_json_tolerant; True only on HTTP 200 + room_id in the answer.
+      Failures are logged to stdout, never crash the loop.
+
+  handle_invite(token, own_user_id, room_id, served)
+      Called for every pending invite of the bot's own account. Joins the
+      room, adds it to the served set and posts a one-line German hello
+      ("🤖 KI-Bot ist jetzt auch in diesem Raum: !ai …, !entwurf …, !brief")
+      so the join is user-visible. Re-invites of already-served rooms are
+      ignored (idempotent).
+
+  process_sync(token, own_user_id, data, served, catchup=False)
+      One place for sync handling: invites come from
+      rooms.invite.<roomId>.invite_state.events (stripped m.room.member,
+      membership=invite, state_key == own user_id — invites for OTHER users
+      are ignored); messages from rooms.join.<roomId>.timeline for every
+      room in the served set (no longer only the bootstrap MATRIX_ROOM).
+      catchup=True (the boot snapshot) processes invites ONLY — its
+      limit-1 timeline would otherwise replay the last historical message
+      on every restart.
+
+  cmd_serve()
+      served = {MATRIX_ROOM} at boot; process_sync(initial, catchup=True)
+      picks up invites pending while the bot was down; the long-poll loop
+      (29 s) passes every sync response through process_sync. Loop-safety
+      unchanged: own events ignored, 📅 booking announcements ignored.
+
+Verified logic with an offline harness: invite-for-own-user → join+hello+add;
+invite-for-other-user → ignored; join failure → room not added, loop intact;
+catchup → no message replay; live sync serves all joined rooms.
+
+PART B — La Suite impress (notes.home) native AI discovery
+══════════════════════════════════════════════════════════
+Question: does lasuite/impress-backend (+frontend) have native AI hooks?
+
+ANSWER: YES — impress ships a complete native AI stack. It is DISABLED in
+our deployment (not even configured, master switch defaults to False).
+
+Evidence (opensme-notes-backend = lasuite/impress-backend:latest, live
+container inspected 2026-11-15):
+
+  1. Settings (image /app/impress/settings.py, Production configuration):
+       AI_FEATURE_ENABLED            bool, default False  ← MASTER SWITCH
+       AI_FEATURE_LEGACY_ENABLED     bool, default True   (stable editor AI)
+       AI_FEATURE_BLOCKNOTE_ENABLED  bool, default False  (BlockNote AI UI;
+                                     "far better UI but more flaky", ⚠ AGPL
+                                     license — comply with Blocknote license)
+       AI_ALLOW_REACH_FROM           public|authenticated|restricted,
+                                     default "authenticated"
+       AI_MODEL                      model id for the provider call
+                                     (environ_name="AI_MODEL", default None)
+       OPENAI_SDK_BASE_URL           OpenAI-compatible endpoint (retrocompat
+                                     alias: AI_BASE_URL)
+       OPENAI_SDK_API_KEY            its key (retrocompat alias: AI_API_KEY)
+       MISTRAL_SDK_BASE_URL          Mistral AI endpoint (alternative provider)
+       MISTRAL_SDK_API_KEY           its key
+       AI_BOT                        identity dict, default name "Docs AI",
+                                     color #8bc6ff
+       AI_DOCUMENT_RATE_THROTTLE_RATES  5/min, 100/hour, 500/day per document
+
+  2. Backend code:
+       core/services/ai_services/legacy.py   OpenAI SDK (openai.OpenAI,
+             optionally langfuse.openai for tracing) OR mistralai client;
+             canned AI_ACTIONS: prompt, correct, rephrase, summarize,
+             beautify, emojify + AI_TRANSLATE; provider chosen by whichever
+             SDK key is set (MISTRAL first, else OPENAI); both paths use
+             settings.AI_MODEL.
+       core/services/ai_services/blocknote.py  pydantic_ai agent
+             (OpenAIChatModel | MistralModel) behind the BlockNote AI UI.
+       core/api/viewsets.py — DRF document actions:
+             POST /api/v1.0/documents/<doc_id>/ai-proxy
+               (needs AI_FEATURE_ENABLED + AI_FEATURE_BLOCKNOTE_ENABLED)
+             POST /api/v1.0/documents/<doc_id>/ai-transform   (legacy)
+             POST /api/v1.0/documents/<doc_id>/ai-translate   (legacy)
+               (both need AI_FEATURE_ENABLED + AI_FEATURE_LEGACY_ENABLED;
+               tests: core/tests/documents/test_api_documents_ai_*.py)
+
+  3. Frontend (opensme-notes-frontend = lasuite/impress-frontend:latest):
+       Next.js chunks already contain the full AI UI (ai-menu,
+       ai-actions-menu, ai-transform, ai-translate, ai-writing,
+       ai-suggestion-menu, ai-toolbar-button…) — it activates itself from
+       the backend's config flags once the feature is enabled; no frontend
+       change needed.
+
+  4. Current deployment state — NO AI configuration anywhere:
+       services/notes.yml: no AI_*/OPENAI_*/MISTRAL_* env for notes-backend.
+       Live container env: no AI keys (only OIDC/S3/Celery/Collaboration
+       settings). AI_FEATURE_ENABLED unset → False → all AI endpoints
+       short-circuit; frontend AI menu hidden.
+
+RECOMMENDATION — wire the native hooks to our LiteLLM gateway
+═════════════════════════════════════════════════════════════
+The impress AI stack speaks OpenAI-compatible out of the box, and our
+gateway (http://litellm:4000/v1) is exactly that. Native wiring is a pure
+compose/env change in services/notes.yml (notes-backend environment), no
+image or code change:
+
+    AI_FEATURE_ENABLED: "true"          # master switch
+    AI_FEATURE_LEGACY_ENABLED: "true"   # default already true
+    # AI_FEATURE_BLOCKNOTE_ENABLED stays false for now (flaky + AGPL)
+    OPENAI_SDK_BASE_URL: http://litellm:4000/v1
+    OPENAI_SDK_API_KEY: ${LITELLM_API_KEY:?LITELLM_API_KEY must be set in .env}
+    AI_MODEL: glm-5.3-flash             # or a notes-specific cheap model
+    # AI_ALLOW_REACH_FROM defaults to "authenticated" — matches SSO-only notes
+
+This gives in-editor summarize/correct/rephrase/translate/emojify via the
+existing AI menu, authenticated through Zitadel SSO, throttled per document
+(5/min). Model must exist in the LiteLLM catalog (bot/portal already use
+glm-5.3-flash).
+
+Bot-side summary via the bot (portal-side '!ai' summarizing a pasted note)
+is only a FALLBACK if AI_FEATURE_ENABLED stays off — the native path is
+strictly better: it is in-context (selection-aware), per-user authenticated
+and already localized in the UI.
+
+Verification recipe once wired:
+  1. docker compose --profile notes up -d (recreate notes-backend)
+  2. curl https://notes.<domain>/api/v1.0/config/ | grep -i ai  → flags true
+  3. Open a note, AI menu → "Zusammenfassen" → answer comes from the
+     gateway (litellm logs show the completion).
+
+Bot change of this task is independent: join-on-invite makes !ai available
+in every room the bot is invited to, including a notes-discussion room.

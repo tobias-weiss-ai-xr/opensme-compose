@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """scripts/ai-room-bot.py — openSME Matrix room bot ('!ai') via the LiteLLM gateway.
 
-A stdlib-only (urllib, no pip deps) bot that watches the Matrix support room
-and answers '!ai <question>' messages by calling the LiteLLM gateway
+A stdlib-only (urllib, no pip deps) bot that watches Matrix rooms and answers
+'!ai <question>' messages by calling the LiteLLM gateway
 (opensme-litellm → upstream models, ollama llama3.2:1b as fallback).
+
+Beyond the configured start room (MATRIX_ROOM, default #support) the bot
+ACCEPTS INVITES: a pending m.room.member membership=invite for its own
+account is answered with POST /_matrix/client/v3/join/<roomId> and the room
+is added to the served set — !ai/!entwurf/!brief then work there too.
 
 Design (verified against the live stack, 2026-11-15):
   * Matrix client API: ONLY /_matrix/client/v3/... — Synapse 1.162.0 on this
@@ -195,6 +200,59 @@ def send_text(token: str, room_id: str, text: str) -> None:
     http_json_tolerant("PUT", f"{MATRIX_HOMESERVER}/_matrix/client/v3/rooms/"
                        f"{urllib.parse.quote(room_id, safe='')}/send/m.room.message/{txn}",
                        bearer=token, body={"msgtype": "m.text", "body": text}, timeout=15)
+
+
+def join_room(token: str, room_id: str) -> bool:
+    """POST /join/<roomId> — accept a pending invite; True on HTTP 200 + room_id."""
+    code, data = http_json_tolerant(
+        "POST", f"{MATRIX_HOMESERVER}/_matrix/client/v3/join/{urllib.parse.quote(room_id, safe='')}",
+        bearer=token, body={}, timeout=15)
+    if code == 200 and isinstance(data, dict) and data.get("room_id"):
+        return True
+    err = data.get("errcode") if isinstance(data, dict) else None
+    print(f"ai-room-bot: join {room_id} failed (HTTP {code} {err})", flush=True)
+    return False
+
+
+JOIN_HELLO = ("🤖 KI-Bot ist jetzt auch in diesem Raum: !ai <frage>, "
+              "!entwurf <empfänger>: <stichpunkte>, !brief")
+
+
+def handle_invite(token: str, own_user_id: str, room_id: str, served: set[str]) -> None:
+    """Invite for the bot account → join, serve the room, announce once."""
+    if room_id in served:
+        return
+    if not join_room(token, room_id):
+        return                      # keep serving the rooms we already have
+    served.add(room_id)
+    print(f"ai-room-bot: joined invited room {room_id} — now serving", flush=True)
+    send_text(token, room_id, JOIN_HELLO)
+
+
+def process_sync(token: str, own_user_id: str, data: dict, served: set[str],
+                 catchup: bool = False) -> None:
+    """Handle one sync response: invites for own account + served-room messages.
+
+    catchup=True (the timeout=0 boot snapshot) processes invites ONLY — its
+    timeline carries the last historical message of each room, and answering
+    that on every restart would replay stale conversations.
+    """
+    rooms = data.get("rooms") or {}
+    for iroom, invite_block in (rooms.get("invite") or {}).items():
+        events = ((invite_block.get("invite_state") or {}).get("events")) or []
+        for ev in events:
+            if (ev.get("type") == "m.room.member"
+                    and (ev.get("content") or {}).get("membership") == "invite"
+                    and ev.get("state_key") == own_user_id):
+                handle_invite(token, own_user_id, iroom, served)
+                break
+    if catchup:
+        return
+    for jroom, room in (rooms.get("join") or {}).items():
+        if jroom not in served:
+            continue
+        for ev in (room.get("timeline") or {}).get("events") or []:
+            handle_event(token, own_user_id, jroom, ev)
 
 
 # ── LiteLLM gateway ─────────────────────────────────────────────────────────
@@ -444,11 +502,13 @@ def cmd_check() -> int:
 def cmd_serve() -> int:
     token, user_id = matrix_login()
     room_id = resolve_room(token)
+    served: set[str] = {room_id}          # grows with every accepted invite
     print(f"ai-room-bot: serving as {user_id} in {room_id} (model {AI_BOT_MODEL} @ {LITELLM_BASE})", flush=True)
 
     _, initial = http_json("GET", f"{MATRIX_HOMESERVER}/_matrix/client/v3/sync"
                            f"?timeout=0&filter={{\"room\":{{\"timeline\":{{\"limit\":1}}}}}}", bearer=token, timeout=60)
     since = initial.get("next_batch")
+    process_sync(token, user_id, initial, served, catchup=True)   # invites pending at boot
     print("ai-room-bot: caught up with sync, listening for '!ai <question>', '!entwurf …', '!brief'", flush=True)
 
     while True:
@@ -457,12 +517,7 @@ def cmd_serve() -> int:
                                 f"?timeout={SYNC_POLL_MS}&since={urllib.parse.quote(since, safe='')}",
                                 bearer=token, timeout=SYNC_POLL_MS // 1000 + 30)
             since = data.get("next_batch", since)
-            joined = (data.get("rooms") or {}).get("join") or {}
-            for rroom, room in joined.items():
-                if rroom != room_id:
-                    continue
-                for ev in (room.get("timeline") or {}).get("events") or []:
-                    handle_event(token, user_id, room_id, ev)
+            process_sync(token, user_id, data, served)
         except KeyboardInterrupt:
             print("ai-room-bot: bye")
             return 0
