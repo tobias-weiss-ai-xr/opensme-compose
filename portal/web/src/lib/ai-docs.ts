@@ -3,7 +3,7 @@
  * runAiHelper-style core behind the route, framework-free and directly
  * unit-testable with a stubbed global fetch (ai-docs.test.ts).
  *
- * Pipeline: OLLAMA_URL gate → {path, question?} validation → WebDAV
+ * Pipeline: AI gate → {path, question?} validation → WebDAV
  * download via lib/clouddav.ts → text extraction (422 for binaries /
  * files without a text layer) → German instruction → Ollama chat →
  * shaped {status, payload}. Every failure comes back as a plain
@@ -12,7 +12,7 @@
 import {
   aiEnabled,
   LlmError,
-  ollamaChat,
+  aiChat,
   type ChatMessage,
 } from "@/lib/llm";
 import {
@@ -114,7 +114,7 @@ export async function runDocAnalysis(input: AiDocsRequest): Promise<AiDocsResult
   }
 
   try {
-    const answer = await ollamaChat(
+    const answer = await aiChat(
       docMessages({ name: file.name, text: file.text, question }),
     );
     return { status: 200, payload: { answer } };
