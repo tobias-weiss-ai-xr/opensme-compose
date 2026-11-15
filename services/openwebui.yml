@@ -35,6 +35,8 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     container_name: opensme-openwebui
     restart: unless-stopped
+    extra_hosts:
+      - "${ZITADEL_DOMAIN:-auth.home.opensme.graphwiz.ai}:host-gateway"
     volumes:
       - openwebui-data:/app/backend/data
     environment:
@@ -44,6 +46,16 @@ services:
       ENABLE_OLLAMA_API: "false"
       WEBUI_URL: ${WEBUI_URL:-https://ai.${OPENSME_DOMAIN:-home.opensme.graphwiz.ai}}
       ENABLE_SIGNUP: ${OPENWEBUI_ENABLE_SIGNUP:-true}
+      # SSO via Zitadel (OIDC). Callback path must match the Zitadel app's
+      # redirect URI: https://ai.<domain>/oauth/oidc/callback
+      ENABLE_OAUTH_SIGNUP: ${ENABLE_OAUTH_SIGNUP:-true}
+      OAUTH_MERGE_ACCOUNTS_BY_EMAIL: ${OAUTH_MERGE_ACCOUNTS_BY_EMAIL:-true}
+      OAUTH_PROVIDER_NAME: ${OAUTH_PROVIDER_NAME:-oidc}
+      OAUTH_CLIENT_ID: ${OPENWEBUI_OAUTH_CLIENT_ID:?OPENWEBUI_OAUTH_CLIENT_ID must be set in .env}
+      OAUTH_CLIENT_SECRET: ${OPENWEBUI_OAUTH_CLIENT_SECRET:?OPENWEBUI_OAUTH_CLIENT_SECRET must be set in .env}
+      OPENID_PROVIDER_URL: ${OPENID_PROVIDER_URL:?OPENID_PROVIDER_URL must be set in .env}
+      OAUTH_SCOPES: ${OAUTH_SCOPES:-openid email profile}
+      OAUTH_CODE_CHALLENGE_METHOD: ${OAUTH_CODE_CHALLENGE_METHOD:-S256}
       TZ: ${TZ:-Europe/Berlin}
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8080/health || exit 1"]
