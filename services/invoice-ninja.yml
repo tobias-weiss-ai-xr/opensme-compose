@@ -122,8 +122,15 @@ services:
       REQUIRE_CONFIRMATION: "false"
       SET_UNCONFIRMED: "true"
       SELF_UPDATE: "false"
-      # Session driver: redis for shared cache across fpm workers
+      # Session driver: redis for shared cache across fpm workers.
+      # redis shares postgres's netns and requires auth — REDIS_HOST must be
+      # set explicitly or Laravel defaults to 127.0.0.1 (nothing listens
+      # there in this netns; a fresh container without a baked .env would
+      # crash-loop on every cache/migration call).
       SESSION_DRIVER: redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       SESSION_LIFETIME: "1440"  # 24 hours in minutes
       SESSION_DOMAIN: ".${OPENSME_DOMAIN:-opensme.graphwiz.ai}"
       SESSION_SECURE_COOKIE: "true"
@@ -201,8 +208,12 @@ services:
       DB_PASSWORD: ${INVOICENINJA_DB_PASSWORD:?INVOICENINJA_DB_PASSWORD must be set in .env}
       DB_CONNECTION: mysql
       QUEUE_CONNECTION: database
-      # Session and cache: use redis like main fpm container
+      # Session and cache: use redis like main fpm container (see the
+      # REDIS_HOST note there)
       SESSION_DRIVER: redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       CACHE_DRIVER: redis
       # Mail settings (same as fpm)
       MAIL_MAILER: smtp
