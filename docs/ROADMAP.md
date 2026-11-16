@@ -49,6 +49,16 @@ Status and direction of the openSME Compose distribution.
 
 ## Backlog / ideas
 
+- **DSGVO Datenportabilität / personal data export (Art. 20)** — self-service
+  export of a user's personal data (identity profile, SOGo calendar + contacts
+  + mail, OpenCloud files, Matrix account data), authenticated, with a
+  documented structure, expiry + access control on the download, and a
+  documented retention/deletion policy. **Not started — intentionally
+  deferred.** The same feature is being designed for openEduSuite first
+  (intercom BFF, async export job, one-time signed download URL with TTL);
+  when that design lands, port the architecture and scope decisions over to
+  openSME-Compose. See openEduSuite `docs/superpowers/specs/*data-export*`
+  once written.
 - **Agentic AI integration** — remaining sagas/epics (AS1–AS6, AD–AH); the
   blueprint lives in `docs/AGENTIC-AI.md`, the opt-in self-maintenance gate is
   `make agentic-gate` (`AGENTIC_STRICT=1`).
