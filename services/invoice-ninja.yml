@@ -167,9 +167,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # fpm image: no HTTP on :9000 (FastCGI) — check both process and
-      # that the artisan config cache is current (signals Laravel booted)
-      test: ["CMD-SHELL", "pgrep -f php-fpm > /dev/null && test -f /var/www/app/bootstrap/cache/config.php"]
+      # fpm container shares invoiceninja-web's netns (network_mode), so probe
+      # the full nginx+fpm stack over HTTP — same pattern as invoiceninja-web.
+      # The old `test -f bootstrap/cache/config.php` clause flagged this
+      # container unhealthy forever although php-fpm ran and the app answered
+      # (Laravel's cached config is optional, the entrypoint may skip it).
+      test: ["CMD-SHELL", "pgrep -f php-fpm > /dev/null && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -q --spider -O /dev/null http://127.0.0.1:80/health"]
       interval: 30s
       timeout: 5s
       retries: 5

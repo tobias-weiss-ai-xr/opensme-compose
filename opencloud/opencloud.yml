@@ -180,11 +180,14 @@ services:
     entrypoint: ["/entrypoint.sh"]
     command: ["server"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200/health/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      # No in-container probe is possible on this image: /etc/group and
+      # /etc/passwd are absolute symlinks into /nix/store (nix-based image),
+      # which runc's openat2(RESOLVE_BENEATH) rejects — EVERY docker exec /
+      # healthcheck fails with "openat etc/group: path escapes from parent"
+      # (rc=126), even /bin/busybox as uid 0. The app itself (static Go) runs
+      # fine, and edge routing uses the file-provider static IP below (not the
+      # docker provider), so container health is monitored externally.
+      test: ["NONE"]
     # Static IP: the Traefik file provider (dynamic/cloud-csp.yml) pins
     # cloud.home to 172.19.0.17 (CSP override) — keep its frame-src in
     # sync with opencloud/csp.yaml. A dynamic renumber on recreate would
