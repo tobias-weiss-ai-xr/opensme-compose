@@ -43,6 +43,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import re
+
 from conftest import ROOT, Result
 
 
@@ -85,16 +87,50 @@ def main() -> bool:
             "incident emitted exactly this error on every login"
         )
 
-    # M4 — latency guard (edge probes + access-log durations)
+    # M4 — latency guard (edge probes + traefik edge-log durations)
     has_edge = "time_total" in text or "%{time_total}" in text
-    has_log_durations = "duration=" in text
-    if has_edge and has_log_durations:
-        result.ok("M4: latency guarded (edge probe timing + access-log durations)")
+    has_edge_log = "docker logs traefik" in text
+    if has_edge and has_edge_log:
+        result.ok("M4: latency guarded (edge probe timing + traefik edge-log durations)")
     else:
         result.fail(
             "suite-monitor.sh lacks latency guards (M4) — PROPFIND /dav "
             "requests ran 12-14s on 2026-11-18 with no signal (external "
             "prober only checks status codes)"
+        )
+
+    # M9 — request-latency signal must come from the TRAEFIK EDGE LOG,
+    # never from opencloud's own access-log durations.
+    #
+    # Why: the opencloud proxy accesslog (accesslog.go:40) reports
+    # duration ≈ AGE OF THE UPSTREAM TCP CONNECTION (traefik keep-alive
+    # pool), not request latency. Proven 2026-11-18 21:07Z: 30 parallel
+    # curl requests all answered in 0.03-0.35s (client) were logged by
+    # opencloud with duration=7.4-53.6s; traefik showed 0 entries ≥10s in
+    # every window where opencloud claimed 15-70s requests; debug traces
+    # show all internal processing in ms at the completion second.
+    # Every "slow burst" (17:17/17:26/17:47 + the C5 alerts built on
+    # them) was this artifact — there is no server-side cold start.
+    uses_opencloud_duration = re.search(
+        r"docker logs opensme-opencloud.*duration=", text, re.S
+    )
+    parses_edge_ms = bool(re.search(r"docker logs traefik", text)) and "ms" in text
+    if uses_opencloud_duration:
+        result.fail(
+            "suite-monitor.sh measures request latency from the opencloud "
+            "access-log duration= field (M9) — that field reports the AGE "
+            "OF THE UPSTREAM TCP CONNECTION (traefik keep-alive pool), not "
+            "request latency (2026-11-18 proof: client 0.03-0.35s vs "
+            "logged 7.4-53.6s). Use the traefik edge log instead"
+        )
+    elif parses_edge_ms:
+        result.ok("M9: request-latency signal = traefik edge log (not the "
+                  "opencloud connection-age artifact)")
+    else:
+        result.fail(
+            "suite-monitor.sh does not parse traefik edge-log request "
+            "durations (M9) — the edge log is the only truthful client-"
+            "perceived latency signal"
         )
 
     # M5 — container health

@@ -16,8 +16,14 @@
 #   C3 OIDC token type    — accessTokenType must be JWT(1) in the Zitadel
 #                           event store for every client in MONITOR_JWT_APPS
 #   C4 auth-error scan    — opencloud logs: opaque-token signatures in window
-#   C5 slow-request scan  — opencloud access-log duration= > MAX_API_SEC
-#                           (caught the 12-14s PROPFIND /dav/spaces regression)
+#   C5 slow-request scan  — traefik edge-log request durations > MAX_API_SEC
+#                           (opencloud's own access-log duration field is a
+#                            connection-age artifact, NOT latency: it reports
+#                            the age of the traefik keep-alive upstream
+#                            connection. Proven 2026-11-18: client 0.03-0.35s
+#                            vs opencloud-logged 7.4-53.6s, zero traefik
+#                            entries >=10s in the same windows. Never alert
+#                            on the opencloud access-log latency field.)
 #
 # Cron wiring (root):
 #   */5 * * * * /opt/opensme-compose/compose/scripts/suite-monitor.sh >> /var/log/opensme-suite-monitor.log 2>&1
@@ -30,7 +36,7 @@
 #   ALERT_TO         recipient (default tobias@tobias-weiss.org)
 #   WINDOW_MIN       log-scan window in minutes (default 10)
 #   MAX_EDGE_SEC     edge page-load budget seconds (default 5)
-#   MAX_API_SEC      opencloud request budget seconds (default 10)
+#   MAX_API_SEC       traefik edge request budget seconds (default 10)
 #   COOLDOWN_SEC     re-alert interval for the same failure (default 3600)
 #   MONITOR_JWT_APPS space-separated Zitadel CLIENT ids that must mint JWT
 #                    tokens (default: OC_OIDC_CLIENT_ID from .env)
@@ -190,22 +196,24 @@ else
     log "C4 ok: no auth errors in ${WINDOW_MIN}min"
 fi
 
-# C5 — opencloud slow-request scan within window
-slow=$(docker logs opensme-opencloud --since "$since" 2>&1 \
-    | grep "access-log" \
-    | awk -v max="$MAX_API_SEC" '
+# C5 — traefik edge slow-request scan within window. The traefik access
+# log duration is the truthful client-perceived latency (bytes fully
+# delivered to the browser). The opencloud proxy access-log CANNOT be
+# used here: its latency field reports the age of the upstream TCP
+# connection (traefik keep-alive pool), not request latency.
+slow=$(docker logs traefik --since "$since" 2>&1 \
+    | grep -E '"cloud-.*@file"' \
+    | grep -v 'notifications/sse' \
+    | awk -v max_ms="$((MAX_API_SEC * 1000))" '
         {
-            for (i = 1; i <= NF; i++) {
-                if ($i ~ /^duration=/) {
-                    d = substr($i, 10) + 0
-                    if (d > max) { print $0; break }
-                }
-            }
+            d = $NF
+            sub(/ms$/, "", d)
+            if (d+0 > max_ms) { print $(NF-2), $6, $7, d "ms" }
         }' | head -5)
 if [[ -n "$slow" ]]; then
-    fail "C5-slow-requests" "requests exceeded ${MAX_API_SEC}s in the last ${WINDOW_MIN}min: $(echo "$slow" | grep -oE 'duration=[0-9.]+ .*method=[A-Z]+ path=[^ ]+' | sed -E 's/line=[^ ]+ //' | tr '\n' '; ')"
+    fail "C5-slow-requests" "traefik edge requests exceeded ${MAX_API_SEC}s in the last ${WINDOW_MIN}min: $(echo "$slow" | tr '\n' '; ')"
 else
-    log "C5 ok: no requests over ${MAX_API_SEC}s in ${WINDOW_MIN}min"
+    log "C5 ok: no edge requests over ${MAX_API_SEC}s in ${WINDOW_MIN}min"
 fi
 
 # ── resolve ─────────────────────────────────────────────────────────
