@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sogo
-      POSTGRES_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo6_db}
+      POSTGRES_PASSWORD: ${SOGO_DB_PASSWORD:?SOGO_DB_PASSWORD must be set in .env}
       POSTGRES_DB: sogo
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -67,7 +67,7 @@ services:
       SOGO_P_DB_HOST: opensme-sogo6-postgres
       SOGO_P_DB_PORT: "5432"
       SOGO_P_DB_USER: sogo
-      SOGO_P_DB_PASS: ${SOGO_DB_PASSWORD:-CHANGEME_sogo6_db}
+      SOGO_P_DB_PASS: ${SOGO_DB_PASSWORD:?SOGO_DB_PASSWORD must be set in .env}
       SOGO_P_DB_NAME: sogo
       SOGO_P_DB_SSL: "false"
       SOGO_P_DB_ENC: utf8
@@ -85,7 +85,7 @@ services:
       SOGO_STALWART_SUBM_PORT: "587"
       # Admin / Secrets
       SOGO_SECRET_KEY: ${SOGO_SECRET_KEY:-0123456789abcdef0123456789abcdef01234567}
-      SOGO_P_ADMIN_PWD: ${SOGO_P_ADMIN_PWD:-CHANGEME_sogo}
+      SOGO_P_ADMIN_PWD: ${SOGO_P_ADMIN_PWD:?SOGO_P_ADMIN_PWD must be set in .env}
       SOGO_MAIL_IMAP_HOST: stalwart
       SOGO_MAIL_IMAP_PORT: "143"
       SOGO_MAIL_SMTP_HOST: stalwart

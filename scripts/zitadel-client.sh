@@ -517,118 +517,62 @@ app_token_type() {
   printf '%s' "${t:-unknown}"
 }
 
-enforce_token_type() {
-  # enforce_token_type PID APP_ID — force accessTokenType=$TOKEN_TYPE.
-  local pid="$1" app_id="$2" before after resp code
+# ── oidc_config enforcement (atomic JWT + allowlist + auth method) ──────────
+# Zitadel v4.19: flipping an existing app's token type via the GENERIC
+# PUT /management/v1/projects/{pid}/apps/{app_id} fails ('No changes'); the
+# dedicated PUT .../apps/{app_id}/oidc_config takes a FLAT body and does
+# the flip. It answers 200 or 204 (both fine); the only tolerated 4xx is
+# Zitadel's 'No changes' reply — an idempotent no-op.
+#
+# CRITICAL (R15, live 2026-11-18): this PUT treats ABSENT fields as
+# reset-to-default. Sequential single-field PUTs destroy each other — the
+# redirect-URIs PUT reset accessTokenType back to 0/OPAQUE right after the
+# token-type PUT had set JWT (event store: accessTokenType 1 at 16:47:35.141,
+# 0 at .242), and openCloud answered every /graph call with 'failed to
+# verify access token: invalid number of segments' -> 'Access denied'.
+# The enforcement MUST be ONE atomic PUT carrying accessTokenType +
+# redirectUris + postLogoutRedirectUris + authMethodType together.
+app_token_type() {
+  # app_token_type PID APP_ID → prints the app's current accessTokenType
+  local out t
+  out="$(api GET "/management/v1/projects/${1}/apps/${2}" 2>/dev/null || true)"
+  t="$(printf '%s' "$out" | jq -r '.app.oidcConfig.accessTokenType // .oidcConfig.accessTokenType // "unknown"' 2>/dev/null || true)"
+  printf '%s' "${t:-unknown}"
+}
+
+enforce_oidc_config() {
+  # enforce_oidc_config PID APP_ID — ONE atomic PUT with every field the
+  # running stack depends on (see the R15 comment above).
+  local pid="$1" app_id="$2"
+  local before body resp code auth_desc
   before="$(app_token_type "$pid" "$app_id")"
-  info "Access token type of app '${APP_NAME}': ${before} (target ${TOKEN_TYPE})"
-  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
-             "{\"accessTokenType\":\"${TOKEN_TYPE}\"}" 2>/dev/null || true)"
+  body="$(jq -nc \
+    --arg tokentype "$TOKEN_TYPE" \
+    --argjson r "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
+    --argjson l "$(printf '%s\n' "${POST_LOGOUT[@]}" | jq -R . | jq -s -c .)" \
+    --argjson pub "$( [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && echo true || echo false )" \
+    --argjson post "$( [[ "${USE_POST_AUTH:-0}" == 1 ]] && echo true || echo false )" \
+    '{ accessTokenType: $tokentype,
+       redirectUris: $r,
+       postLogoutRedirectUris: $l,
+       authMethodType: (if $pub then "OIDC_AUTH_METHOD_TYPE_NONE"
+                      elif $post then "OIDC_AUTH_METHOD_TYPE_POST"
+                      else "OIDC_AUTH_METHOD_TYPE_BASIC" end) }')"
+  auth_desc="BASIC"
+  [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]] && auth_desc="NONE (public/PKCE)"
+  [[ "${USE_POST_AUTH:-0}" == 1 ]] && auth_desc="POST (client_secret_post)"
+  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" "$body" 2>/dev/null || true)"
   code="$(api_http)"
-  after="$(app_token_type "$pid" "$app_id")"
   case "$code" in
     2??)
-      ok "Access token type enforced: ${before} -> ${after} (HTTP ${code})"
+      ok "oidc_config enforced atomically for '${APP_NAME}': tokens ${before} -> ${TOKEN_TYPE}, ${#REDIRECTS[@]} redirect URI(s), auth method ${auth_desc} (HTTP ${code})"
       ;;
     *)
       if [[ "$resp" == *"No changes"* ]]; then
-        ok "Access token type already ${after:-$TOKEN_TYPE} — Zitadel: 'no changes' (HTTP ${code})"
+        ok "oidc_config already enforced for '${APP_NAME}' (${TOKEN_TYPE} tokens, ${#REDIRECTS[@]} redirect URI(s), ${auth_desc}) — Zitadel: 'no changes'"
       else
-        err "Could not enforce access token type ${TOKEN_TYPE} (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
+        err "Could not enforce oidc_config (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
         err "JWKS-validating backends reject OPAQUE tokens — flip it manually via"
-        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
-        return 1
-      fi
-      ;;
-  esac
-}
-
-# ── redirect-URI enforcement (durable allowlist sync) ───────────────────────
-# An app's registered redirect allowlist can drift from what this script
-# computes — the sogo6-server derives its callback from the USER's login
-# domain (opensme.local) while OPENSME_DOMAIN on the public VPS is
-# opensme.graphwiz.ai, so a client registered with only the public-domain
-# callback makes Zitadel answer authorize with HTTP 400 "invalid_request:
-# The requested redirect_uri is missing in the client configuration"
-# (T1-SOGO). The same dedicated PUT .../oidc_config that flips the token
-# type also takes redirectUris; rewrite them to exactly the computed list on
-# every run so the allowlist and the running services stay in sync by
-# construction. Idempotent: an identical list answers 'No changes', which is
-# tolerated exactly like the token flip.
-enforce_redirect_uris() {
-  # enforce_redirect_uris PID APP_ID — force redirectUris=${REDIRECTS[*]}.
-  local pid="$1" app_id="$2"
-  local body resp code
-  body="$(jq -nc --argjson r "$(printf '%s\n' "${REDIRECTS[@]}" | jq -R . | jq -s -c .)" \
-             '{redirectUris: $r}')"
-  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
-             "$body" 2>/dev/null || true)"
-  code="$(api_http)"
-  case "$code" in
-    2??)
-      ok "Redirect URIs enforced for app '${APP_NAME}' (HTTP ${code})" ;;
-    *)
-      if [[ "$resp" == *"No changes"* ]]; then
-        ok "Redirect URIs already up to date for app '${APP_NAME}' — Zitadel: 'no changes' (HTTP ${code})"
-      else
-        err "Could not enforce redirect URIs (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
-        err "The app's allowlist may drift from what the running service emits — fix via"
-        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
-        return 1
-      fi
-      ;;
-  esac
-}
-
-# ── public (PKCE) auth-method enforcement ───────────────────────────────────
-enforce_auth_method_none() {
-  # enforce_auth_method_none PID APP_ID — force OIDC_AUTH_METHOD_TYPE_NONE
-  # (public client, PKCE) on an app. Used for the OpenCloud SPA: a
-  # confidential (BASIC) app makes the browser's code+PKCE token exchange
-  # fail with "invalid_client: empty client secret". Same endpoint and
-  # 200/204 or 'No changes' semantics as enforce_token_type.
-  local pid="$1" app_id="$2"
-  local resp code
-  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
-             '{"authMethodType":"OIDC_AUTH_METHOD_TYPE_NONE"}' 2>/dev/null || true)"
-  code="$(api_http)"
-  case "$code" in
-    2??)
-      ok "OpenCloud app is public/PKCE (auth method NONE) (HTTP ${code})" ;;
-    *)
-      if [[ "$resp" == *"No changes"* ]]; then
-        ok "OpenCloud app already public/PKCE — Zitadel: 'no changes' (HTTP ${code})"
-      else
-        err "Could not set OpenCloud auth method NONE (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
-        err "The OpenCloud SPA will fail OIDC login until the app is public — fix via"
-        err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
-        return 1
-      fi
-      ;;
-  esac
-}
-
-# ── client_secret_post auth-method enforcement (Socialite 'oidc' driver) ────
-enforce_auth_method_post() {
-  # enforce_auth_method_post PID APP_ID — force OIDC_AUTH_METHOD_TYPE_POST
-  # (confidential client posting its secret in the token request body). Used
-  # for Invoice Ninja: its Socialite 'oidc' provider (Laravel
-  # SocialiteProviders/Manager) sends client_secret in the form body, so a
-  # BASIC app would be answered with invalid_client at token exchange.
-  local pid="$1" app_id="$2"
-  local resp code
-  resp="$(api PUT "/management/v1/projects/${pid}/apps/${app_id}/oidc_config" \
-             '{"authMethodType":"OIDC_AUTH_METHOD_TYPE_POST"}' 2>/dev/null || true)"
-  code="$(api_http)"
-  case "$code" in
-    2??)
-      ok "Invoice Ninja app uses client_secret_post (auth method POST) (HTTP ${code})" ;;
-    *)
-      if [[ "$resp" == *"No changes"* ]]; then
-        ok "Invoice Ninja app already client_secret_post — Zitadel: 'no changes' (HTTP ${code})"
-      else
-        err "Could not set Invoice Ninja auth method POST (HTTP ${code}): $(printf '%s' "$resp" | head -c 200)"
-        err "Invoice Ninja OIDC login will fail until the app is POST — fix via"
         err "PUT ${IDP_URL}/management/v1/projects/${pid}/apps/${app_id}/oidc_config"
         return 1
       fi
@@ -802,27 +746,12 @@ done <<< "$(printf '%s' "$projects_json" | jq -r '.result[]?.id' 2>/dev/null || 
 
 if [[ -n "$FOUND_APP" ]]; then
   ok "OIDC app '${APP_NAME}' already registered (client id '${FOUND_CLIENT_ID:-?}', project '${FOUND_PROJECT}')"
-  # Durable enforcement: an app registered before the JWT default (or
-  # flipped by hand) may still carry Zitadel's OPAQUE tokens, which every
-  # JWKS-validating backend rejects — flip it here on every run instead
-  # of the manual/live-only fix of 2026-10-26.
-  enforce_token_type "$FOUND_PROJECT" "$FOUND_APP" || exit 1
-  # Durable allowlist sync: the redirect URIs a running service emits can
-  # drift from what was registered (T1-SOGO: sogo6 emits a .../callback/
-  # opensme.local redirect from testuser@opensme.local on the public VPS).
-  # Rewrite the allowlist to exactly the computed list on every run.
-  enforce_redirect_uris "$FOUND_PROJECT" "$FOUND_APP" || exit 1
-  # OpenCloud's SPA additionally requires the PUBLIC auth method (PKCE); a
-  # confidential/BASIC app makes its browser token exchange fail with
-  # "empty client secret". Enforce it here on every run.
-  if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
-    enforce_auth_method_none "$FOUND_PROJECT" "$FOUND_APP" || exit 1
-  fi
-  # Invoice Ninja's Socialite 'oidc' driver authenticates at the token
-  # endpoint with client_secret_post — a BASIC app would answer invalid_client.
-  if [[ "${USE_POST_AUTH:-0}" == 1 ]]; then
-    enforce_auth_method_post "$FOUND_PROJECT" "$FOUND_APP" || exit 1
-  fi
+  # Durable enforcement (atomic, R15): the app registered before the JWT
+  # default — or any drift since — is brought back to JWT tokens + the exact
+  # redirect allowlist + the right auth method in ONE PUT. Sequential
+  # single-field PUTs reset each other (absent field = reset-to-default),
+  # which left OPAQUE tokens live after the JWT flip on 2026-11-18.
+  enforce_oidc_config "$FOUND_PROJECT" "$FOUND_APP" || exit 1
   info "Client credentials in .env are the working ones — idempotent beyond the token type."
   exit 0
 fi
@@ -905,11 +834,7 @@ fi
 new_app_id="$(api POST "/management/v1/projects/${pid}/apps/_search" '{}' 2>/dev/null \
   | jq -r --arg cid "$new_client_id" '.result[]? | select((.oidcConfig.clientId // "") == $cid) | .id' 2>/dev/null | head -1 || true)"
 if [[ -n "${new_app_id:-}" ]]; then
-  enforce_token_type "$pid" "$new_app_id" || exit 1
-  enforce_redirect_uris "$pid" "$new_app_id" || exit 1
-  if [[ "${USE_PUBLIC_AUTH:-0}" == 1 ]]; then
-    enforce_auth_method_none "$pid" "$new_app_id" || exit 1
-  fi
+  enforce_oidc_config "$pid" "$new_app_id" || exit 1
 else
   warn "Could not re-resolve the new app id — skipping token-type enforcement (app was created with ${TOKEN_TYPE})."
 fi

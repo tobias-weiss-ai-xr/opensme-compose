@@ -464,6 +464,82 @@ def check_sogo_redirect_allowlist(result: Result) -> None:
         )
 
 
+def check_zitadel_atomic_oidc_config(result: Result) -> None:
+    """R15 — zitadel-client.sh must enforce the OIDC config as ONE atomic PUT.
+
+    Live 2026-11-18: every openCloud login completed the code exchange, then
+    the proxy answered /graph/v1.0/me with "failed to verify access token:
+    token contains an invalid number of segments" (OPAQUE token, JWKS
+    backend) and the web UI retried until it said 'Access denied'. The event
+    store showed why: Zitadel's PUT /apps/{id}/oidc_config treats ABSENT
+    fields as reset-to-default, so the script's SEQUENTIAL single-field
+    enforcements destroyed each other — the redirect-URIs PUT reset
+    accessTokenType back to 0 (OPAQUE) right after the token-type PUT had
+    set it to JWT. Only a single PUT carrying accessTokenType AND
+    redirectUris AND authMethodType together is durable.
+    """
+    if not ZITADEL_CLIENT_SH.exists():
+        result.fail("scripts/zitadel-client.sh missing — cannot verify the "
+                    "atomic oidc_config enforcement (R15)")
+        return
+    text = ZITADEL_CLIENT_SH.read_text()
+
+    def _all_fields(body: str) -> bool:
+        return all(f in body for f in ("accessTokenType", "redirectUris", "authMethodType"))
+
+    # prebuilt-variable pattern: PUT "...oidc_config" "$body" with
+    # body="$(jq -nc ... '{...}')"
+    var_bodies = re.findall(
+        r'oidc_config"\s+"\$([a-zA-Z_]+)"', text,
+    )
+    for var in var_bodies:
+        builders = re.findall(
+            rf"{var}=\"\$\(jq.*?'(\{{.*?\}})'\)\"",
+            text, re.S,
+        )
+        if not builders or not all(_all_fields(b) for b in builders):
+            result.fail(
+                f"scripts/zitadel-client.sh (R15): the ${{{var}}} body PUT to "
+                "/oidc_config does not carry accessTokenType + redirectUris "
+                "+ authMethodType together — Zitadel treats absent fields as "
+                "reset-to-default, so a partial PUT erases the JWT "
+                "access-token type (live 2026-11-18: openCloud 'Access "
+                "denied', 'invalid number of segments')"
+            )
+            return
+
+    # inline-body pattern: PUT "...oidc_config" "'{json}'"
+    put_bodies = re.findall(
+        r'oidc_config"\s+\"([^\"]*(?:\\.[^\"]*)*)\"',
+        text,
+    )
+    # "$var"-style bodies are validated via the builder scan above
+    single_field_puts = [b[:60] for b in put_bodies
+                         if not b.startswith("$") and not _all_fields(b)]
+
+    if single_field_puts:
+        result.fail(
+            "scripts/zitadel-client.sh (R15): split oidc_config PUTs are "
+            "self-destructing — Zitadel treats absent fields as "
+            "reset-to-default, so a redirectUris-only PUT erases the JWT "
+            "access-token type (live 2026-11-18: openCloud 'Access denied', "
+            "'invalid number of segments'). Consolidate into ONE PUT whose "
+            "body carries accessTokenType + redirectUris + authMethodType; "
+            f"offending bodies: {single_field_puts}"
+        )
+        return
+
+    if var_bodies or put_bodies:
+        result.ok("oidc_config enforcement is atomic (single PUT carries "
+                  "accessTokenType + redirectUris + authMethodType)")
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh (R15): no oidc_config PUT found — "
+            "the enforcement must PUT one body carrying accessTokenType, "
+            "redirectUris and authMethodType together"
+        )
+
+
 def check_sogo_sso_repair_script(result: Result) -> None:
     """R13 — scripts/fix-sogo-sso.sh must cover every login identity AND logout.
 
@@ -825,6 +901,9 @@ def main() -> bool:
 
     # ── R14: sogo6-ui SSO auto-redirect (SSO-only deployment) ──
     check_sogo_ui_auto_sso(result)
+
+    # ── R15: atomic oidc_config enforcement (no self-clobbering PUTs) ──
+    check_zitadel_atomic_oidc_config(result)
 
     # ── R10: server-side IdP dialers must pin the hostname (alias shadow) ──
     check_idp_dialer_pins(result)
