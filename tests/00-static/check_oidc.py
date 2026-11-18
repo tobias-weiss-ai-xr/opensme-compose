@@ -51,14 +51,15 @@ exists, but the stack must still complete a real login):
        must register the webmail OIDC callback(s) the RUNNING sogo6
        actually emits. sogo6 builds its redirect_uri as
        {public_base}/api/user/v1/auth/callback/{TENANT} where TENANT is
-       taken from the USER's login domain (= the webmail host's parent,
-       e.g. webmail.home.opensme.graphwiz.ai -> home.opensme.graphwiz.ai) —
-       deriving it from OPENSME_DOMAIN (the apex) made Zitadel answer
-       authorize with HTTP 400 "redirect_uri is missing in the client
-       configuration" on every webmail login (live regression 2026-11-10).
-       The branch must therefore derive the callback domain from SOGO_DOMAIN
-       (or the SOGO_OIDC_DOMAIN override) and register BOTH the bare form
-       and the tenant-suffixed form.
+       the USER's login domain. On the live VPS the IdP issues
+       <user>@<org>.<ZITADEL_DOMAIN> (opensme.auth.home.opensme.graphwiz.ai),
+       NOT <user>@SOGO_DOMAIN's parent — 2026-11-18: the emitted tenant
+       opensme.auth.home.opensme.graphwiz.ai was in neither allowlist, so
+       Zitadel answered authorize with HTTP 400 "redirect_uri is missing in
+       the client configuration" while the kind:sso mode probe stayed green.
+       The branch must therefore register BOTH the webmail-derived tenant
+       (SOGO_DOMAIN / SOGO_OIDC_DOMAIN) and the IdP login-domain tenant
+       (ZITADEL_LOGIN_DOMAIN), each with its bare callback form.
 
   R10 — IdP dialer pin: every compose service that dials
        https://${ZITADEL_DOMAIN} SERVER-SIDE (OIDC token/userinfo/JWKS,
@@ -439,6 +440,27 @@ def check_sogo_redirect_allowlist(result: Result) -> None:
             "scripts/zitadel-client.sh (R9): sogo branch lacks the .local "
             "callback variant — demo-stack *.local logins (testuser@opensme.local) "
             "would 400 at the IdP"
+        )
+
+    # 4) the IdP login-domain tenant must be registered too: sogo6 takes the
+    #    callback {TENANT} from the USER's login domain, and the live VPS's
+    #    IdP issues <user>@<org>.<ZITADEL_DOMAIN>
+    #    (opensme.auth.home.opensme.graphwiz.ai). 2026-11-18 outage: that
+    #    tenant was absent from both allowlists, so Zitadel 400'd the
+    #    authorize request for every real identity while the webmail-derived
+    #    tenant (which the kind:sso probe used) stayed registered.
+    if "/api/user/v1/auth/callback/${idp_cb_domain}" in text:
+        result.ok("sogo6 IdP login-domain callback tenant registered "
+                  "(/api/user/v1/auth/callback/${idp_cb_domain}, "
+                  "ZITADEL_LOGIN_DOMAIN)")
+    else:
+        result.fail(
+            "scripts/zitadel-client.sh (R9): sogo branch lacks the IdP "
+            "login-domain callback tenant (/api/user/v1/auth/callback/"
+            "${idp_cb_domain} derived from ZITADEL_LOGIN_DOMAIN) — on a "
+            "live home.<apex> deployment the IdP issues <user>@<org>."
+            "<ZITADEL_DOMAIN> and sogo6 emits exactly this tenant, which "
+            "Zitadel 400s ('redirect_uri missing in client configuration')"
         )
 
 
