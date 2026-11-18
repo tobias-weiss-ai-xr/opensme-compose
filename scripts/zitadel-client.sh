@@ -305,9 +305,23 @@ case "$APP_KIND" in
     # every run so the allowlist and the running server stay in sync.
     oidc_domain="$(env_get SOGO_OIDC_DOMAIN "${app_domain#webmail.}")"
     local_cb_domain="$(env_get SOGO_OIDC_LOCAL_DOMAIN "${oidc_domain%%.*}.local")"
-    base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback" "/api/user/v1/auth/callback/${oidc_domain}")
+    # The {domain} in the sogo6 callback is the TENANT from the USER's login
+    # name. On the live VPS the seeded IdP identities are
+    # <user>@opensme.auth.home.opensme.graphwiz.ai (instance login domain =
+    # <org>.<ZITADEL_DOMAIN>), so the emitted callback is
+    # .../callback/opensme.auth.home.opensme.graphwiz.ai — NOT the webmail
+    # host's parent. 2026-11-18 outage: that tenant was missing here, Zitadel
+    # answered authorize with 400 invalid_request and every webmail SSO login
+    # dead-ended. Register the IdP login-domain tenant (and its .local face)
+    # alongside the webmail-derived one.
+    idp_cb_domain="$(env_get ZITADEL_LOGIN_DOMAIN "opensme.$(env_get ZITADEL_DOMAIN "auth.$(env_get OPENSME_DOMAIN opensme.graphwiz.ai)")")"
+    idp_local_cb_domain="${idp_cb_domain%%.*}.local"
+    base_paths=("/SOGo" "/SOGo/" "/api/user/v1/auth/callback" "/api/user/v1/auth/callback/${oidc_domain}" "/api/user/v1/auth/callback/${idp_cb_domain}")
     if [[ -n "${local_cb_domain}" && "${local_cb_domain}" != "${oidc_domain}" ]]; then
       base_paths+=("/api/user/v1/auth/callback/${local_cb_domain}")
+    fi
+    if [[ "$idp_local_cb_domain" != "$idp_cb_domain" && "$idp_local_cb_domain" != "$local_cb_domain" && "$idp_local_cb_domain" != "$oidc_domain" ]]; then
+      base_paths+=("/api/user/v1/auth/callback/${idp_local_cb_domain}")
     fi
     ;;
   paperless)

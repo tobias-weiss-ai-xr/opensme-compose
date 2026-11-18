@@ -87,10 +87,44 @@ check_sso_redirect() {
 # auth mode for a user. With the IdP realm active it answers kind:"sso" plus
 # a Zitadel authorize location (client_id on that hop). A missing/broken SSO
 # wiring instead answers kind:"credentials" (DB lookup) — fail then.
+# Username the webmail SSO-mode probe should use: an explicitly set
+# SSO_TEST_USER wins; otherwise the first enabled row of the sogo6 SQL user
+# source — the identity the IdP actually issues email claims for (its domain
+# suffix becomes the {tenant} in sogo6's OIDC callback
+# /api/user/v1/auth/callback/{tenant}); fallback testuer@${DOMAIN}.
+default_sogo_user() {
+    if [[ -n "${SSO_TEST_USER:-}" ]]; then
+        echo "$SSO_TEST_USER"; return
+    fi
+    # The tenant sogo6 derives the OIDC callback from is the USER's login
+    # domain — on the live VPS the IdP issues <user>@<login-domain> with
+    # login-domain = <org>.<ZITADEL_DOMAIN> (opensme.auth.home.opensme.graphwiz.ai),
+    # so prefer a seeded user from exactly that domain (2026-11-18: users from
+    # the webmail host's parent domain passed the check while the real IdP
+    # identities got 400 invalid_request from the authorize endpoint).
+    local idp_login_domain="${ZITADEL_LOGIN_DOMAIN:-opensme.${ZITADEL_DOMAIN:-auth.${DOMAIN}}}"
+    if command -v docker >/dev/null 2>&1 \
+       && sudo -n docker ps --format '{{.Names}}' 2>/dev/null | grep -qx opensme-sogo6-postgres; then
+        local u
+        u=$(sudo -n docker exec opensme-sogo6-postgres psql -U sogo -d sogo -At -c \
+            "SELECT mail FROM users WHERE enabled AND domain='${idp_login_domain}' ORDER BY uid LIMIT 1;" 2>/dev/null || true)
+        if [[ -n "$u" ]]; then
+            echo "$u"; return
+        fi
+        u=$(sudo -n docker exec opensme-sogo6-postgres psql -U sogo -d sogo -At -c \
+            "SELECT mail FROM users WHERE enabled ORDER BY uid LIMIT 1;" 2>/dev/null || true)
+        if [[ -n "$u" ]]; then
+            echo "$u"; return
+        fi
+    fi
+    echo "testuer@${idp_login_domain}"
+}
+
 check_sso_mode() {
     local name="$1" url="$2" expected_idp="$3" expected_client="${4:-}"
     info "Checking $name SSO mode…"
-    local user="${SSO_TEST_USER:-testuer@${DOMAIN}}"
+    local user
+    user=$(default_sogo_user)
     local body
     body=$(curl -sk --max-time 30 "${url}?username=${user}" 2>&1 || echo "ERROR")
     if [[ "$body" == "ERROR" ]]; then
@@ -111,7 +145,25 @@ check_sso_mode() {
         err "  $name: SSO mode client_id mismatch (expected ${expected_client} in ${loc:0:100})"
         FAILED=$((FAILED+1)); return 1
     fi
-    ok "  $name: SSO mode verified (→ $expected_idp, client=$expected_client)"
+    # Follow the authorize hop: the IdP must ACCEPT the redirect_uri the app
+    # emitted (302 → its login UI, or 200 if it serves the form inline).
+    # HTTP 400 invalid_request means the callback {tenant} is not registered
+    # in the Zitadel client — the mode probe above cannot see this (it answers
+    # 200 kind:sso regardless of redirect_uri), which is exactly how the
+    # 2026-11-18 sogo6 SSO outage (tenant opensme.auth.home.opensme.graphwiz.ai
+    # missing from the client allowlist) slipped through.
+    local hop_code hop_detail
+    hop_code=$(curl -sk --max-time 30 -o /dev/null -w '%{http_code}' "$loc" 2>/dev/null || echo 000)
+    if [[ "$hop_code" == "400" ]]; then
+        hop_detail=$(curl -sk --max-time 30 "$loc" 2>/dev/null | head -c 200)
+        err "  $name: IdP REJECTED the emitted redirect_uri (HTTP 400: ${hop_detail})"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    if [[ "$hop_code" != "302" && "$hop_code" != "200" ]]; then
+        err "  $name: IdP authorize hop answered HTTP ${hop_code} (expected 302/200; redirect_uri=${loc})"
+        FAILED=$((FAILED+1)); return 1
+    fi
+    ok "  $name: SSO mode verified (→ $expected_idp, client=$expected_client, authorize hop HTTP $hop_code)"
     return 0
 }
 
