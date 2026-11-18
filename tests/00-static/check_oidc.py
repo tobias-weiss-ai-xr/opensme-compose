@@ -540,6 +540,55 @@ def check_zitadel_atomic_oidc_config(result: Result) -> None:
         )
 
 
+def check_post_logout_uris(result: Result) -> None:
+    """R17 — SPA sign-out URIs must be registered as postLogoutRedirectUris.
+
+    OpenCloud's web app signs out by calling the IdP end-session endpoint
+    with post_logout_redirect_uri = the app ROOT (OC_URL, e.g.
+    https://cloud.home.opensme.graphwiz.ai/). Zitadel validates that URI
+    against the client's registered postLogoutRedirectUris and answers
+    400 Bad Request when it is missing — the user then lands on Zitadel's
+    error page instead of a signed-out landing page (2026-11-18 17:47:44Z
+    live: 400 on the cloud.home root because the opencloud branch fell
+    back to the bare callback paths).
+
+    Contract: every --app branch that owns a SPA with a root-URL sign-out
+    (opencloud) must set POST_LOGOUT_OVERRIDE and include the app root
+    'https://${app_domain}/' next to the callback paths. operaton (line
+    ~358) already does this for the same reason.
+    """
+    if not ZITADEL_CLIENT_SH.exists():
+        result.fail("scripts/zitadel-client.sh missing — cannot verify SLO URIs")
+        return
+    text = ZITADEL_CLIENT_SH.read_text()
+
+    m = re.search(r"^  opencloud\)\n(.*?^    ;;)", text, re.S | re.M)
+    if not m:
+        result.fail("opencloud case block not found in scripts/zitadel-client.sh")
+        return
+    block = m.group(1)
+
+    if "POST_LOGOUT_OVERRIDE=" not in block:
+        result.fail(
+            "opencloud branch must set POST_LOGOUT_OVERRIDE — without it "
+            "POST_LOGOUT falls back to the bare callback paths, and the SPA's "
+            "sign-out (post_logout_redirect_uri = app root) is then rejected "
+            "by Zitadel with 400 Bad Request (2026-11-18 live outage of the "
+            "logout page)"
+        )
+    elif 'https://${app_domain}/"' not in block:
+        result.fail(
+            'opencloud POST_LOGOUT_OVERRIDE must include the app root '
+            '("https://${app_domain}/") — the web SPA sends the root as '
+            "post_logout_redirect_uri on sign-out"
+        )
+    else:
+        result.ok(
+            "opencloud SLO: app root registered as postLogoutRedirectUri "
+            "(end_session no longer 400s)"
+        )
+
+
 def check_sogo_sso_repair_script(result: Result) -> None:
     """R13 — scripts/fix-sogo-sso.sh must cover every login identity AND logout.
 
@@ -904,6 +953,9 @@ def main() -> bool:
 
     # ── R15: atomic oidc_config enforcement (no self-clobbering PUTs) ──
     check_zitadel_atomic_oidc_config(result)
+
+    # ── R17: SPA sign-out URIs registered (end_session post_logout) ──
+    check_post_logout_uris(result)
 
     # ── R10: server-side IdP dialers must pin the hostname (alias shadow) ──
     check_idp_dialer_pins(result)

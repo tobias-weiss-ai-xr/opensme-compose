@@ -220,6 +220,14 @@ case "$APP_KIND" in
     app_domain="$(env_get OPENCLOUD_DOMAIN "$(env_get OC_DOMAIN cloud.opensme.local)")"
     CLIENT_ID_LABEL="$(env_get OC_OIDC_CLIENT_ID opencloud)"
     base_paths=("/oidc/callback" "/oidc-callback.html")
+    # SLO: the web SPA signs out via end_session with
+    # post_logout_redirect_uri = the app ROOT. Zitadel validates that URI
+    # against postLogoutRedirectUris — an unregistered root answers 400 and
+    # the user lands on Zitadel's error page (2026-11-18 live). Register
+    # the root next to the callback paths (same pattern as operaton).
+    POST_LOGOUT_OVERRIDE=("https://${app_domain}/" \
+                          "https://${app_domain}/oidc-callback.html" \
+                          "https://${app_domain}/oidc/callback")
     ;;
   notes)
     APP_PROJECT="opensme"
