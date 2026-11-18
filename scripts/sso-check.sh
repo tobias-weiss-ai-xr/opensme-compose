@@ -16,11 +16,13 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 
 # Load env
+# Load .env without choking on values with spaces (e.g.
+# OAUTH_SCOPES=openid email profile) that `source .env` would try to
+# execute as commands — under `set -e` that aborts the whole check.
 if [[ -f .env ]]; then
-    set -a
-    # shellcheck source=/dev/null  # .env generated at deploy time
-    source .env
-    set +a
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && export "$line"
+    done < .env
 fi
 
 DOMAIN="${OPENSME_DOMAIN:-opensme.local}"
