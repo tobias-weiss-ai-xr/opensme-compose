@@ -59,6 +59,12 @@ WEB_URL="${SOGO6_PUBLIC_URL:-https://${WEB_HOST}}"
 WEB_HOST_URL="${WEB_URL#https://}"; WEB_HOST_URL="${WEB_HOST_URL#http://}"
 TENANT_WEB="${SOGO_OIDC_DOMAIN:-${WEB_HOST#webmail.}}"
 TENANT_IDP="${ZITADEL_LOGIN_DOMAIN:-opensme.${ZITADEL_D}}"
+# The *.local faces of both tenants (mirror zitadel-client.sh's sogo branch:
+# local_cb_domain / idp_local_cb_domain). Demo identities like
+# testuser@opensme.local authorize against callback/opensme.local — the
+# desired list must cover every login form the deployment seeds.
+TENANT_LOCAL_WEB="${TENANT_WEB%%.*}.local"
+LOCAL_TENANT_IDP="${TENANT_IDP%%.*}.local"
 DESIRED="$(python3 -c '
 import json, sys
 host, tenants = sys.argv[1], sys.argv[2:]
@@ -67,7 +73,14 @@ for t in dict.fromkeys(tenants):
     uris += [f"https://{host}/api/user/v1/auth/callback/{t}",
              f"http://{host}/api/user/v1/auth/callback/{t}"]
 print(json.dumps(uris))
-' "$WEB_HOST_URL" "$TENANT_WEB" "$TENANT_IDP")"
+' "$WEB_HOST_URL" "$TENANT_WEB" "$TENANT_IDP" "$TENANT_LOCAL_WEB" "$LOCAL_TENANT_IDP")"
+
+# Logout must terminate the IdP session (R13): with the shipped default
+# SOGO_D_OPENID_ENDSESSION_ENABLED=false, webmail logout leaves the IdP
+# session alive and the next portal tile click silently re-authenticates —
+# users experience this as 'cannot logout from the portal'.
+ENDSESSION="$(sudo -n docker exec "$PG" psql -U "$USER" -d "$DB" -At -c \
+  "SELECT settings_domain_default->'AUTH_SETTINGS'->>'SOGO_D_OPENID_ENDSESSION_ENABLED' FROM sogo6_sogo_settings WHERE settings_unique = 1;" 2>/dev/null | tr -d '[:space:]')"
 
 CURRENT="$(sudo -n docker exec "$PG" psql -U "$USER" -d "$DB" -At -c \
   "SELECT settings_domain_default->'AUTH_SETTINGS'->'SOGO_D_OPENID_ALLOW_REDIRECT' FROM sogo6_sogo_settings;" 2>/dev/null | tr -d '[:space:]')"
@@ -80,20 +93,26 @@ DESIRED_NORM="$(echo "$DESIRED" | tr -d ' ')"
 
 if [[ "$CURRENT_NORM" == "$DESIRED_NORM" ]]; then
   ok "allow-redirect list already correct"
-  [[ "$MODE" == "check" ]] && exit 0
-  exit 0
+else
+  [[ "$MODE" == "check" ]] && { err "allow-redirect list is stale (see above)"; exit 1; }
+  if [[ "$DRY_RUN" == true ]]; then
+    info "dry-run — would UPDATE sogo6_sogo_settings"
+  else
+    sudo -n docker exec "$PG" psql -U "$USER" -d "$DB" -c \
+      "UPDATE sogo6_sogo_settings SET settings_domain_default = jsonb_set(settings_domain_default, '{AUTH_SETTINGS,SOGO_D_OPENID_ALLOW_REDIRECT}', '${DESIRED}'::jsonb) WHERE settings_unique = 1;" >/dev/null
+    ok "allow-redirect list repaired (restart sogo6-server to pick it up: see mail/sogo6.yml netns note — recreate the sogo6-server/redis/postgres trio, never restart the server alone)"
+  fi
 fi
 
-if [[ "$MODE" == "check" ]]; then
-  err "allow-redirect list is stale (see above)"; exit 1
+# ── R13b: ENDSESSION_ENABLED ─────────────────────────────────────────────
+if [[ "$ENDSESSION" == "true" ]]; then
+  ok "SOGO_D_OPENID_ENDSESSION_ENABLED already true (logout terminates the IdP session)"
+elif [[ "$MODE" == "check" ]]; then
+  err "SOGO_D_OPENID_ENDSESSION_ENABLED is '$ENDSESSION' — logout will not terminate the IdP session"; exit 1
+elif [[ "$DRY_RUN" == true ]]; then
+  info "dry-run — would set SOGO_D_OPENID_ENDSESSION_ENABLED=true"
+else
+  sudo -n docker exec "$PG" psql -U "$USER" -d "$DB" -c \
+    "UPDATE sogo6_sogo_settings SET settings_domain_default = jsonb_set(settings_domain_default, '{AUTH_SETTINGS,SOGO_D_OPENID_ENDSESSION_ENABLED}', 'true'::jsonb) WHERE settings_unique = 1;" >/dev/null
+  ok "SOGO_D_OPENID_ENDSESSION_ENABLED set to true (logout now terminates the IdP session)"
 fi
-
-if [[ "$DRY_RUN" == true ]]; then
-  info "dry-run — would UPDATE sogo6_sogo_settings"
-  exit 0
-fi
-
-sudo -n docker exec "$PG" psql -U "$USER" -d "$DB" -c \
-  "UPDATE sogo6_sogo_settings SET settings_domain_default = jsonb_set(settings_domain_default, '{AUTH_SETTINGS,SOGO_D_OPENID_ALLOW_REDIRECT}', '${DESIRED}'::jsonb) WHERE settings_unique = 1;" >/dev/null
-
-ok "allow-redirect list repaired (restart sogo6-server to pick it up: docker restart opensme-sogo6-server)"

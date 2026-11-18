@@ -464,6 +464,97 @@ def check_sogo_redirect_allowlist(result: Result) -> None:
         )
 
 
+def check_sogo_sso_repair_script(result: Result) -> None:
+    """R13 — scripts/fix-sogo-sso.sh must cover every login identity AND logout.
+
+    Live 2026-11-18: the DESIRED allow-redirect list only carried the
+    webmail-parent tenant (home.<apex>) and the IdP login domain
+    (opensme.<ZITADEL_DOMAIN>) — but demo identities like
+    testuser@opensme.local log in with the *.local tenant, which the Zitadel
+    client already accepts. And SOGO_D_OPENID_ENDSESSION_ENABLED stayed
+    false, so 'logging out' never terminated the IdP session: the next
+    portal/tile click silently re-authenticated (the 'cannot logout'
+    complaint). The repair script must therefore (a) include the *.local
+    tenant in the DESIRED list and (b) flip ENDSESSION_ENABLED to true.
+    """
+    path = ROOT / "scripts" / "fix-sogo-sso.sh"
+    if not path.exists():
+        result.fail("scripts/fix-sogo-sso.sh missing — cannot verify the "
+                    "sogo allow-redirect repair contract (R13)")
+        return
+    text = path.read_text()
+
+    # (a) the *.local tenant must be part of the desired redirect list
+    if "local_cb_tenant" in text or "LOCAL_TENANT" in text:
+        result.ok("fix-sogo-sso.sh DESIRED list covers the *.local login "
+                  "tenant (testuser@opensme.local-style identities)")
+    else:
+        result.fail(
+            "scripts/fix-sogo-sso.sh (R13): DESIRED allow-redirect list "
+            "must include the *.local tenant (e.g. opensme.local / "
+            "ZITADEL_local_login_name_domain) — demo identities like "
+            "testuser@opensme.local authorize against callback/<that "
+            "tenant> and the list must match or the login UX drifts from "
+            "the IdP client registration"
+        )
+
+    # (b) webmail logout must terminate the IdP session
+    if "SOGO_D_OPENID_ENDSESSION_ENABLED" in text and "true" in text:
+        result.ok("fix-sogo-sso.sh enables SOGO_D_OPENID_ENDSESSION_ENABLED "
+                  "(webmail logout ends the IdP session — no silent re-login)")
+    else:
+        result.fail(
+            "scripts/fix-sogo-sso.sh (R13): must set "
+            "SOGO_D_OPENID_ENDSESSION_ENABLED=true in AUTH_SETTINGS — "
+            "with the default false, webmail/portal logout leaves the IdP "
+            "session alive and the next tile click silently re-authenticates "
+            "(users experience 'cannot logout from the portal')"
+        )
+
+
+def check_sogo_ui_auto_sso(result: Result) -> None:
+    """R14 — mail/sogo6.yml must deploy the UI in SSO-auto-redirect mode.
+
+    The sogo6-ui login form validates the input as an EMAIL (zod .email()),
+    so a bare 'testuser' can never be submitted, and the server rejects
+    domain-less logins too (SOGO_S_DOMAINLESS_LOGIN=false, HTTP 500 'No
+    domain given for auth when this is required'). The deployment is
+    SSO-only: the UI must therefore auto-redirect to the IdP
+    (SSO_AUTO_REDIRECT=true + SSO_AUTO_REDIRECT_USERNAME=sso@<primary
+    tenant>) instead of ever showing the email form. The redirect tenant
+    must be the IdP login domain (opensme.<ZITADEL_DOMAIN>) — the one
+    tenant the IdP session cookie belongs to.
+    """
+    path = ROOT / "mail" / "sogo6.yml"
+    if not path.exists():
+        result.fail("mail/sogo6.yml missing — the sogo6 stack must be "
+                    "tracked in the repo (R14)")
+        return
+    text = path.read_text()
+
+    if re.search(r"SSO_AUTO_REDIRECT:\s*\$?\{?\S*['\"]?true", text):
+        result.ok("sogo6-ui runs with SSO_AUTO_REDIRECT=true (no email "
+                  "form — straight to the IdP)")
+    else:
+        result.fail(
+            "mail/sogo6.yml (R14): sogo6-ui must set SSO_AUTO_REDIRECT=true "
+            "— the login form zod-validates input as an email, so a bare "
+            "username ('testuser') is rejected client-side and the server "
+            "answers 'No domain given for auth when this is required'; "
+            "SSO-only deployments must bounce straight to the IdP"
+        )
+
+    if "SSO_AUTO_REDIRECT_USERNAME" in text:
+        result.ok("sogo6-ui pins SSO_AUTO_REDIRECT_USERNAME (the tenant the "
+                  "authorize URL is built from)")
+    else:
+        result.fail(
+            "mail/sogo6.yml (R14): sogo6-ui must set SSO_AUTO_REDIRECT_USERNAME "
+            "(synthetic sso@<tenant>) — without it the auto-redirect has no "
+            "tenant to build the callback from and falls back to ''"
+        )
+
+
 # ── Runtime SSO invariants (R10–R12) ───────────────────────────
 
 DIAL_URL_RE = re.compile(r"https://\$\{ZITADEL_DOMAIN[^}]*\}")
@@ -728,6 +819,12 @@ def main() -> bool:
 
     # ── R9: sogo6 webmail callback allowlist (tenant-domain mismatch) ──
     check_sogo_redirect_allowlist(result)
+
+    # ── R13: sogo SSO repair script (identity coverage + end-session) ──
+    check_sogo_sso_repair_script(result)
+
+    # ── R14: sogo6-ui SSO auto-redirect (SSO-only deployment) ──
+    check_sogo_ui_auto_sso(result)
 
     # ── R10: server-side IdP dialers must pin the hostname (alias shadow) ──
     check_idp_dialer_pins(result)

@@ -1,0 +1,165 @@
+# ── SOGo6 + Stalwart Mail Stack ────────────────────────────
+# Usage:
+#   COMPOSE_FILE=docker-compose.yml:mail/sogo6.yml:mail/stalwart.yml docker compose up -d
+#
+# Provides: Modern SOGo6 web groupware with Stalwart IMAP/SMTP backend
+# Replaces: mail/sogo5.yml (SOGo5 / salvoxia/sogo:latest)
+
+services:
+  sogo6-redis:
+    image: redis:alpine
+    container_name: opensme-sogo6-redis
+    restart: unless-stopped
+    volumes:
+      - sogo6-redis-data:/data
+    network_mode: service:sogo6-server
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  sogo6-postgres:
+    image: postgres:17
+    container_name: opensme-sogo6-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sogo
+      POSTGRES_PASSWORD: ${SOGO_DB_PASSWORD:-CHANGEME_sogo6_db}
+      POSTGRES_DB: sogo
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - sogo6-postgres-data:/var/lib/postgresql/data
+      - ./sogo6-users-init.sql:/docker-entrypoint-initdb.d/10-users.sql:ro
+    network_mode: service:sogo6-server
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sogo -d sogo"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  sogo6-server:
+    image: sogo6-server:latest
+    container_name: opensme-sogo6-server
+    restart: unless-stopped
+    # OIDC RP (ModuleOIDC) and the external-calendar IcsFetcher both resolve
+    # public hostnames via Docker DNS, which returns stale bridge aliases for
+    # them; the IcsFetcher additionally rejects private IPs (SSRF guard), so
+    # both hosts are pinned to host-gateway (= docker0, where Traefik
+    # publishes 443). Same pattern as camunda/stalwart/notes backends.
+    # Only the IdP is pinned to host-gateway. The calendar host must resolve
+    # to the PUBLIC IP: the external-calendar IcsFetcher rejects private
+    # ranges as SSRF, so the edge CalDAV URL is reached via NAT hairpin.
+    extra_hosts:
+      - "auth.home.opensme.graphwiz.ai:host-gateway"
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      FLASK_ENV: production
+      SOGO_P_PUBLIC_BASE_URL: ${SOGO6_PUBLIC_URL:-https://webmail.home.opensme.graphwiz.ai}
+      # REQUIRED: Redis
+      SOGO_P_REDIS_URL: redis://opensme-sogo6-redis:6379/0
+      SOGO_P_REDIS_RESP_3: "true"
+      # REQUIRED: Secrets (32 chars each)
+      SOGO_P_VOUCHER_SECRET: ${SOGO_P_VOUCHER_SECRET:-0123456789abcdef0123456789abcdef}
+      SOGO_AES_ENC_KEY: ${SOGO_AES_ENC_KEY:-0123456789abcdef0123456789abcdef}
+      # Database (PostgreSQL)
+      SOGO_P_DB_TYPE: PostgreSQL
+      SOGO_P_DB_HOST: opensme-sogo6-postgres
+      SOGO_P_DB_PORT: "5432"
+      SOGO_P_DB_USER: sogo
+      SOGO_P_DB_PASS: ${SOGO_DB_PASSWORD:-CHANGEME_sogo6_db}
+      SOGO_P_DB_NAME: sogo
+      SOGO_P_DB_SSL: "false"
+      SOGO_P_DB_ENC: utf8
+      # Storage
+      SOGO_P_STORAGE_TYPE: database
+      SOGO_UPLOAD_PATH: /var/lib/sogo6/uploads
+      SOGO_UPLOAD_TEMP_PATH: /var/lib/sogo6/uploads/tmp
+      SOGO_MAX_ATTACHMENT_SIZE: "25000000"
+      # LDAP (disabled for openSME: no LDAP service in base stack)
+      SOGO_LDAP_URI: ""
+      # Stalwart Mail (openSME service name is 'stalwart' in opensme-net)
+      SOGO_SMTP_SERVER: stalwart
+      SOGO_STALWART_IMAP_PORT: "143"
+      SOGO_STALWART_SMTP_PORT: "25"
+      SOGO_STALWART_SUBM_PORT: "587"
+      # Admin / Secrets
+      SOGO_SECRET_KEY: ${SOGO_SECRET_KEY:-0123456789abcdef0123456789abcdef01234567}
+      SOGO_P_ADMIN_PWD: ${SOGO_P_ADMIN_PWD:-CHANGEME_sogo}
+      SOGO_MAIL_IMAP_HOST: stalwart
+      SOGO_MAIL_IMAP_PORT: "143"
+      SOGO_MAIL_SMTP_HOST: stalwart
+      SOGO_MAIL_SMTP_PORT: "587"
+      # Agent (optional)
+      SOGO_P_AGENT_WORKER_CONCURRENCY: "2"
+    networks:
+      opensme-net:
+        aliases:
+          - sogo6-postgres
+          - sogo6-redis
+          - opensme-sogo6-postgres
+          - opensme-sogo6-redis
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/user/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  sogo6-ui:
+    image: sogo6-ui:latest
+    container_name: opensme-sogo6-ui
+    restart: unless-stopped
+    depends_on:
+      sogo6-server:
+        condition: service_healthy
+    environment:
+      # Browser-facing public origin (served to the SPA via GET /env; the
+      # app appends /api/user/v1 itself — NEVER set the API path here or
+      # the browser gets a doubled path on an unresolvable host).
+      NEXT_PUBLIC_API_BASE_URL: ${SOGO6_PUBLIC_URL:-https://webmail.home.opensme.graphwiz.ai}
+      # Internal backend the server-side /api proxy + SSE routes forward to
+      # (bare origin + /api; appended with the request path).
+      API_PROXY_TARGET: http://opensme-sogo6-server:5000/api
+      NEXT_PUBLIC_ADMIN_DOMAINS: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      SSE_ENABLED: "true"
+      # SSO-only deployment (R14): the login form zod-validates its input as
+      # an EMAIL, so a bare 'testuser' can never be submitted, and the server
+      # rejects domain-less logins too (SOGO_S_DOMAINLESS_LOGIN=false → HTTP
+      # 500 'No domain given for auth when this is required'). Auto-redirect
+      # the browser straight to the IdP instead: the synthetic username only
+      # carries the tenant for the authorize URL's callback suffix, the real
+      # login happens at Zitadel (testuser / <user>@<org>.<ZITADEL_DOMAIN>).
+      # The tenant must be the IdP login domain — the one the IdP session
+      # cookie belongs to, so portal → webmail tile hops are silent.
+      SSO_AUTO_REDIRECT: "true"
+      SSO_AUTO_REDIRECT_USERNAME: sso@${ZITADEL_LOGIN_DOMAIN:-opensme.${ZITADEL_DOMAIN:-auth.${OPENSME_DOMAIN:-opensme.graphwiz.ai}}}
+    networks:
+      - opensme-net
+      - traefik-web
+    labels:
+      - "traefik.enable=true"
+      - "com.centurylinklabs.watchtower.enable=false"
+      - "traefik.docker.network=opensme-net"
+      # Router domain is SOGO_DOMAIN (the tiles-catalog domain_env for
+      # webmail — contracts/tiles.yml), matching the legacy sogo stack so
+      # either stack can serve the tile without contract drift.
+      - "traefik.http.routers.sogo6-ui.rule=Host(${SOGO_DOMAIN:-webmail.home.opensme.graphwiz.ai})"
+      - "traefik.http.routers.sogo6-ui.entrypoints=websecure"
+      - "traefik.http.routers.sogo6-ui.tls=true"
+      - "traefik.http.routers.sogo6-ui.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.sogo6-ui.loadbalancer.server.port=3000"
+    healthcheck:
+      # Through the UI's own /api proxy (catch-all -> API_PROXY_TARGET),
+      # so a green health check proves proxy AND backend. The backend's
+      # health route lives under /api/user/v1 — /api/health is a 404.
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/user/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  sogo6-redis-data:
+  sogo6-postgres-data:

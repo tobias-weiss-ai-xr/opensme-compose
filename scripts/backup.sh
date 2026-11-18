@@ -75,6 +75,7 @@ KNOWN_VOLUMES=(
   postgres-data redis-data portal-data opencloud-config opencloud-data
   opencloud-lib
   stalwart-etc stalwart-data sogo-config sogo-data
+  sogo6-postgres-data sogo6-redis-data
   traefik-data casdoor-data zitadel-machinekey
   cryptpad-data cryptpad-blob synapse-data notes-data
   seaweedfs-data paperless-data paperless-media paperless-export

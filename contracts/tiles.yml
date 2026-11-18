@@ -49,8 +49,10 @@ catalog:
     tile: Webmail
     url_env: MAIL_URL
     domain_env: SOGO_DOMAIN
-    service: sogo
-    router: sogo
+    # sogo6 stack (mail/sogo6.yml) is the webmail surface; legacy SOGo5
+    # ('sogo') stays excluded below.
+    service: sogo6-ui
+    router: sogo6-ui
 
   - id: workflow
     tile: Workflow
@@ -164,6 +166,7 @@ excluded:
   - id: zitadel-login # the IdP's login page (path-routed on the same host)
   - id: casdoor      # IdP swap point — same rule
   - id: stalwart     # mail backend admin — users read mail via SOGo
+  - id: sogo         # legacy SOGo5 stack — replaced by sogo6-ui (webmail tile)
   - id: collabora    # embedded editor inside OpenCloud — never a tile
   - id: cryptpad     # alternative embedded editor (collab profile)
   - id: seaweedfs    # S3 storage admin UI
