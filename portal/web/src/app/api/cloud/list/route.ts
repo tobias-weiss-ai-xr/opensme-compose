@@ -45,13 +45,18 @@ interface BridgeFileInfo {
 
 const BRIDGE_TIMEOUT_MS = 15_000;
 
-async function listViaBridge(rel: string): Promise<CloudFile[]> {
+async function listViaBridge(rel: string, cookieHeader: string | null): Promise<CloudFile[]> {
   const url = `${backendUrl()}/api/cloud/files/metadata?path=${encodeURIComponent(rel)}`;
   let res: Response;
   try {
     res = await fetch(url, {
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      // The Rust bridge sits behind the portal's session firewall — the
+      // signed-in caller's session cookie must be forwarded or every
+      // listing answers 401 (found live 2026-11).
+      headers: cookieHeader
+        ? { Accept: "application/json", Cookie: cookieHeader }
+        : { Accept: "application/json" },
       signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS),
     });
   } catch {
@@ -88,10 +93,11 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: "Ungültiger Cloud-Pfad" }, { status: 400 });
   }
   try {
+    const cookieHeader = request.headers.get("cookie");
     const files =
       webdavRoot() && davAuthHeader()
         ? await listDir(rel)
-        : await listViaBridge(rel);
+        : await listViaBridge(rel, cookieHeader);
     return Response.json(files);
   } catch (err) {
     if (err instanceof UpstreamError) {

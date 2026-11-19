@@ -1156,16 +1156,15 @@ impl CloudFiles {
         parse_ocs_share_list(&body)
     }
 
-    /// Check if opencloud is reachable by GET /health/ready at the
-    /// WebDAV base URL. Uses a dedicated client with a 5s timeout.
-    /// If dav_base is empty, returns true trivially.
+    /// Check if opencloud is reachable by GET <origin>/health/ready (host
+    /// root — see [`crate::cloud::health_endpoint`]). Uses a dedicated
+    /// client with a 5s timeout. If dav_base is empty, returns true trivially.
     pub async fn check_health(&self) -> bool {
         let dav_base = self.dav_base.trim_end_matches('/');
         if dav_base.is_empty() {
             return true;
         }
-        // Build the health check URL: <dav_base>/health/ready
-        let health_url = format!("{}/health/ready", dav_base);
+        let health_url = health_endpoint(dav_base);
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
@@ -1186,8 +1185,16 @@ impl CloudFiles {
     }
 }
 
+/// Readiness endpoint of the OpenCloud HOST (not the user DAV base!):
+/// GET <origin>/health/ready answers 200 when the host is up. The old
+/// form (<user-dav-base>/health/ready) 401/404s even with valid auth —
+/// the readiness route lives at the host root, found live 2026-11.
+pub fn health_endpoint(dav_base: &str) -> String {
+    format!("{}/health/ready", dav_base_host_base(dav_base))
+}
+
 /// Standalone health check function that checks if opencloud is reachable.
-/// GET /health/ready at CLOUD_WEBDAV_URL with a 5s timeout.
+/// GET /health/ready at the CLOUD_WEBDAV host with a 5s timeout.
 /// If CLOUD_WEBDAV_URL is empty, succeeds trivially.
 pub async fn cloud_health() -> bool {
     let Some(cloud) = CloudFiles::from_env() else {
@@ -1514,6 +1521,22 @@ mod tests {
             "http://cloud.local:8099"
         );
         assert_eq!(dav_base_host_base("http://only-host"), "http://only-host");
+    }
+
+    /// The readiness probe must hit the HOST root — the old user-DAV-base
+    /// form 401/404s even with valid auth (found live 2026-11: OpenCloud
+    /// answers GET /health/ready with 200, but …/dav/files/<user>/health/ready
+    /// with 404).
+    #[test]
+    fn health_endpoint_targets_host_root() {
+        assert_eq!(
+            health_endpoint("https://cloud.opensme.graphwiz.ai/remote.php/dav/files/umfragen-bot"),
+            "https://cloud.opensme.graphwiz.ai/health/ready"
+        );
+        assert_eq!(
+            health_endpoint("http://opensme-opencloud:9200/remote.php/dav/files/uploader"),
+            "http://opensme-opencloud:9200/health/ready"
+        );
     }
 
     #[test]
