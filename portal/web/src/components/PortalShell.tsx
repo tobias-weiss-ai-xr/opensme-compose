@@ -7,6 +7,7 @@ import ServiceTile from "./ServiceTile";
 import AnnouncementBar from "./AnnouncementBar";
 import LoginRequired from "./LoginRequired";
 import AiCard from "./AiCard";
+import ArtGallery from "./ArtGallery";
 import FeedColumn from "./FeedColumn";
 import IntercomPanel from "./IntercomPanel";
 import PollsPanel from "./PollsPanel";
@@ -82,6 +83,10 @@ export default function PortalShell({
         <section className="tab-panel" hidden={tab !== "notizen"} aria-label="Notizen">
           <IntercomPanel broadcastEnabled={broadcastEnabled} />
         </section>
+
+        {/* Kunstgalerie: nur für anonyme Besucher — eine angemeldete
+            Sitzung sieht den Funktionskatalog, nie die Galerie. */}
+        {!authenticated && <ArtGallery />}
 
         <section className="mt-10" aria-label="News">
           <h2 className="mb-4 text-xl font-bold">News</h2>

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1040" viewBox="0 0 1680 1040" role="img">
+  <title>openSME — der SME-Arbeitstag als Neoplastizismus nach Piet Mondrian</title>
+  <desc>Dateien, E-Mail, Workflow und Buchhaltung in klaren Farbblöcken.</desc>
+  <rect width="1680" height="1040" fill="#f5f2ea"/>
+  <!-- grid: black structural lines -->
+  <g stroke="#111111" stroke-width="20">
+    <line x1="0" y1="300" x2="1680" y2="300"/>
+    <line x1="0" y1="700" x2="1680" y2="700"/>
+    <line x1="620" y1="0" x2="620" y2="1040"/>
+    <line x1="1120" y1="300" x2="1120" y2="1040"/>
+    <line x1="240" y1="700" x2="240" y2="1040"/>
+    <line x1="1400" y1="0" x2="1400" y2="300"/>
+  </g>
+  <!-- dateien/cloud: the large red block -->
+  <rect x="0" y="0" width="620" height="300" fill="#d0342c"/>
+  <!-- mail: blue -->
+  <rect x="240" y="700" width="380" height="340" fill="#225095"/>
+  <!-- workflow: yellow -->
+  <rect x="620" y="300" width="500" height="400" fill="#e8b620"/>
+  <!-- buchhaltung: soft gray accent -->
+  <rect x="1120" y="700" width="560" height="340" fill="#c9c4b6"/>
+  <rect x="1400" y="0" width="280" height="300" fill="#c9c4b6"/>
+  <!-- small white rhythm blocks -->
+  <rect x="620" y="0" width="500" height="300" fill="#ffffff"/>
+  <rect x="1120" y="300" width="560" height="400" fill="#ffffff"/>
+  <rect x="0" y="700" width="240" height="340" fill="#ffffff"/>
+  <!-- envelope glyph on the blue block -->
+  <g stroke="#f5f2ea" stroke-width="10" fill="none">
+    <rect x="360" y="820" width="140" height="96" rx="4"/>
+    <path d="M 360 828 L 430 880 L 500 828"/>
+  </g>
+  <!-- document glyph on the red block -->
+  <g fill="#f5f2ea">
+    <rect x="220" y="70" width="150" height="180" rx="8"/>
+    <rect x="248" y="106" width="94" height="10" fill="#d0342c"/>
+    <rect x="248" y="134" width="94" height="10" fill="#d0342c"/>
+    <rect x="248" y="162" width="60" height="10" fill="#d0342c"/>
+  </g>
+  <!-- wordmark -->
+  <text x="836" y="530" font-family="Helvetica, Arial, sans-serif" font-size="88" font-weight="700" fill="#111111" letter-spacing="14">openSME</text>
+  <text x="840" y="600" font-family="Helvetica, Arial, sans-serif" font-size="34" fill="#555555" letter-spacing="6">Das Büro für das digitale Gewerbe</text>
+</svg>

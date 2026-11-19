@@ -46,7 +46,7 @@ catalog:
     default_url: true
 
   - id: webmail
-    tile: Webmail
+    tile: WebMail
     url_env: MAIL_URL
     domain_env: SOGO_DOMAIN
     # sogo6 stack (mail/sogo6.yml) is the webmail surface; legacy SOGo5
@@ -70,7 +70,7 @@ catalog:
     router: invoices
 
   - id: archive
-    tile: Archive
+    tile: Archiv
     url_env: PAPERLESS_URL
     domain_env: null
     host_prefix: paperless
@@ -78,7 +78,7 @@ catalog:
     router: paperless
 
   - id: notes
-    tile: Notes
+    tile: Notizen
     url_env: NOTES_URL
     domain_env: null
     host_prefix: notes
@@ -122,7 +122,7 @@ catalog:
     router: store
 
   - id: surveys
-    tile: Surveys
+    tile: Umfragen
     url_env: SURVEYS_URL
     domain_env: null
     host_prefix: surveys

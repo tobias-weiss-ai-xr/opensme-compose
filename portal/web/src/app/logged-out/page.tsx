@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import ArtGallery from "@/components/ArtGallery";
 import { SITE } from "@/lib/config";
 
 export const metadata: Metadata = {
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
  */
 export default function LoggedOutPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-4">
       <div className="w-full max-w-[520px] rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
         <h1 className="mb-3 text-2xl font-semibold">Du wurdest abgemeldet</h1>
         <p className="mb-4 text-dim">
@@ -37,6 +38,11 @@ export default function LoggedOutPage() {
           </Link>
         </p>
         <p className="mt-6 text-xs text-dim">openSME-Portal · {SITE.domain}</p>
+      </div>
+      {/* Kunstgalerie unterhalb der Karte — der gepflegte Abschluss der
+          Logout-Journey (Analog openEduSuite-Landing). */}
+      <div className="w-full">
+        <ArtGallery />
       </div>
     </div>
   );

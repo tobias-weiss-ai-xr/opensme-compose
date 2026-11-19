@@ -138,4 +138,16 @@ describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Broadcast an alle")).toBeInTheDocument();
   });
+
+  it("shows the art gallery only for anonymous visitors", () => {
+    stubFetch(false);
+    render(<PortalShell {...base} authenticated={false} />);
+    expect(screen.getByTestId("art-gallery")).toBeInTheDocument();
+  });
+
+  it("renders no art gallery for signed-in visitors", () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} />);
+    expect(screen.queryByTestId("art-gallery")).not.toBeInTheDocument();
+  });
 });

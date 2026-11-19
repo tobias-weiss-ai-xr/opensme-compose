@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1040" viewBox="0 0 1680 1040" role="img">
+  <title>openSME — Dokumente und Archiv als Papier-Collagen nach Henri Matisse</title>
+  <desc>Geschnittene organische Formen in leuchtenden Farben, arrangiert als Collage.</desc>
+  <rect width="1680" height="1040" fill="#faf7f0"/>
+  <!-- large blue leaf (archive) -->
+  <path d="M 300 900 C 120 760 160 480 400 380 C 640 280 760 420 700 620 C 640 820 460 960 300 900 Z" fill="#225095"/>
+  <!-- red coral fragment (documents) -->
+  <path d="M 900 260 C 1020 180 1180 200 1240 320 C 1300 440 1220 540 1120 520 C 1160 600 1080 660 1000 620 C 940 700 820 680 800 580 C 780 480 820 340 900 260 Z" fill="#d0342c"/>
+  <!-- green algae ribbon -->
+  <path d="M 240 300 C 380 180 560 200 620 320 C 660 400 580 460 500 420 C 420 560 220 540 200 420 C 190 360 200 330 240 300 Z" fill="#2e6b4f"/>
+  <!-- yellow sun cutout -->
+  <g fill="#e8b620">
+    <circle cx="1380" cy="700" r="150"/>
+    <g stroke="#e8b620" stroke-width="26" stroke-linecap="round">
+      <line x1="1380" y1="480" x2="1380" y2="420"/>
+      <line x1="1380" y1="920" x2="1380" y2="980"/>
+      <line x1="1160" y1="700" x2="1100" y2="700"/>
+      <line x1="1600" y1="700" x2="1660" y2="700"/>
+      <line x1="1230" y1="550" x2="1190" y2="510"/>
+      <line x1="1530" y1="850" x2="1570" y2="890"/>
+      <line x1="1530" y1="550" x2="1570" y2="510"/>
+      <line x1="1230" y1="850" x2="1190" y2="890"/>
+    </g>
+  </g>
+  <!-- white paper cutout pinned on the red blob: a document -->
+  <g transform="translate(980,340) rotate(-8)">
+    <rect width="220" height="280" rx="10" fill="#faf7f0"/>
+    <rect x="36" y="44" width="148" height="14" fill="#d0342c"/>
+    <rect x="36" y="82" width="148" height="14" fill="#d0342c"/>
+    <rect x="36" y="120" width="100" height="14" fill="#d0342c"/>
+  </g>
+  <!-- scattered small confetti cutouts -->
+  <ellipse cx="700" cy="760" rx="60" ry="34" fill="#8a2f2b"/>
+  <ellipse cx="820" cy="860" rx="40" ry="24" fill="#225095"/>
+  <ellipse cx="1560" cy="300" rx="46" ry="28" fill="#2e6b4f"/>
+  <ellipse cx="200" cy="180" rx="36" ry="22" fill="#e8b620"/>
+  <!-- wordmark -->
+  <text x="1080" y="960" font-family="Helvetica, Arial, sans-serif" font-size="72" font-weight="700" fill="#111111" letter-spacing="12">openSME</text>
+</svg>

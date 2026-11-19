@@ -26,6 +26,8 @@ const ENV_KEYS = [
   "TICKETING_URL",
   "CMS_URL",
   "SHOP_URL",
+  "CALENDAR_URL",
+  "VC_URL",
 ] as const;
 
 const ORIG: Record<string, string | undefined> = {};
@@ -51,10 +53,12 @@ async function freshConfig(): Promise<typeof import("./config")> {
 const FULL_SPECS: Record<string, string> = {
   opencloud: "https://cloud.example.com",
   mail: "https://webmail.example.com",
+  calendar: "https://calendar.example.com",
   bpm: "https://bpm.example.com",
   invoice: "https://invoices.example.com",
   paperless: "https://paperless.example.com",
   chat: "https://chat.example.com",
+  vc: "https://vc.example.com",
   notes: "https://notes.example.com",
   surveys: "https://surveys.example.com",
   ticketing: "https://support.example.com",
@@ -92,16 +96,18 @@ describe("serverEnv", () => {
 });
 
 describe("buildServices", () => {
-  it("emits all 11 tiles in the fixed catalog order with German copy", () => {
+  it("emits all 13 tiles in the fixed catalog order with German copy", () => {
     const services = buildServices(FULL_SPECS);
-    expect(services).toHaveLength(11);
+    expect(services).toHaveLength(13);
     expect(services.map((s) => s.id)).toEqual([
       "opencloud",
       "webmail",
+      "calendar",
       "workflow",
       "invoice",
       "archive",
       "chat",
+      "vc",
       "notes",
       "surveys",
       "support",
@@ -120,7 +126,19 @@ describe("buildServices", () => {
       description: "E-Mail, Kalender, Kontakte",
       url: "https://webmail.example.com",
     });
-    expect(services[10]).toEqual({
+    expect(services[2]).toEqual({
+      id: "calendar",
+      name: "Calendar",
+      description: "Terminbuchung (CalRS)",
+      url: "https://calendar.example.com",
+    });
+    expect(services[7]).toEqual({
+      id: "vc",
+      name: "Meet",
+      description: "Video-Meetings (LiveKit)",
+      url: "https://vc.example.com",
+    });
+    expect(services[12]).toEqual({
       id: "shop",
       name: "Shop",
       description: "Store & Bestellungen",
@@ -128,18 +146,20 @@ describe("buildServices", () => {
     });
   });
 
-  it("filters out falsy urls (missing shop + empty ticketing/cms) -> 8 tiles", () => {
+  it("filters out falsy urls (missing shop + empty ticketing/cms) -> 10 tiles", () => {
     const specs = { ...FULL_SPECS, ticketing: "", cms: "", shop: "" };
     const services = buildServices(specs);
-    expect(services).toHaveLength(8);
+    expect(services).toHaveLength(10);
     expect(services[0].id).toBe("opencloud");
     expect(services.map((s) => s.id)).toEqual([
       "opencloud",
       "webmail",
+      "calendar",
       "workflow",
       "invoice",
       "archive",
       "chat",
+      "vc",
       "notes",
       "surveys",
     ]);
@@ -152,7 +172,7 @@ describe("buildServices", () => {
     const specs: Record<string, string> = { ...FULL_SPECS };
     delete specs.shop;
     const services = buildServices(specs);
-    expect(services).toHaveLength(10);
+    expect(services).toHaveLength(12);
     expect(services[services.length - 1]).toEqual({
       id: "website",
       name: "Website",
@@ -177,10 +197,12 @@ describe("loadServiceSpecs", () => {
     expect(load()).toEqual({
       opencloud: "https://cloud.opensme.graphwiz.ai",
       mail: "https://webmail.opensme.graphwiz.ai",
+      calendar: "",
       bpm: "https://bpm.opensme.graphwiz.ai",
       invoice: "https://invoices.opensme.graphwiz.ai",
       paperless: "https://paperless.opensme.graphwiz.ai",
       chat: "https://chat.opensme.graphwiz.ai",
+      vc: "",
       notes: "https://notes.opensme.graphwiz.ai",
       surveys: "https://surveys.opensme.graphwiz.ai",
       ticketing: "",
@@ -203,7 +225,8 @@ describe("loadServiceSpecs", () => {
     // set MAIL_URL etc., which would shadow the derived fallback.
     for (const k of ["OPENCLOUD_URL", "MAIL_URL", "BPM_URL", "INVOICE_URL",
                      "PAPERLESS_URL", "CHAT_URL", "NOTES_URL", "SURVEYS_URL",
-                     "TICKETING_URL", "CMS_URL", "SHOP_URL"]) {
+                     "TICKETING_URL", "CMS_URL", "SHOP_URL", "CALENDAR_URL",
+                     "VC_URL"]) {
       delete process.env[k];
     }
     process.env.OPENSME_DOMAIN = "suite.example.com";

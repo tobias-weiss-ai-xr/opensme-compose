@@ -37,7 +37,13 @@ from conftest import Result, ROOT
 TILES_CONTRACT = ROOT / "contracts" / "tiles.yml"
 COMPOSE_MAIN = ROOT / "docker-compose.yml"
 PORTAL_SRC = ROOT / "portal" / "src" / "main.rs"
+WEB_CONFIG = ROOT / "portal" / "web" / "src" / "lib" / "config.ts"
 ENV_EXAMPLE = ROOT / ".env.example"
+
+# Catalog ids rendered via a dedicated component instead of the standard
+# buildServices tile loop. 'ai' is the AI-assistant card (AiCard inside
+# PortalShell) — it must exist as a component, not as a catalog entry.
+WEB_TILES_SPECIAL = {"ai": "components/PortalShell.tsx:<AiCard />"}
 
 # All compose files that may carry routed services (profiles excluded —
 # they are overrides, not new surfaces).
@@ -82,6 +88,31 @@ def routed_services():
                 entry["routers"] |= routers
                 entry["labels"] += " " + labels
     return routed
+
+
+def web_catalog():
+    """Parse the Next.js frontend catalog from lib/config.ts.
+
+    Returns (specs, order) where specs maps key -> URL env var name
+    (loadServiceSpecs) and order is a list of (id, name, specs_key)
+    tuples from the buildServices order array.
+    """
+    text = WEB_CONFIG.read_text()
+
+    # loadServiceSpecs return object: 'key: envOr("ENV_NAME", ...)' lines
+    specs = dict(
+        re.findall(r'(\w+):\s*envOr\("([A-Z_0-9]+)"', text)
+    )
+
+    # buildServices order entries, e.g.
+    # { id: "opencloud", name: "OpenCloud", description: "...",
+    #   url: specs.opencloud }
+    order = re.findall(
+        r'\{\s*id:\s*"(\w+)",\s*name:\s*"([^"]+)",'
+        r'\s*description:\s*"[^"]*",\s*url:\s*specs\.(\w+)\s*\}',
+        text,
+    )
+    return specs, order
 
 
 def main():
@@ -188,6 +219,63 @@ def main():
     if re.search(r"^COLLABORA_URL=", env_ex, re.M):
         failures.append(".env.example still declares COLLABORA_URL")
 
+    # ── 5. Web frontend catalog parity (tiles.yml ↔ config.ts) ────────
+    # The live landing is rendered by the Next.js frontend (portal-web);
+    # its catalog must mirror the contract or tiles silently disappear
+    # (2026-11-19: calendar/vc were absent while contract, Rust catalog
+    # and compose env were complete). Parity is resolved via the URL env:
+    # order entry → specs key → envOr(...) env name must equal the
+    # contract's url_env (spec keys may differ from tile ids — 'mail',
+    # 'bpm', 'paperless', 'ticketing', 'cms' are legacy keys).
+    web_specs, web_order = web_catalog()
+    env_by_id: dict[str, str] = {}
+    name_by_id: dict[str, str] = {}
+    for tid, name, specs_key in web_order:
+        env_by_id[tid] = web_specs.get(specs_key, "")
+        name_by_id[tid] = name
+    for entry in catalog:
+        tid = entry["id"]
+        if tid in WEB_TILES_SPECIAL:
+            continue  # dedicated render path (AiCard), no catalog entry
+        if tid not in env_by_id:
+            failures.append(
+                f"tile '{tid}': missing from web catalog buildServices "
+                "order — the live landing would never render it"
+            )
+            continue
+        if env_by_id[tid] != entry["url_env"]:
+            failures.append(
+                f"tile '{tid}': web catalog reads "
+                f"{env_by_id[tid] or '<unset>'} but the contract pins "
+                f"{entry['url_env']}"
+            )
+        if name_by_id[tid] != entry.get("tile"):
+            failures.append(
+                f"tile '{tid}': web name {name_by_id[tid]!r} != contract "
+                f"tile name {entry.get('tile')!r}"
+            )
+    # unknown web tiles: the reverse direction of the "no tile to nowhere"
+    # rule — the web catalog must not invent functions the contract lacks
+    contract_ids = {e["id"] for e in catalog} | set(WEB_TILES_SPECIAL)
+    contract_envs = {e["url_env"] for e in catalog}
+    phantom = sorted(
+        tid for tid in env_by_id
+        if tid not in contract_ids and env_by_id[tid] not in contract_envs
+    )
+    if phantom:
+        failures.append(
+            "web catalog renders tiles unknown to contracts/tiles.yml: "
+            f"{', '.join(phantom)}"
+        )
+    # every spec key must be consumed by an order entry (no dead specs)
+    used_keys = {specs_key for _, _, specs_key in web_order}
+    dead_keys = sorted(set(web_specs) - used_keys)
+    if dead_keys:
+        failures.append(
+            "web loadServiceSpecs defines specs no order entry consumes: "
+            f"{', '.join(dead_keys)}"
+        )
+
     if failures:
         for f in failures:
             result.fail(f)
@@ -198,7 +286,9 @@ def main():
     else:
         result.ok(
             f"catalog complete: {len(catalog)} tiles ↔ routed services, "
-            f"{len(excluded)} infra surfaces excluded, COLLABORA_URL gone"
+            f"{len(excluded)} infra surfaces excluded, COLLABORA_URL gone, "
+            f"web catalog parity ok ({len(web_order)} tiles + "
+            f"{len(WEB_TILES_SPECIAL)} special)"
         )
     return 0 if result.summary() else 1
 
