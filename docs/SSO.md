@@ -277,7 +277,7 @@ Im Stack: das Portal initiiert den Logout
 `/logged-out`, registriert) und OpenClouds Web-App signiert über ihren
 App-Root aus. Live-Journey: `tests/05-e2e/logout.py`.
 
-**Stolperfalle (R17, 2026-11-18 live):** Zitadel validiert
+**Stolperfalle 1 (R17, 2026-11-18 live):** Zitadel validiert
 `post_logout_redirect_uri` gegen die beim Client registrierten
 `postLogoutRedirectUris` — eine fehlende URI antwortet **400 Bad Request**,
 und der User landet auf Zitadels Fehlerseite statt der Signed-out-Seite.
@@ -289,6 +289,21 @@ App-Root **und** Callback-Paths in einem atomaren oidc_config-PUT (R15);
 operaton macht dasselbe für den Cockpit-Sign-out.
 Layer-0-Wächter: `tests/00-static/check_oidc.py` (R17 — jeder SPA-Branch
 muss den App-Root neben den Callback-Paths registriert haben).
+
+**Stolperfalle 2 (R21, 2026-11-19 live):** Ohne gültiges `id_token_hint`
+zeigt Zitadel seine eigene Sitzungsauswahl („Click an account to end the
+session“) und landet auf `/ui/v2/login/logout/done` statt auf der
+`post_logout_redirect_uri` — der Portallogout lief damit still ins Leere
+(Session blieb am IdP erhalten). Zwei Ursachen: (a) die Next-CSP
+`form-action 'self'` blockte den Cross-Origin-Hop des 303 zur IdP-Domain
+(Chrome wendet `form-action` auch auf Redirects von Form-Submits an) —
+Fix: `portal/web/src/lib/csp.ts` erlaubt zusätzlich die `IDP_URL`-Origin
+(R21-Wächter + Mutation in `check_oidc.py`); (b) der Callback verwarf das
+`id_token` aus der Token-Antwort — Fix: `OPENSMESESSION` (der in dieser
+Doku beschriebene IdP-Token-Container) wird beim Login jetzt tatsächlich
+mit dem `id_token` gesetzt, sodass `logout.rs` ein valides
+`id_token_hint` erzeugt (Mock-IdP-Tests in `portal/src/session.rs`).
+Layer-0-Wächter: `check_oidc.py` R21 + Vitest `csp.test.ts`.
 
 **Verifizieren:**
 

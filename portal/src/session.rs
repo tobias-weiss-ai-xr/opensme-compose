@@ -423,9 +423,9 @@ pub async fn handle_callback(
             .expect("static");
     }
     match exchange_and_userinfo(&config.session, &params.code).await {
-        Ok(user) => {
+        Ok((user, id_token)) => {
             let cookie = mint_session(&config.session, &user.sub, &user.name, &user.email);
-            Response::builder()
+            let mut builder = Response::builder()
                 .status(StatusCode::FOUND)
                 .header(LOCATION, "/")
                 .header(SET_COOKIE, clear_state())
@@ -435,7 +435,26 @@ pub async fn handle_callback(
                         "{PORTAL_SESSION_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Lax; Secure; \
                          Max-Age={SESSION_TTL}"
                     ),
-                )
+                );
+            // Persist the id_token in the OPENSMESESSION cookie: logout uses
+            // it as `id_token_hint` so Zitadel ends THIS session and bounces
+            // back to post_logout_redirect_uri (/logged-out). Without a valid
+            // hint Zitadel shows its session picker and lands on
+            // /logout/done (found live 2026-11-19 — the cookie had never been
+            // set, the login discarded the id_token). Clear a stale value when
+            // the token response carries none.
+            let id_token_hdr = match id_token {
+                Some(tok) if !tok.is_empty() => format!(
+                    "{}={tok}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age={SESSION_TTL}",
+                    crate::logout::SESSION_COOKIE
+                ),
+                _ => format!(
+                    "{}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0",
+                    crate::logout::SESSION_COOKIE
+                ),
+            };
+            builder = builder.header(SET_COOKIE, id_token_hdr);
+            builder
                 .body(axum::body::Body::empty())
                 .expect("static")
         }
@@ -484,6 +503,11 @@ impl std::fmt::Display for ExchangeError {
 #[derive(Deserialize)]
 struct TokenResponse {
     access_token: String,
+    /// IdP-issued id_token (RP-initiated logout: used as `id_token_hint` to
+    /// let Zitadel terminate the exact session and redirect to
+    /// post_logout_redirect_uri instead of showing its session picker).
+    #[serde(default)]
+    id_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -505,7 +529,10 @@ struct UserinfoResponse {
 /// the compose network in demo/CI). Those stacks' Zitadel only serves the
 /// OIDC surface for its EXTERNAL domain, so the public `Host` is sent
 /// explicitly; production (no internal base) keeps the default Host.
-async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserInfo, ExchangeError> {
+async fn exchange_and_userinfo(
+    cfg: &SessionConfig,
+    code: &str,
+) -> Result<(UserInfo, Option<String>), ExchangeError> {
     let base = cfg.idp_internal_base();
     // Zitadel v4.19 serves the token endpoint at /oauth/v2/token (the
     // discovery document, what every other integration uses) — /oidc/v1/
@@ -563,11 +590,14 @@ async fn exchange_and_userinfo(cfg: &SessionConfig, code: &str) -> Result<UserIn
         return Err(ExchangeError::NoSubject);
     }
     let sub = info.sub;
-    Ok(UserInfo {
-        sub: sub.clone(),
-        name: info.name.or(info.preferred_username).unwrap_or(sub),
-        email: info.email.unwrap_or_default(),
-    })
+    Ok((
+        UserInfo {
+            sub: sub.clone(),
+            name: info.name.or(info.preferred_username).unwrap_or(sub),
+            email: info.email.unwrap_or_default(),
+        },
+        token.id_token,
+    ))
 }
 
 #[cfg(test)]
@@ -961,10 +991,13 @@ mod tests {
 
         let mut sc = cfg();
         sc.idp_url = format!("http://{addr}");
-        let user = exchange_and_userinfo(&sc, "good-code").await.unwrap();
+        let (user, id_token) = exchange_and_userinfo(&sc, "good-code").await.unwrap();
         assert_eq!(user.sub, "user-mock");
         assert_eq!(user.name, "mockuser");
         assert_eq!(user.email, "m@example");
+        // no id_token in this mock — the callback must then set NO id_token
+        // cookie (the portal session alone stays valid)
+        assert!(id_token.is_none());
 
         assert!(matches!(
             exchange_and_userinfo(&sc, "bad-code").await,
@@ -988,7 +1021,11 @@ mod tests {
                             if code == "good-code" {
                                 (
                                     StatusCode::OK,
-                                    axum::Json(serde_json::json!({ "access_token": "at-123" })),
+                                    axum::Json(serde_json::json!({
+                                        "access_token": "at-123",
+                                        "id_token": "it-123",
+                                        "token_type": "Bearer",
+                                    })),
                                 )
                             } else {
                                 (StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({})))
@@ -1056,6 +1093,20 @@ mod tests {
         let s = verify_session(&sc, value).expect("minted session verifies");
         assert_eq!(s.sub, "user-mock");
         assert_eq!(s.name, "Mock User");
+
+        // R21: the id_token from the token response must be persisted in the
+        // OPENSMESESSION cookie so the logout end_session carries a valid
+        // id_token_hint — without it Zitadel shows its session picker and
+        // lands on /logout/done instead of redirecting to the portal's
+        // /logged-out (post_logout_redirect_uri).
+        let id_token_cookie = cookies
+            .iter()
+            .find(|c| c.starts_with("OPENSMESESSION="))
+            .expect("id_token cookie set from the token response");
+        let id_token = id_token_cookie.split_once('=').unwrap().1.split(';').next().unwrap();
+        assert_eq!(id_token, "it-123");
+        assert!(id_token_cookie.contains("HttpOnly"), "id_token cookie must be HttpOnly");
+        assert!(id_token_cookie.contains("Secure"), "id_token cookie must be Secure");
 
         // wrong state → 400, no session cookie
         let mut app = crate::tests::cfg_with("", None, "");
