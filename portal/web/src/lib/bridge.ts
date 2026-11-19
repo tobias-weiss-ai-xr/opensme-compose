@@ -104,7 +104,11 @@ export function subscribeBridge(listener: () => void): () => void {
 export function useSlot<K extends BridgeSlot>(
   slot: K,
 ): BridgeProviderMap[K] | null {
-  return useSyncExternalStore(subscribeBridge, () => getProvider(slot));
+  return useSyncExternalStore(
+    subscribeBridge,
+    () => getProvider(slot),
+    () => null, // server snapshot: nothing registers in effects during SSR
+  );
 }
 
 /** Test helper only — clears every registration between tests. */

@@ -1,8 +1,10 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   getProvider,
   registerProvider,
   resetBridgeForTests,
+  useSlot,
   type BridgeProviderMap,
   type CloudPickProvider,
 } from "./bridge";
@@ -77,5 +79,18 @@ describe("bridge registry", () => {
     registerProvider("share.open", { open: vi.fn() });
     expect(getProvider("share.open")).not.toBeNull();
     expect(getProvider("cloud.pick")).toBeNull();
+  });
+
+  it("is SSR-safe: renderToStaticMarkup falls back to the null server snapshot", () => {
+    // A provider registered before the server render must NOT leak into the
+    // server output — the R21-CSP errors proved this class of bug before.
+    registerProvider("cloud.pick", { pick: async () => null });
+    function Consumer() {
+      const picker = useSlot("cloud.pick");
+      return createElement("button", null, picker ? "has-provider" : "none");
+    }
+    const html = renderToStaticMarkup(createElement(Consumer));
+    expect(html).toContain("none");
+    expect(html).not.toContain("has-provider");
   });
 });
