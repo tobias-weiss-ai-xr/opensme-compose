@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { buildCsp, idpOriginFromUrl } from "./lib/csp";
 
 /**
  * Nonce-based CSP. Next.js's App Router flushes inline bootstrap scripts,
@@ -7,6 +8,10 @@ import { NextResponse } from "next/server";
  * from the CSP header and tags its inline scripts with the same nonce,
  * while `'unsafe-inline'` stays out of script-src — untrusted feed /
  * intercom / poll text rendered into the DOM cannot execute inline handlers.
+ *
+ * IDP_URL is allow-listed in `form-action` (see lib/csp.ts): the logout
+ * form POST /api/logout 303s to the IdP end-session endpoint — a
+ * cross-origin hop Chrome enforces against `form-action`.
  */
 
 export function middleware() {
@@ -14,21 +19,11 @@ export function middleware() {
     "base64",
   );
 
-  const csp = [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
-    "frame-src 'none'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join("; ");
-
   const response = NextResponse.next();
-  response.headers.set("Content-Security-Policy", csp);
+  response.headers.set(
+    "Content-Security-Policy",
+    buildCsp(nonce, idpOriginFromUrl(process.env.IDP_URL)),
+  );
   return response;
 }
 

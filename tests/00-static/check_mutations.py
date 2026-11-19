@@ -95,6 +95,17 @@ MUTATIONS = [
         "why": "§7 — synapse public_baseurl must derive from SYNAPSE_SERVER_NAME",
     },
     {
+        "name": "slo-portal-csp-idp",
+        "file": "portal/web/src/middleware.ts",
+        "old": "process.env.IDP_URL",
+        "new": "process.env.IDP_URL_STRIPPED",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R21 — the logout 303 hop to the IdP end-session is blocked by "
+              "form-action 'self' unless the middleware allow-lists the "
+              "IDP_URL origin (Chrome enforces form-action on redirects of "
+              "form submissions)",
+    },
+    {
         "name": "oidc-client-ref",
         "file": "services/notes.yml",
         "old": "NOTES_OIDC_CLIENT_ID",

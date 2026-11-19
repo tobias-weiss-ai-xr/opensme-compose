@@ -589,6 +589,46 @@ def check_post_logout_uris(result: Result) -> None:
         )
 
 
+def check_portal_logout_csp(result: Result) -> None:
+    """R21 — the portal-web CSP must allow-list the IdP origin.
+
+    The logout button is a native form POST /api/logout; the Rust handler
+    303s to the IdP end-session URL (cross-origin). Chrome enforces
+    `form-action` on redirects of form submissions, so a `form-action
+    'self'`-only CSP silently swallows the hop: the POST clears the portal
+    cookie, but the browser aborts the redirect and the IdP session
+    survives (found live 2026-11-19; the misleading console message names
+    the POST target, not the blocked hop).
+
+    Contract: the middleware must build the CSP through lib/csp.ts, which
+    derives the form-action allow-list from process.env.IDP_URL; compose
+    must pass IDP_URL to the portal-web service (so the middleware can
+    read it at runtime).
+    """
+    mw = ROOT / "portal" / "web" / "src" / "middleware.ts"
+    if not mw.exists():
+        result.fail("portal/web/src/middleware.ts missing — cannot verify CSP")
+        return
+    text = mw.read_text()
+    if "buildCsp" not in text or "idpOriginFromUrl" not in text:
+        result.fail(
+            "middleware.ts must build the CSP through lib/csp.ts "
+            "(buildCsp + idpOriginFromUrl) — the logout 303 hop to the IdP "
+            "is blocked by form-action 'self' otherwise (R21)"
+        )
+    elif not re.search(r"process\.env\.IDP_URL\b", text):
+        result.fail(
+            "middleware.ts must derive the form-action IdP allow-list from "
+            "process.env.IDP_URL — a hardcoded origin drifts from compose "
+            "and breaks logout on renamed domains"
+        )
+    else:
+        result.ok(
+            "portal-web CSP: form-action allow-lists the IdP origin for the "
+            "logout 303 hop (lib/csp.ts + IDP_URL)"
+        )
+
+
 def check_sogo_sso_repair_script(result: Result) -> None:
     """R13 — scripts/fix-sogo-sso.sh must cover every login identity AND logout.
 
@@ -956,6 +996,7 @@ def main() -> bool:
 
     # ── R17: SPA sign-out URIs registered (end_session post_logout) ──
     check_post_logout_uris(result)
+    check_portal_logout_csp(result)
 
     # ── R10: server-side IdP dialers must pin the hostname (alias shadow) ──
     check_idp_dialer_pins(result)
