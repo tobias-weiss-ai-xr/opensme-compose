@@ -74,20 +74,23 @@
       Teilen-Affordance — alles wie Spec-Szenarien
 
 
-## Nachtrag R22 (Live-Verify, 2026-02-17)
+## Nachtrag R22 (Live-Verify, 2026-02-17) — ALLE Szenarien grün
 
 LIVE (Playwright, home.opensme.graphwiz.ai, testuser):
 - Feed „Ins Team teilen" öffnet Notizen-Komposer vorbefüllt (Titel+Link),
   Post legt die Notiz real an (geteilter Artikel als Notiz sichtbar).
-- Fail-soft/fehlerfrei: ohne Anbieter (ausgeloggt) keine Share-UI.
+- Cloud-Bridge („Aus der Cloud anhängen"): Picker listet die Datei,
+  Auswahl füllt die Anhang-URL mit dem geteilten Cloud-Link.
+- „In Cloud ablegen": lokale Datei wird real in der Cloud abgelegt,
+  Anhang wechselt auf den geteilten Cloud-Link (durabler Pfad).
+- Fail-soft: ohne Anbieter (ausgeloggt) keine Share-UI.
 
-Eingeschränkt (Umgebungs-Blocker, NICHT durch R22 verursacht):
-- Cloud-Szenarien (T3, 3.4) sind unit-getestet (CloudPickerProvider /
-  postCloudShare / uploadCloudFile Pfad) und zeigen live den
-  grazilen Fehlerpfad (Modal „Cloud-Liste fehlgeschlagen" + Retry),
-  können aber nicht durchspielen: die Portal-Cloud-Bridge antwortet
-  upstream 401 — `GET /api/cloud/health` → `{"healthy":false}`,
-  `GET /api/cloud/list` → 502 (HTTP 401). Config unverändert
-  (CLOUD_WEBDAV_USER=umfragen-bot, OPENCLOUD_ENABLE_BASIC_AUTH off
-  laut docs/opencloud.md). Follow-up: DAV-Serviceaccount/Basic-Auth
-  am OpenCloud-Host verifizieren.
+Dabei behobene Betriebsfehler (commits b577d97):
+- `umfragen-bot` fehlte im OpenCloud-User-Store (nur admin+testuser) —
+  alle DAV/OCS 401. Über die Graph-API mit dem konfigurierten Passwort
+  neu angelegt; kein .env-Umbau nötig.
+- `check_health` (Rust) probte `<user-dav-base>/health/ready` (404 trotz
+  gültiger Auth) statt Host-Root `/health/ready` → `health_endpoint()`.
+- `/api/cloud/list` (Next) leitete die Session nicht an den geschützten
+  Rust-Endpoint `/api/cloud/files/metadata` weiter → immer 401 in
+  Produktion. Inbound-Cookie wird jetzt weitergegeben (4 Route-Tests).
