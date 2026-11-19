@@ -65,6 +65,7 @@ LAYERS = {
             ("Webmail SSO backchannel (stalwart)", "tests/00-static/check_webmail_sso.py"),
             ("Outbound LLM payload patterns", "tests/00-static/check_outbound_patterns.py"),
             ("Notes celery broker auth", "tests/00-static/check_notes_broker.py"),
+            ("Suite-monitor guards (M1–M9)", "tests/00-static/check_monitoring.py"),
             ("Dev-maintenance-bot agent lint", "tests/00-static/check_agent.py"),
             ("Backup drift guard", "tests/00-static/check_backup.py"),
             ("Env-quote hardening (brand/loader)", "tests/00-static/check_env_quote.py"),

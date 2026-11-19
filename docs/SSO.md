@@ -12,10 +12,12 @@ API; `ZITADEL_EXTERNALSECURE=false`, `ZITADEL_EXTERNALPORT=443`, Hostname
 `auth.home.opensme.graphwiz.ai`, TLS endet am Edge-Traefik) — und jede
 einzelne Anwendung als OIDC-Relying-Party. Ein Login am IdP gilt für alle
 Dienste; Abmeldung läuft als RP-initiated Logout über die geteilte IdP-Session
-(`portal/src/logout.rs`).
+(siehe [Logout](#logout-rp-initiated--single-sign-out);
+`portal/src/logout.rs`).
 
 Alle Angaben in diesem Dokument sind **live verifiziert am 2026-10-26** auf
-`opensme.graphwiz.ai`, sofern nicht anders vermerkt. Das Dokument ist
+`opensme.graphwiz.ai`, sofern nicht anders vermerkt; nachgetragen und
+re-verifiziert bis **2026-11-18** (R15/R17). Das Dokument ist
 erklärend — normativ sind die Compose-Dateien, [`specs/`](../specs/),
 [`contracts/`](../contracts/) und [`tests/`](../tests/) (siehe
 [docs/README.md](README.md)). Die ausführbaren Gegenstücke zu jedem Abschnitt:
@@ -23,10 +25,13 @@ erklärend — normativ sind die Compose-Dateien, [`specs/`](../specs/),
 | Abschnitt | Erzwungen durch |
 |---|---|
 | Client-Registrierung (R1–R3) | `tests/00-static/check_oidc.py` (Layer 0) |
+| Atomare oidc_config-Enforcement (R15) | `tests/00-static/check_oidc.py` |
+| SPA-Sign-out-URIs registriert (R17) | `tests/00-static/check_oidc.py` |
 | Login-UI deklariert (R7) | `tests/00-static/check_oidc.py` |
 | Backchannel-Pin + Autoprovisioning (R4/R5) | `tests/00-static/check_oidc.py` |
 | Redirect-Gesundheit pro Dienst | `scripts/sso-check.sh` (`make sso-check`) |
 | Headless-Login-Beweis (Session-API) | `tests/05-e2e/run.py` (`make e2e`) |
+| Logout-/Single-Sign-out-Flow | `tests/05-e2e/logout.py` (Portal→IdP→OpenCloud) |
 
 ## Architektur
 
@@ -69,11 +74,11 @@ Paar in `.env` unter den Schlüsseln der jeweiligen App).
 
 ## Status-Tabelle
 
-Stand: **2026-10-27** (CI-verifiziert auf HEAD; Live-Zeile so weit wie möglich).
+Stand: **2026-11-18** (CI-verifiziert auf HEAD; Live-Zeile so weit wie möglich).
 
 | Dienst | Client | Status | Anmerkung |
 |---|---|---|---|
-| OpenCloud (Dateien/ocis) | `opencloud` (`OC_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Headless-Beweis: authorize → v2 Session API → JWT → OCS `/ocs/v1.php/cloud/user` 200 **+** WebDAV 200 als `zitadel-admin@opensme.auth.home.opensme.graphwiz.ai`. Braucht zwingend `OIDC_TOKEN_TYPE_JWT` + Backchannel-Pin + Autoprovisioning (Abschnitte unten). **Regression 2026-10-30: Browser-Login brach am Token-Endpoint (`invalid_client: empty client secret`) — die SPA-App war als confidential/BASIC angelegt**, ein öffentliches PKCE-SPA kann das nie nutzen. Fix: `OIDC_AUTH_METHOD_TYPE_NONE` via `PUT …/apps/{id}/oidc_config`; `scripts/zitadel-client.sh` erzwingt das dauerhaft (opencloud-Branch `USE_PUBLIC_AUTH=1` → `enforce_auth_method_none`). **Re-verifiziert 2026-10-30 im Browser: Login → `/files/spaces/personal/testuer@…` (pers. Raum, 1 Item).** |
+| OpenCloud (Dateien/ocis) | `opencloud` (`OC_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Headless-Beweis: authorize → v2 Session API → JWT → OCS `/ocs/v1.php/cloud/user` 200 **+** WebDAV 200 als `zitadel-admin@opensme.auth.home.opensme.graphwiz.ai`. Braucht zwingend `OIDC_TOKEN_TYPE_JWT` + Backchannel-Pin + Autoprovisioning (Abschnitte unten). **Regression 2026-10-30: Browser-Login brach am Token-Endpoint (`invalid_client: empty client secret`) — die SPA-App war als confidential/BASIC angelegt**, ein öffentliches PKCE-SPA kann das nie nutzen. Fix: `OIDC_AUTH_METHOD_TYPE_NONE` via `PUT …/apps/{id}/oidc_config`; `scripts/zitadel-client.sh` erzwingt das dauerhaft (opencloud-Branch `USE_PUBLIC_AUTH=1` → `enforce_auth_method_none`). **Re-verifiziert 2026-10-30 im Browser: Login → `/files/spaces/personal/testuer@…` (pers. Raum, 1 Item).** **Sign-out-Regression 2026-11-18 behoben (R17):** Der SPA-Sign-out ruft Zitadels end-session-Endpoint mit `post_logout_redirect_uri` = App-Root — der offene Fallback auf die nackten Callback-Paths antwortete **400** und der User landete auf Zitadels Fehlerseite. Fix: `POST_LOGOUT_OVERRIDE` registriert `https://<app_domain>/` + Callback-Paths als `postLogoutRedirectUris` (atomarer PUT, idempotent); live 302 verifiziert. Details: [Logout](#logout-rp-initiated--single-sign-out). |
 | Chat (Element/Synapse) | `opensme-synapse` (`SYNAPSE_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Synapse-SSO: `/login/sso/redirect` → 302 auf Zitadel-Authorize mit PKCE. Element: `base_url` **und** `server_name` sind beide `matrix.home.opensme.graphwiz.ai` — `server_name` wird im Entrypoint aus `ELEMENT_DEFAULT_SERVER_URL` abgeleitet (kein `ELEMENT_HOMESERVER_NAME`), kann also nicht desyncen. **Regression 2026-10-30: OIDC-Callback „localpart is invalid“ → „Numeric user IDs are reserved“ — Zitadel-ID-Token tragen hier keine email/name/preferred_username-Claims** (nur `sub`+Metadata; Profile-Claims kommen ausschließlich über `/oidc/v1/userinfo`). Fix in `services/synapse-setup.sh`: `localpart_template: "u_{{ user.sub }}"` (claim-unabhängig, valid). **Re-verifiziert 2026-10-30 im Browser: Element `#/home` als `@u_397215662709145620`.** |
 | Notes (Impress) | `opensme-notes` (`NOTES_OIDC_CLIENT_ID`) | ✅ VERIFIZIERT | Client registriert, Redirect auf den IdP funktioniert; **Browser-SSO-Flow 2026-10-30 verifiziert: Zitadel-Login als testuer → Backend-Board gelandet.** |
 | Webmail (SOGo6) | `sogo-webmail` (`SOGO_OIDC_CLIENT_ID`) | 🟢 **live: echter OIDC-SSO end-to-end verifiziert** | Client registriert via `scripts/zitadel-client.sh --app sogo` (registriert auch den sogo6-Callback `{PUBLIC_BASE}/api/user/v1/auth/callback/{domain}` als Redirect-URI). **Stand 2026-10-31 (SSO-Ticket geschlossen):** sogo6 ist ein echtes OIDC-RP — `POST /de/ → email` triggert `kind:"sso"` + authorize-URL (`/api/user/v1/auth/mode`), Browser geht automatisch zu Zitadel `/ui/v2/login`, nach Login → Callback → JWT-Voucher (`302 → /auth/callback#token=<jwt>`, uid = Zitadel-`loginName`) → Frontend-Pickup → **`/de/u/0/INBOX` (Session via `/api/sse` 200, testuer authentifiziert)**. Voraussetzungen live: (a) Zitadel-App `397489856642613268` + `SOGO_OIDC_CLIENT_ID/SECRET` in `/opt/opensme-compose/.env`; (b) DB `AUTH_SETTINGS` = `openid` + CONFIG_URL `https://auth.home…` + Client-Name/-Secret (Patch in Live-DB); (c) `extra_hosts: auth.home…:host-gateway` am sogo6-server (OIDC-Discovery/Token holt Router „Traefik offline AFAIA bastelt nicht“ — Nachbau: siehe weiter unten); (d) **UI-Proxy-Fix** (SOGo6-UI `route.ts`): `fetch(...,{redirect:'manual'})` — sonst frisst die Next-Proxy-Schicht die Backend-302 und verliert das `#token`, der Browser bleibt am Callback hängen (Live-Bundle-Hotpatch liegt ein, Image-Rebuild aus dem fix gebauten Repo ersetzt ihn). **Weiterhin offen (pre-existing Open Item):** die **Postfach-UI rendert nicht** — sogo6→Stalwart-IMAP-LOGIN wird abgelehnt (Stalwart-Directory=`oidc` = Plain nur App-Passwörter; XOAUTH2/OAUTHBEARER bräuchte das IdP-Zugriffstoken, das im `user.password` steckt, aber der Webmail-IMAP-Client sendet Plain). Nebenbefund früher behoben: Domain-Settings zeigten auf toten Hostname `sogo6-stalwart:993` → `stalwart:143`/`587`/STARTTLS (Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`). Optionen: App-Passwörter seeden **oder** IMAP-OAUTHBEARER (siehe `docs/operaton-sso.md`-Muster). **✅ RESOLUT 2026-10-31 (sogo→stalwart-App-Passwort-Seeding):** Postfach rendert end-to-end — (e) `SOGO_D_{IMAP,SMTP,SIEVE}_AUTH_MECH=xoauth2` (Access-Token als XOAUTH2 statt Plain; Live-DB + SOGo6-server-Repo `scripts/init/domain_settings.json`), (f) UI-Image `sogo6-ui:latest` aus Main `31538d2b` neu gebaut (im alten 10-26-Build fehlte der `memo`-Fix `8ae412be` → Client-Crash `memo is not defined`), (g) App-Passwörter via Stalwart-0.15-REST `POST/GET /api/account/auth` (self-service, Bearer = OIDC-Token) — Skript `scripts/stalwart-app-password.sh`. Verifikation: Browser-E2E → INBOX „1 Nachricht“, SMTP-XOAUTH2 `235`, IMAP-LOGIN mit App-Passwort OK (Details: Abschnitt „Stalwart App-Passwörter (sogo→stalwart)“). |
@@ -160,23 +165,44 @@ Secret korrekt sind — der Fehler sieht aus wie ein Netzwerk-/Konfig-Problem
 und ist es nicht.
 
 **Stolperfalle:** Der Token-Typ ist nur über den spezialisierten Endpunkt
-änderbar:
+änderbar — und der Endpunkt ist **full-replace** (siehe
+[Zweitete Stolperfalle](#zweitete-stolperfalle-oidc_config-put-ist-full-replace-r15)
+unterhalb; deshalb zeigt das Beispiel schon den vollständigen Body):
 
 ```sh
-# RICHTIG: oidc_config-Endpunkt
+# RICHTIG: oidc_config-Endpunkt — als EIN atomarer PUT mit ALLEN Feldern
+# (abwesende Felder werden auf den Default zurückgesetzt!). Nicht
+# handrollen — scripts/zitadel-client.sh macht das idempotent:
 curl -X PUT "https://auth.home.opensme.graphwiz.ai/management/v1/projects/${PID}/apps/${APPID}/oidc_config" \
   -H "Authorization: Bearer ${ZITADEL_PAT}" \
   -H 'Content-Type: application/json' \
-  -d '{"accessTokenType": "OIDC_TOKEN_TYPE_JWT"}'
+  -d '{"appType":"…","authMethodType":"…","accessTokenType":"OIDC_TOKEN_TYPE_JWT",
+       "redirectUris":["…"],"postLogoutRedirectUris":["…"],"grantTypes":["…"]}'
 ```
 
 Das generische `PUT /management/v1/projects/{pid}/apps/{appid}` antwortet
-höflich `No changes` und ändert den Token-Typ **nicht** — der Client bleibt
-opaque und ocis bleibt kaputt. Nach dem Umstellen Client-Secret nicht
-ändern müssen; ein Re-Login erzwingen (alte Tokens bleiben bis Ablauf opaque).
+höflich `No changes` und ändert den Token-Typ **nicht**. Nach dem Umstellen
+Client-Secret nicht ändern müssen; ein Re-Login erzwingen (alte Tokens bleiben
+bis Ablauf opaque).
 
-Die Clients selbst registriert [`scripts/zitadel-client.sh`](../scripts/zitadel-client.sh);
-der Token-Typ-Switch ist eine einmalige Management-API-Aktion danach.
+### Zweitete Stolperfalle: oidc_config-PUT ist FULL-REPLACE (R15)
+
+Zitadels `PUT …/apps/{id}/oidc_config` behandelt **abwesende Felder als
+Reset auf den Default** — ein minimaler Body oder mehrere sequenzielle
+Ein-Feld-PUTs zerstören sich gegenseitig. Live 2026-11-18: ein
+redirectUris-PUT setzte `accessTokenType` auf den Default (OPAQUE)
+zurück, nachdem der Token-Typ-PUT ihn auf JWT gesetzt hatte — der
+JWKS-validierende Client bekam opaque Tokens (`token contains an invalid
+number of segments`) und jeder Login endete auf „Access denied“.
+
+Deshalb: **genau EIN atomarer PUT mit allen Feldern** (appType,
+authMethodType, accessTokenType, redirectUris, postLogoutRedirectUris,
+grantTypes). Der kanonische Weg ist nicht der Hand-Curl, sondern
+[`scripts/zitadel-client.sh`](../scripts/zitadel-client.sh) — er berechnet
+die komplette Config pro App-Branch und schreibt sie als einen PUT
+(idempotent: unveränderte Config antwortet `No changes`).
+Layer-0-Wächter: `tests/00-static/check_oidc.py` (R15 — das Skript darf
+keine sequenziellen Ein-Feld-Enforcements mehr enthalten).
 
 ## ocis-Backchannel-Pin
 
@@ -233,6 +259,44 @@ PROXY_USER_CS3_CLAIM: username
 Der `default`-Driver gibt jedem authentifizierten Subjekt die eingebaute
 Nutzerrolle — robust, solange der IdP keine Gruppen-Rollen mapped.
 Layer-0-Wächter: `tests/00-static/check_oidc.py` (R5).
+
+## Logout (RP-initiated + Single Sign-Out)
+
+Die Abmeldung läuft als **RP-initiated Logout** über die geteilte IdP-Session:
+
+1. Die SPA/Backend leitet den Browser auf Zitadels End-Session-Endpoint
+   (`/oidc/v1/end_session` bzw. die Discovery-Angabe `end_session_endpoint`)
+   mit `id_token_hint` und `post_logout_redirect_uri`.
+2. Zitadel beendet die **geteilte IdP-Session** — jedes andere RP im Stack
+   muss sich danach neu authentifizieren (Single Sign-Out).
+3. Zitadel redirectet auf `post_logout_redirect_uri` — die Landing-Page
+   „Sie sind abgemeldet“ des auslösenden Dienstes.
+
+Im Stack: das Portal initiiert den Logout
+([`portal/src/logout.rs`](../portal/src/logout.rs), eigene SLO-Landing
+`/logged-out`, registriert) und OpenClouds Web-App signiert über ihren
+App-Root aus. Live-Journey: `tests/05-e2e/logout.py`.
+
+**Stolperfalle (R17, 2026-11-18 live):** Zitadel validiert
+`post_logout_redirect_uri` gegen die beim Client registrierten
+`postLogoutRedirectUris` — eine fehlende URI antwortet **400 Bad Request**,
+und der User landet auf Zitadels Fehlerseite statt der Signed-out-Seite.
+OpenClouds Fallback registrierte nur die nackten Callback-Paths, die Web-App
+schickt aber den **App-Root** (`https://<app_domain>/`) — hence 400.
+Fix: `POST_LOGOUT_OVERRIDE` im opencloud-Branch von
+[`scripts/zitadel-client.sh`](../scripts/zitadel-client.sh) registriert
+App-Root **und** Callback-Paths in einem atomaren oidc_config-PUT (R15);
+operaton macht dasselbe für den Cockpit-Sign-out.
+Layer-0-Wächter: `tests/00-static/check_oidc.py` (R17 — jeder SPA-Branch
+muss den App-Root neben den Callback-Paths registriert haben).
+
+**Verifizieren:**
+
+```sh
+# end_session mit registrierter URI → 302 (unregistrierte → 400)
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  'https://auth.home.opensme.graphwiz.ai/oidc/v1/end_session?id_token_hint=<JWT>&post_logout_redirect_uri=https%3A%2F%2Fcloud.home.opensme.graphwiz.ai%2F'
+```
 
 ## Ops-Runbook
 

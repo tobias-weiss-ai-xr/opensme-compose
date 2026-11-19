@@ -17,6 +17,14 @@ How the stack is sized, tuned, and kept efficient across the three VPS tiers
    services are disabled, not just resized.
 4. **Measure, don't assert.** `scripts make bench` records memory + latency
    before/after on a live host; CI keeps the static invariants.
+5. **Measure at the edge.** Request latency is read from the Traefik edge
+   access log (trailing `NNms` field = bytes delivered to the browser) —
+   never from OpenCloud's own access log, whose `duration=` field reports
+   the age of the upstream TCP connection (Traefik keep-alive pool), not
+   request latency (proven live 2026-11-18: client 0.03-0.35 s vs
+   OpenCloud-logged 7.4-53.6 s). The cron suite monitor
+   (`scripts/suite-monitor.sh`, check C5) scans the edge log;
+   `tests/00-static/check_monitoring.py` (M9) guards the rule.
 
 ## Per-tier runtime parameters
 

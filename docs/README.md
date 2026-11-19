@@ -53,8 +53,8 @@ directories:
 
 | Document | What it covers |
 |---|---|
-| [PERFORMANCE.md](PERFORMANCE.md) | Reservations-first sizing, per-tier parameters (PostgreSQL, PgBouncer, Redis/Memcached, Traefik), boot ordering, hardening defaults |
-| [SSO.md](SSO.md) | SSO-Architektur & Login-Durchgänge — Zitadel/OIDC-Flow, Status-Matrix aller Dienste, Login-UI, Token-Typen, Backchannel-Pin, Ops-Runbook |
+| [PERFORMANCE.md](PERFORMANCE.md) | Reservations-first sizing, per-tier parameters (PostgreSQL, PgBouncer, Redis/Memcached, Traefik), boot ordering, hardening defaults, edge-first latency measurement |
+| [SSO.md](SSO.md) | SSO-Architektur & Login-Durchgänge — Zitadel/OIDC-Flow, Status-Matrix aller Dienste, Login-UI, Token-Typen, atomare oidc_config (R15), Logout/Single Sign-Out (R17), Backchannel-Pin, Ops-Runbook |
 | [perf/README.md](perf/README.md) | Per-tier “what may run” matrix + benchmark protocol |
 | [perf/baselines.md](perf/baselines.md) | Measured resource numbers per tier |
 | [perf/benchmark-run.md](perf/benchmark-run.md) | How a benchmark run is recorded (`make bench`) |
@@ -70,7 +70,7 @@ directories:
 
 | Document | What it covers |
 |---|---|
-| [VALIDATION.md](VALIDATION.md) | Test layers, layer-0 check inventory, the static gate CI blocks on, release checklist |
+| [VALIDATION.md](VALIDATION.md) | Test layers, layer-0 check inventory, the static gate CI blocks on, the cron suite monitor (C1–C5), release checklist |
 | [E2E-JOURNEYS.md](E2E-JOURNEYS.md) | Epics and user stories, and the exact e2e tests that prove them |
 | [tests/README.md](../tests/README.md) | The pyramid layer by layer, how to run and extend it |
 

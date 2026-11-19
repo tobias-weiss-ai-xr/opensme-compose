@@ -13,6 +13,7 @@ How the openSME Compose distribution is validated before release.
 | 0 · Backup coverage | `tests/00-static/check_backup.py` — every stateful volume the fragments ship is in backup.sh (drift guard) | ✅ |
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
 | 0 · Agent lint | `tests/00-static/check_agent.py` — dev-maintenance-bot knowledge/spec parity | ✅ |
+| 0 · Suite monitor guards | `tests/00-static/check_monitoring.py` — M1–M9 pin the cron suite monitor (health/edge probes/JWT/auth-errors/**edge-latency**); local Layer-0 sweep (`tests/00-static/run.sh`), deliberately not a `run.py` CI entry | — |
 | 0 · Suite coverage | `tests/00-static/check_suite_coverage.py` — no silently-dead checks (inventory below) | ✅ |
 | 0 · Mutation tests | `tests/00-static/check_mutations.py` — every wired check has teeth (mutation-flipped) or a documented shadow-incompat reason; full-coverage self-check | ✅ |
 | 0 · Env-quote hardening | `tests/00-static/check_env_quote.py` — brand.sh emits quoted env values; dotenv loaders scrub unquoted multi-word values (backup + warning, never die, idempotent) before `source` | ✅ |
@@ -25,6 +26,7 @@ How the openSME Compose distribution is validated before release.
 | 6 · Security | hardening audit: exposed ports, secrets, TLS, privileges | host |
 | 7 · Bench | `tests/07-bench/run_bench.py` — memory + p50/p95/p99 latency | optional (manual) |
 | 8 · K8s | cluster deployment health (`tests/08-k8s`) | host |
+| Live monitor | cron `*/5 * * * *` runs `scripts/suite-monitor.sh`: C1 container health, C2 edge probes (status + timing), C3 JWT mint, C4 auth-error log scan, C5 **Traefik edge** slow-request scan (mail alert + cooldown) — C5 deliberately reads the edge log, because OpenCloud's own access-log durations measure the upstream TCP connection age, not latency (see `docs/opencloud.md` §3.11) | host |
 | Portal | `cargo test` in `portal/` — in-process HTTP contract tests, mock AI upstream, proptest fuzzing of parsers | ✅ |
 
 Run everything locally: `make test-static`, `make test-all`, `make bench`,
@@ -76,6 +78,7 @@ CI step or on its documented allowlist.
 - [x] `check_env_quote.py` — env-quote hardening: brand.sh writes double-quoted values; the byte-identical loader block in calendar-setup.sh/demo-data.sh rewrites unquoted multi-word values quoted in place (.bak-<date> + file+line warning) before `source`, never dies, idempotent
 - [x] `check_interop.py` — interoperability surfaces (SSO, routing, Redis auth)
 - [x] `check_mail_backend.py` — mail backend switch (XOR)
+- [x] `check_monitoring.py` — suite-monitor guards M1–M9: cron monitor exists, guards (accessTokenType event-store, opaque-token signature, traefik edge-latency C5, container health, mail alerting + cooldown, cron wiring); forbids opencloud access-log durations as a latency signal (M9 — they measure the upstream TCP connection age)
 - [x] `check_mutations.py` — every wired check has teeth (mutation-flipped red) or a documented shadow-incompat reason; prints `mutation-coverage: N/M` and fails on any uncovered wired check
 - [x] `check_oidc.py` — Zitadel OIDC client registration
 - [x] `check_outbound_patterns.py` — outbound LLM payload pattern catalog still detects secrets/IPs/paths/hosts (teeth for AE1)

@@ -141,12 +141,24 @@ MUTATIONS = [
     {
         "name": "sso-oidc-app-tokentype",
         "file": "scripts/zitadel-client.sh",
-        "old": "accessTokenType: $tokentype,",
-        "new": 'accessTokenType: "OIDC_TOKEN_TYPE_OPAQUE",',
+        "old": '     accessTokenType: $tokentype,\n     responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],',
+        "new": '     accessTokenType: "OIDC_TOKEN_TYPE_OPAQUE",\n     responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],',
         "check": "tests/00-static/check_oidc.py",
         "why": "R8 — the OIDC app must be registered with JWT access "
               "tokens; Zitadel's OPAQUE default is rejected by every "
               "JWKS-validating backend (ocis: 'invalid number of segments')",
+    },
+    {
+        "name": "suite-c5-edge-latency",
+        "file": "scripts/suite-monitor.sh",
+        "old": 'slow=$(docker logs traefik --since "$since" 2>&1 \\\n    | grep -E \'"cloud-.*@file"\' \\',
+        "new": 'slow=$(docker logs opensme-opencloud --since "$since" 2>&1 \\\n    | grep "access-log" \\\n    | grep -oE \'duration=[0-9.]+\' | head -5) \\',
+        "check": "tests/00-static/check_monitoring.py",
+        "why": "M9 — OpenCloud access-log durations report the AGE OF THE "
+              "UPSTREAM TCP CONNECTION (Traefik keep-alive pool), not "
+              "request latency (2026-11-18 phantom-alert incident: client "
+              "0.03-0.35 s vs logged 7.4-53.6 s); the suite monitor must "
+              "scan the Traefik edge log",
     },
     {
         "name": "sso-notes-dialer-pin",

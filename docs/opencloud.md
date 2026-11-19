@@ -353,6 +353,26 @@ docker compose --env-file .env config | sed -n '/services:/,/^volumes:/p' | grep
 docker exec opensme-opencloud env | grep -E 'OC_|CLOUD_|OPENCLOUD_|NOTIFICATIONS_'
 ```
 
+### 3.11 Access-log `duration=` values look like 15-70 s requests
+
+**Cause:** measurement artifact, not slow requests. The proxy access-log
+middleware measures the **age of the upstream TCP connection** (the Traefik
+keep-alive pool), not per-request latency: requests served on a freshly
+opened connection log ~0.0x s, requests served on a pooled, long-lived
+connection log the connection age. Proven live 2026-11-18: 30 parallel
+authenticated requests answered in 0.03-0.35 s (client **and** Traefik edge
+log) were logged by OpenCloud as `duration=7.4-53.6s`; there was not a
+single Traefik entry ≥10 s in any window where OpenCloud claimed 15-70 s.
+All "slow burst" reports traced back to this artifact.
+
+**Fix:** never alert on, or investigate from, OpenCloud access-log
+durations. The truthful client-perceived latency signal is the **Traefik
+edge access log** (trailing `NNms` field per request). The cron suite
+monitor (`scripts/suite-monitor.sh`, check C5) scans the edge log for
+exactly this reason, and `tests/00-static/check_monitoring.py`
+(M4/M9) forbids OpenCloud access-log durations as a latency signal so the
+mistake cannot come back.
+
 ---
 
 ## 4. Quick-start checklist
@@ -388,3 +408,4 @@ OC_S3_SECRET_KEY=CHANGEME_minio
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-11-09 | Autonomous Agent (T-OCC-011) | Initial comprehensive environment variable documentation, integration patterns, and troubleshooting runbook |
+| 1.1 | 2026-11-18 | Tobias Weiss | §3.11: OpenCloud access-log `duration=` is a connection-age artifact (Traefik keep-alive pool), not latency — the Traefik edge log is the source of truth (suite-monitor C5, static guard M9) |
