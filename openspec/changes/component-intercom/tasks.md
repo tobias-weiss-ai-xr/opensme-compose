@@ -64,11 +64,30 @@
 - [x] 4.2 Doku-Drift prüfen: docs-Index/Architektur-Absatz zu `lib/bridge.ts`
       und den beiden Slots („modular integration") in Kürze ergänzen —
       Docs sind Norm (Drift = Bug)
-- [ ] 4.3 Commit/Push (R22-Präfix) + VPS-Deploy: portal-web bauen
+- [x] 4.3 Commit/Push (R22-Präfix) + VPS-Deploy: portal-web bauen
       (buildx `--network host`), `--force-recreate portal-web` NACH
       `portal` (netns-merge! Router-IP bei Bedarf refreshen)
-- [ ] 4.4 Live-Verify (Playwright): geteilter Feed-Artikel öffnet Notizen-
+- [x] 4.4 Live-Verify (Playwright): geteilter Feed-Artikel öffnet Notizen-
       Tab mit vorbefülltem Komposer und legt Notiz mit Titel+Link an;
       Cloud-Teilens aus Datei erzeugt Notiz mit Freigabelink; „In Cloud
       ablegen" stellt Anhang um; ohne Anbieter (anonym/kein Feed) keine
       Teilen-Affordance — alles wie Spec-Szenarien
+
+
+## Nachtrag R22 (Live-Verify, 2026-02-17)
+
+LIVE (Playwright, home.opensme.graphwiz.ai, testuser):
+- Feed „Ins Team teilen" öffnet Notizen-Komposer vorbefüllt (Titel+Link),
+  Post legt die Notiz real an (geteilter Artikel als Notiz sichtbar).
+- Fail-soft/fehlerfrei: ohne Anbieter (ausgeloggt) keine Share-UI.
+
+Eingeschränkt (Umgebungs-Blocker, NICHT durch R22 verursacht):
+- Cloud-Szenarien (T3, 3.4) sind unit-getestet (CloudPickerProvider /
+  postCloudShare / uploadCloudFile Pfad) und zeigen live den
+  grazilen Fehlerpfad (Modal „Cloud-Liste fehlgeschlagen" + Retry),
+  können aber nicht durchspielen: die Portal-Cloud-Bridge antwortet
+  upstream 401 — `GET /api/cloud/health` → `{"healthy":false}`,
+  `GET /api/cloud/list` → 502 (HTTP 401). Config unverändert
+  (CLOUD_WEBDAV_USER=umfragen-bot, OPENCLOUD_ENABLE_BASIC_AUTH off
+  laut docs/opencloud.md). Follow-up: DAV-Serviceaccount/Basic-Auth
+  am OpenCloud-Host verifizieren.
