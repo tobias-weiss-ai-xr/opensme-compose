@@ -35,9 +35,26 @@
 
 ## 5. Deploy & Live-Verify
 
-- [ ] 5.1 VPS dev copy pull; live `.env`: `CALENDAR_URL` vorhanden?
-- [ ] 5.2 portal-web Image neu bauen (buildx `--network host`) und
+- [x] 5.1 VPS dev copy pull; live `.env`: `CALENDAR_URL` vorhanden?
+- [x] 5.2 portal-web Image neu bauen (buildx `--network host`) und
       `--force-recreate` nach erfolgreichem Build
-- [ ] 5.3 Live-Verify: anon `/` + `/logged-out` enthalten `art-slide-0`
+- [x] 5.3 Live-Verify: anon `/` + `/logged-out` enthalten `art-slide-0`
       und `/brand/art/*.svg` wird ausgeliefert (200); Calendar-/Meet-Tile
       im Markup; angemeldet kein Galerie-Node
+
+> **R21-Nachtrag (2026-11-19, separate Fix-Serie, Commits `76a14d1`,
+> `4513c14`, `a70b31c`):** Die Live-Verify der Abmelde-Journey deckte drei
+> verbundene Logout/Nonce-Bugs auf, die mit der Galerie-Doku zusammenhängen:
+> (a) CSP `form-action 'self'` blockte den Cross-Origin-303-Hop zum IdP
+> (Route `portal/web/src/lib/csp.ts` erlaubt `IDP_URL`-Origin; Wächter R21);
+> (b) das Callback verwarf das `id_token` → `OPENSMESESSION` wird jetzt
+> beim Login persistiert, damit `logout.rs` ein valides `id_token_hint`
+> erzeugt und Zitadel direkt auf `post_logout_redirect_uri` (`/logged-out`)
+> bounce (statt Sitzungspicker/`/logout/done`); (c) Next taggt Inline-Scripts
+> nur, wenn der Nonce im REQUEST-Header ankommt (Middleware spiegelt die
+> CSP jetzt in `NextResponse.next({request})`) — und statische Prerender
+> haben keinen Buildzeit-Nonce, daher `export const dynamic =
+> "force-dynamic"` auf `/logged-out` (Mutanten `slo-portal-csp-xreq`,
+> `slo-loggedout-dynamic`). Live verifiziert: Login → id_token-Cookie →
+> Abmelden → Redirect auf `/logged-out` mit Galerie + „Erneut anmelden“;
+> IdP-Session nach Logout wirklich beendet (Passwort erneut verlangt).
