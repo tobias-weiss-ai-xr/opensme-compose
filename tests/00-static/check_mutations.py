@@ -95,6 +95,26 @@ MUTATIONS = [
         "why": "§7 — synapse public_baseurl must derive from SYNAPSE_SERVER_NAME",
     },
     {
+        "name": "slo-portal-csp-xreq",
+        "file": "portal/web/src/middleware.ts",
+        "old": "request: {",
+        "new": "requestX: {",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R21 — Next's parseRequestHeaders only reads req.headers; without "
+              "the CSP in the REQUEST headers the nonce never tags the inline "
+              "bootstrap scripts and dynamic pages stay blank",
+    },
+    {
+        "name": "slo-loggedout-dynamic",
+        "file": "portal/web/src/app/logged-out/page.tsx",
+        "old": "force-dynamic",
+        "new": "force-dynamic_STRIPPED",
+        "check": "tests/00-static/check_oidc.py",
+        "why": "R21 — a static prerender has no per-request nonce at build time, "
+              "so the nonce-CSP blocks every inline script and the R20 gallery "
+              "landing would render blank",
+    },
+    {
         "name": "slo-portal-csp-idp",
         "file": "portal/web/src/middleware.ts",
         "old": "process.env.IDP_URL",

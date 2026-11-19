@@ -622,11 +622,40 @@ def check_portal_logout_csp(result: Result) -> None:
             "process.env.IDP_URL — a hardcoded origin drifts from compose "
             "and breaks logout on renamed domains"
         )
+    elif "request: {" not in text or "Content-Security-Policy" not in text:
+        result.fail(
+            "middleware.ts must feed the CSP to app-render through the "
+            "REQUEST headers (NextResponse.next({ request: { headers } })). "
+            "Next's parseRequestHeaders only sees req.headers — a response-"
+            "only CSP never tags the inline bootstrap scripts, so dynamic "
+            "pages stay blank under script-src 'nonce-...' (R21, live-verified "
+            "2026-11-19)"
+        )
     else:
         result.ok(
             "portal-web CSP: form-action allow-lists the IdP origin for the "
-            "logout 303 hop (lib/csp.ts + IDP_URL)"
+            "logout 303 hop (lib/csp.ts + IDP_URL), nonce reaches app-render "
+            "via the request headers"
         )
+    # The nonce only tags inline scripts when app-render runs per request.
+    # A static prerender bakes the HTML at build time WITHOUT a nonce — every
+    # inline bootstrap script is then blocked and the page renders blank.
+    # /logged-out (R20 gallery landing) must stay dynamic for that reason.
+    logged_out = ROOT / "portal" / "web" / "src" / "app" / "logged-out" / "page.tsx"
+    if logged_out.exists():
+        lo = logged_out.read_text()
+        if not re.search(r"\bforce-dynamic\b", lo):
+            result.fail(
+                "portal/web/src/app/logged-out/page.tsx must be dynamic "
+                "(export const dynamic = \"force-dynamic\"): a nonce-CSP "
+                "static prerender has no nonce at build time, so the R20 "
+                "gallery landing renders blank (R21)"
+            )
+        else:
+            result.ok(
+                "logged-out page is per-request rendered — the nonce-CSP tags "
+                "its inline scripts and the R20 gallery landing hydrates"
+            )
 
 
 def check_sogo_sso_repair_script(result: Result) -> None:

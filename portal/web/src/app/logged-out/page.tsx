@@ -8,6 +8,15 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Force per-request rendering: the nonce-CSP middleware (R21) only tags
+// Next's inline bootstrap scripts when app-render runs for THIS request
+// (parseRequestHeaders reads req.headers, which the middleware feeds). A
+// static prerender bakes the HTML at build time without a nonce, so every
+// inline script is blocked by script-src 'nonce-...' and the page stays
+// blank (observed live 2026-11-19 on /logged-out — the home page works
+// only because it is dynamic).
+export const dynamic = "force-dynamic";
+
 /**
  * Post-logout landing page — the IdP bounces the browser here after the
  * end-session request (portal /api/logout → IdP → /logged-out). Mirrors
