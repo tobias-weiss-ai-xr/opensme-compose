@@ -108,6 +108,17 @@ Retention).
   BPMN-Freigabe → DMS-Ingest). Contract: `contracts/interop.yml`,
   geprüft von `tests/00-static/check_interop.py`; Saga-Smoke:
   `tests/05-e2e/saga_smoke.py`.
+- **Komponenten-Bridge (portal-intercom)**: Portal-Web-Komponenten
+  integrieren sich nie gegenseitig, sondern über einen typisierten
+  Provider-Registry (`portal/web/src/lib/bridge.ts`) mit zwei Slots —
+  `share.open` („Ins Team teilen“: Text+URL/Cloud-Link in die
+  Notizen-Vorlage; Quellen: Feed, Cloud-Dateiauswahl) und `cloud.pick`
+  (eine geteilte Cloud-Dateiauswahl für Notizen- und Umfragen-Komposer;
+  „In Cloud ablegen“ macht lokale Dateien explizit dauerhaft über den
+  bestehenden `PUT /api/cloud/files`-Pfad). Hosts rendern deklarative
+  Slots; ohne registrierten Provider verschwinden die Aktionen
+  (fail-soft, SSR-sicher, kein Peer-Import). Geprüft von
+  `tests/00-static/check_bridge.py` inkl. Mutationen.
 
 ## 8. Architektur-Entscheidungen
 

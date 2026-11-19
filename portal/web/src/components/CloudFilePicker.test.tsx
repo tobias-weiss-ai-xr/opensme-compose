@@ -1,6 +1,10 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import CloudFilePicker from "./CloudFilePicker";
 import type { CloudFileEntry } from "./CloudFilePicker";
+import { registerProvider, resetBridgeForTests } from "@/lib/bridge";
+
+const { mockedShare } = vi.hoisted(() => ({ mockedShare: vi.fn() }));
+vi.mock("@/lib/api", () => ({ postCloudShare: mockedShare }));
 
 const FILES: CloudFileEntry[] = [
   {
@@ -47,6 +51,8 @@ describe("CloudFilePicker", () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    resetBridgeForTests();
+    mockedShare.mockReset();
   });
 
   afterEach(() => {
@@ -212,5 +218,55 @@ describe("CloudFilePicker", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Analyse fehlgeschlagen");
     expect(alert).toHaveTextContent("Dateityp nicht unterstützbar");
+  });
+
+  /* ── ins Team teilen (portal-intercom share.open slot) ─────────────── */
+  it("share: offers no 'Ins Team teilen' while no share.open host is registered (fail-soft)", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(FILES));
+    renderPicker();
+    await screen.findByText("bericht.pdf");
+    expect(
+      screen.queryByRole("button", { name: /Ins Team teilen/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("share: 'Ins Team teilen' creates the share and forwards text+attachment link through the slot", async () => {
+    const open = vi.fn();
+    registerProvider("share.open", { open });
+    fetchMock.mockResolvedValue(jsonResponse(FILES));
+    mockedShare.mockResolvedValue({ url: "https://cloud.example/s/xyz" });
+    const { onClose } = renderPicker();
+    const buttons = await screen.findAllByRole("button", {
+      name: /Ins Team teilen/,
+    });
+    expect(buttons).toHaveLength(2);
+
+    fireEvent.click(buttons[0]);
+    expect(mockedShare).toHaveBeenCalledWith("docs/bericht.pdf");
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith({
+        text: "bericht.pdf",
+        attachmentUrl: "https://cloud.example/s/xyz",
+      }),
+    );
+    // the picker closes — the composer (notes tab) takes over
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("share: surfaces a German error when the share creation fails", async () => {
+    const open = vi.fn();
+    registerProvider("share.open", { open });
+    fetchMock.mockResolvedValue(jsonResponse(FILES));
+    mockedShare.mockRejectedValue(new Error("HTTP 502"));
+    const { onClose } = renderPicker();
+    const buttons = await screen.findAllByRole("button", {
+      name: /Ins Team teilen/,
+    });
+    fireEvent.click(buttons[0]);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Teilen fehlgeschlagen");
+    expect(alert).toHaveTextContent("HTTP 502");
+    expect(open).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

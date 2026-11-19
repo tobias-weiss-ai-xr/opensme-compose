@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import PortalShell from "./PortalShell";
+import { getProvider, resetBridgeForTests } from "@/lib/bridge";
 import type { Service } from "@/lib/types";
 
 const services: Service[] = [
@@ -60,6 +61,10 @@ function stubFetch(authenticated: boolean) {
 }
 
 describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
+  beforeEach(() => {
+    resetBridgeForTests();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -149,5 +154,27 @@ describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
     stubFetch(true);
     render(<PortalShell {...base} authenticated={true} />);
     expect(screen.queryByTestId("art-gallery")).not.toBeInTheDocument();
+  });
+
+  it("registers the share.open provider that prefills the notes composer and switches to the Notizen tab", async () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} />);
+
+    const share = getProvider("share.open");
+    expect(share).not.toBeNull();
+
+    // a source component calls the slot (e.g. FeedColumn) — the shell
+    // switches into the notes tab and forwards the prefill
+    act(() => {
+      share!.open({ text: "t3n — KI-Briefing", url: "https://feeds.example/a1" });
+    });
+
+    // the shell's notes section (outer region) becomes visible
+    const notesPanels = screen.getAllByRole("region", { name: "Notizen" });
+    expect(notesPanels[0]).not.toHaveAttribute("hidden");
+    await screen.findByText("Aus Quelle übernommen — Text anpassen und senden.");
+    const ta = (await screen.findByLabelText("Nachricht")) as HTMLTextAreaElement;
+    expect(ta.value).toContain("t3n — KI-Briefing");
+    expect(ta.value).toContain("https://feeds.example/a1");
   });
 });

@@ -9,12 +9,12 @@ import {
   postCloudShare,
   postIntercom,
   postIntercomUpload,
+  uploadCloudFile,
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
-import CloudFilePicker from "@/components/CloudFilePicker";
-import type { CloudFileEntry } from "@/components/CloudFilePicker";
 import { aiEnabledProbe, draftReply, summarizeThread } from "@/lib/ai";
 import type { IntercomMessage } from "@/lib/types";
+import { useSlot, type CloudPickResult, type SharePayload } from "@/lib/bridge";
 
 /** Delta-poll cadence (ms) — pauses entirely while the tab is hidden. */
 const POLL_MS = 7000;
@@ -24,6 +24,13 @@ const MAX_RENDERED = 50;
 interface IntercomPanelProps {
   /** Operator broadcast box (INTERCOM_BROADCAST=1) — off by default. */
   broadcastEnabled?: boolean;
+  /**
+   * Share-to-team prefill (portal-intercom): a source component (feed,
+   * cloud file) hands the composer a reference + link; the shell switches
+   * into the notes tab and passes it here. Re-prefills on every NEW object
+   * (latest share wins); never clears the user's own typing.
+   */
+  sharePrefill?: SharePayload | null;
 }
 
 /**
@@ -40,7 +47,10 @@ interface IntercomPanelProps {
  * in the header area: /api/broadcast stores the note AND fans it out to
  * the Element support room and Stalwart mail (all demo users).
  */
-export default function IntercomPanel({ broadcastEnabled = false }: IntercomPanelProps) {
+export default function IntercomPanel({
+  broadcastEnabled = false,
+  sharePrefill = null,
+}: IntercomPanelProps) {
   const [messages, setMessages] = useState<IntercomMessage[]>([]);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
@@ -51,8 +61,7 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
   const [broadcastBusy, setBroadcastBusy] = useState(false);
   const [broadcastOut, setBroadcastOut] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [cloudPick, setCloudPick] = useState<CloudFileEntry | null>(null);
+  const [cloudPick, setCloudPick] = useState<CloudPickResult | null>(null);
   const [aiReady, setAiReady] = useState(false);
   const [aiBusy, setAiBusy] = useState<null | "summary" | "draft">(null);
   const [aiOut, setAiOut] = useState<string | null>(null);
@@ -157,13 +166,13 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
   }
 
   /**
-   * Cloud pick: the backend turns the file (path relative to the user's
-   * DAV root) into a public read-only share link. That link rides the
-   * existing attachment_url plumbing — the Rust attachment validator
-   * rejects relative paths but allowlists these share URLs.
+   * Cloud pick: the shared cloud.pick slot (portal-intercom) hands us the
+   * selected entry; the backend turns it into a public read-only share and
+   * we ride the existing attachment_url plumbing (the Rust attachment
+   * validator rejects relative paths but allowlists these share URLs).
    */
-  async function onCloudPick(picked: CloudFileEntry) {
-    setPickerOpen(false);
+  const cloudPicker = useSlot("cloud.pick");
+  async function onCloudPick(picked: CloudPickResult) {
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
     setOut("…");
@@ -172,6 +181,40 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
       setUrl(shared.url);
       setCloudPick(picked);
       setOut(null);
+    } catch (err) {
+      setOut(
+        `Cloud-Freigabe fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (err instanceof AuthError) markAuthRequired();
+    }
+  }
+
+  async function pickFromCloud() {
+    try {
+      const picked = await cloudPicker?.pick();
+      if (picked) await onCloudPick(picked);
+    } catch (err) {
+      setOut(
+        `Cloud-Freigabe fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (err instanceof AuthError) markAuthRequired();
+    }
+  }
+
+  /**
+   * "In Cloud ablegen" (portal-intercom): stores the locally picked file
+   * in the cloud on explicit demand and switches the note to the durable
+   * share — the ephemeral intercom upload is never used in this path.
+   */
+  async function storeInCloud(f: File) {
+    try {
+      const { path } = await uploadCloudFile(f.name, f, f.type);
+      const shared = await postCloudShare(path);
+      setUrl(shared.url);
+      setCloudPick({ path, name: f.name, size: f.size });
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+      setOut("In der Cloud abgelegt — Anhang wird als geteilter Cloud-Link gesendet.");
     } catch (err) {
       setOut(
         `Cloud-Freigabe fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
@@ -281,6 +324,20 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
       setAiBusy(null);
     }
   }
+
+  // Share-to-team prefill: apply every NEW prefill object once (identity
+  // guard), fill title+link into the text and a cloud share into the URL
+  // field, then confirm with an inline status — the composer stays fully
+  // editable. No prefill → zero behaviour change (fail-soft).
+  const lastAppliedRef = useRef<SharePayload | null>(null);
+  useEffect(() => {
+    if (!sharePrefill || sharePrefill === lastAppliedRef.current) return;
+    lastAppliedRef.current = sharePrefill;
+    const link = sharePrefill.url ?? "";
+    setText(link ? `${sharePrefill.text}\n${link}` : sharePrefill.text);
+    if (sharePrefill.attachmentUrl) setUrl(sharePrefill.attachmentUrl);
+    setOut("Aus Quelle übernommen — Text anpassen und senden.");
+  }, [sharePrefill]);
 
   if (authRequired) {
     return (
@@ -428,13 +485,15 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
               onChange={(e) => setUrl(e.target.value)}
             />
             <div className="mt-2 flex items-center gap-3">
-              <button
-                type="button"
-                className="ic-cloud text-sm text-accent"
-                onClick={() => setPickerOpen(true)}
-              >
-                ☁ Aus der Cloud anhängen
-              </button>
+              {cloudPicker && (
+                <button
+                  type="button"
+                  className="ic-cloud text-sm text-accent"
+                  onClick={() => void pickFromCloud()}
+                >
+                  ☁ Aus der Cloud anhängen
+                </button>
+              )}
               <label className="cursor-pointer text-sm text-accent" htmlFor="ic-file">
                 📎 Datei…
               </label>
@@ -453,6 +512,15 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
                     ? `☁ ${cloudPick.name}${humanSize(cloudPick.size) ? ` (${humanSize(cloudPick.size)})` : ""}`
                     : ""}
               </span>
+              {file && (
+                <button
+                  type="button"
+                  className="ic-cloud-save text-xs text-accent"
+                  onClick={() => void storeInCloud(file)}
+                >
+                  ☁ In Cloud ablegen
+                </button>
+              )}
               {cloudPick && (
                 <button
                   type="button"
@@ -483,11 +551,6 @@ export default function IntercomPanel({ broadcastEnabled = false }: IntercomPane
           </div>
         </div>
       </div>
-      <CloudFilePicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(picked) => void onCloudPick(picked)}
-      />
     </section>
   );
 }

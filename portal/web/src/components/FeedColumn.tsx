@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { feedMetaLabel } from "@/lib/format";
 import { fetchFeeds } from "@/lib/api";
+import { useSlot } from "@/lib/bridge";
 import type { FeedColumnPayload } from "@/lib/types";
 
 interface FeedColumnProps {
@@ -43,6 +44,11 @@ export default function FeedColumn({ placeholder }: FeedColumnProps) {
 
   const entries = column?.entries ?? [];
 
+  // Portal-intercom: when the shell hosts the share-open provider, offer
+  // "ins Team teilen" per entry (title + url → prefilled note). No host →
+  // no affordance — the card is unchanged.
+  const shareProvider = useSlot("share.open");
+
   return (
     <div className="feed-card" data-feed-column={placeholder.id}>
       <h2>{placeholder.title}</h2>
@@ -53,11 +59,22 @@ export default function FeedColumn({ placeholder }: FeedColumnProps) {
       {!error && entries.length > 0 && (
         <ul aria-live="polite">
           {entries.map((e, i) => (
-            <li key={`${e.url}-${i}`}>
+            <li key={`${e.url}-${i}`} className="feed-item">
               <a href={e.url} target="_blank" rel="noopener noreferrer">
                 {e.title}
               </a>
               <span className="date">{feedMetaLabel(e)}</span>
+              {shareProvider && (
+                <button
+                  type="button"
+                  className="feed-share mt-1 block text-xs text-accent underline"
+                  onClick={() =>
+                    shareProvider.open({ text: e.title, url: e.url })
+                  }
+                >
+                  Ins Team teilen
+                </button>
+              )}
             </li>
           ))}
         </ul>

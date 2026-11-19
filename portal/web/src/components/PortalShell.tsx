@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Header from "./Header";
 import Footer from "./Footer";
 import ServiceTile from "./ServiceTile";
@@ -12,6 +12,9 @@ import FeedColumn from "./FeedColumn";
 import IntercomPanel from "./IntercomPanel";
 import PollsPanel from "./PollsPanel";
 import QuickSwitchPalette from "./QuickSwitchPalette";
+import CloudPickerProvider from "./CloudPickerProvider";
+import { registerProvider } from "@/lib/bridge";
+import type { SharePayload } from "@/lib/bridge";
 import type { Announcement, Service } from "@/lib/types";
 import type { FeedColumnSpec } from "@/lib/config";
 
@@ -51,8 +54,27 @@ export default function PortalShell({
   const [tab, setTab] = useState("dienste");
   const tabs = TABS.filter((t) => (t.id === "umfragen" ? pollsEnabled : true));
 
+  // Portal-intercom: host the share-to-team slot. Sources (feed cards,
+  // cloud files) never import the notes panel — they call this provider;
+  // the shell owns the tab state and forwards the prefill as a prop
+  // (no peer import). Registration is effect-only, so server rendering
+  // and anonymous pages stay untouched.
+  const [sharePrefill, setSharePrefill] = useState<SharePayload | null>(null);
+  useEffect(() => {
+    return registerProvider("share.open", {
+      open(payload) {
+        setSharePrefill(payload);
+        setTab("notizen");
+      },
+    });
+  }, []);
+
   return (
     <div className="flex min-h-screen flex-col">
+      {/* portal-intercom: the one shared cloud-pick provider (owner of the
+          picker modal); consumers call useSlot("cloud.pick") — no peer
+          imports, absent provider hides their triggers. */}
+      <CloudPickerProvider />
       <AnnouncementBar announcements={announcements} />
       <Header activeTab={tab} onTabChange={setTab} tabs={tabs} />
       <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
@@ -81,7 +103,7 @@ export default function PortalShell({
         )}
 
         <section className="tab-panel" hidden={tab !== "notizen"} aria-label="Notizen">
-          <IntercomPanel broadcastEnabled={broadcastEnabled} />
+          <IntercomPanel broadcastEnabled={broadcastEnabled} sharePrefill={sharePrefill} />
         </section>
 
         {/* Kunstgalerie: nur für anonyme Besucher — eine angemeldete

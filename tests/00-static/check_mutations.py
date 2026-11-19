@@ -115,6 +115,42 @@ MUTATIONS = [
               "landing would render blank",
     },
     {
+        "name": "intercom-bridge-slot-share",
+        "file": "portal/web/src/lib/bridge.ts",
+        "old": '"share.open": ShareOpenProvider;',
+        "new": '"share_open_MUT": ShareOpenProvider;',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-intercom — a renamed slot detaches every consumer; the "
+              "guard must flag the missing documented slot in the contract",
+    },
+    {
+        "name": "intercom-bridge-slot-cloud",
+        "file": "portal/web/src/lib/bridge.ts",
+        "old": '"cloud.pick": CloudPickProvider;',
+        "new": '"cloud_pick_MUT": CloudPickProvider;',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-intercom — the shared cloud-pick slot is the attachment "
+              "contract; renaming it silently orphans the picker consumers",
+    },
+    {
+        "name": "intercom-bridge-shell-tab",
+        "file": "portal/web/src/components/PortalShell.tsx",
+        "old": 'setTab("notizen");',
+        "new": 'setTab("dienste");',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-intercom — the share.open handler must land the visitor in "
+              "the notes tab; switching elsewhere hides the prefilled composer",
+    },
+    {
+        "name": "intercom-bridge-feed-share",
+        "file": "portal/web/src/components/FeedColumn.tsx",
+        "old": 'useSlot("share.open")',
+        "new": 'useSlot("share_open_MUT")',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-intercom — a detached feed share source breaks the share "
+              "path; the guard must flag the missing feed affordance",
+    },
+    {
         "name": "slo-portal-csp-idp",
         "file": "portal/web/src/middleware.ts",
         "old": "process.env.IDP_URL",

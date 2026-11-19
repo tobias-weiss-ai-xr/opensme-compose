@@ -1,7 +1,11 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import PollsPanel from "./PollsPanel";
 import { markVoted, votedSet } from "@/lib/format";
+import { registerProvider, resetBridgeForTests } from "@/lib/bridge";
 import type { Poll, PollListResponse } from "@/lib/types";
+
+const { mockedShare } = vi.hoisted(() => ({ mockedShare: vi.fn() }));
+vi.mock("@/lib/api", () => ({ postCloudShare: mockedShare }));
 
 // humanSize stays real; vote bookkeeping is mocked so tests can observe it.
 vi.mock("@/lib/format", async (importOriginal) => {
@@ -37,6 +41,8 @@ describe("PollsPanel", () => {
     mockedMarkVoted.mockReset();
     mockedVotedSet.mockReset().mockReturnValue({});
     vi.stubGlobal("fetch", fetchMock);
+    resetBridgeForTests();
+    mockedShare.mockReset();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -263,5 +269,38 @@ describe("PollsPanel", () => {
       "Nicht gewählt: HTTP 500",
     );
     expect(mockedMarkVoted).not.toHaveBeenCalled();
+  });
+
+  /* ── shared cloud-pick slot (portal-intercom) ────────────────────── */
+  it("offers no cloud-pick trigger while no cloud.pick provider is registered (fail-soft)", async () => {
+    fetchMock.mockResolvedValue(res(true, pollList([poll])));
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+    expect(
+      screen.queryByRole("button", { name: /Aus der Cloud anhängen/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("attaches a cloud pick as the poll attachment URL via the shared slot", async () => {
+    registerProvider("cloud.pick", {
+      pick: async () => ({
+        path: "docs/logo.pdf",
+        name: "logo.pdf",
+        size: 2048,
+      }),
+    });
+    fetchMock.mockResolvedValue(res(true, pollList([poll])));
+    mockedShare.mockResolvedValue({ url: "https://cloud.example/s/xyz" });
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+    fireEvent.click(
+      screen.getByRole("button", { name: /Aus der Cloud anhängen/ }),
+    );
+    await waitFor(() =>
+      expect(mockedShare).toHaveBeenCalledWith("docs/logo.pdf"),
+    );
+    expect(screen.getByLabelText("Umfrage-Anhang-URL")).toHaveValue(
+      "https://cloud.example/s/xyz",
+    );
   });
 });

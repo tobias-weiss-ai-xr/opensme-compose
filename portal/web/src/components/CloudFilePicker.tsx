@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { humanSize } from "@/lib/format";
+import { postCloudShare } from "@/lib/api";
+import { useSlot } from "@/lib/bridge";
 
 /** One entry of the /api/cloud/list contract (files only). */
 export interface CloudFileEntry {
@@ -48,6 +50,11 @@ export default function CloudFilePicker({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  // portal-intercom share state — one row at a time.
+  const shareProvider = useSlot("share.open");
+  const [sharing, setSharing] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareErrPath, setShareErrPath] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,6 +111,28 @@ export default function CloudFilePicker({
     }
   }, []);
 
+  const shareFile = useCallback(
+    async (file: CloudFileEntry) => {
+      if (!shareProvider) return;
+      setSharing(file.path);
+      setShareError(null);
+      setShareErrPath(null);
+      try {
+        const shared = await postCloudShare(file.path);
+        shareProvider.open({ text: file.name, attachmentUrl: shared.url });
+        onClose();
+      } catch (err) {
+        setShareError(
+          `Teilen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        setShareErrPath(file.path);
+      } finally {
+        setSharing(null);
+      }
+    },
+    [shareProvider, onClose],
+  );
+
   // (Re)load on every open — the cloud listing is never cached client-side.
   // Closing resets the KI-Analyse panel so a stale answer never reappears.
   useEffect(() => {
@@ -114,6 +143,8 @@ export default function CloudFilePicker({
       setAiLoading(false);
       setAiError(null);
       setAiAnswer(null);
+      setShareError(null);
+      setShareErrPath(null);
     }
   }, [open, load]);
 
@@ -207,7 +238,22 @@ export default function CloudFilePicker({
                   >
                     KI-Analyse
                   </button>
+                  {shareProvider && (
+                    <button
+                      type="button"
+                      className="cfp-share shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
+                      disabled={sharing === f.path}
+                      onClick={() => void shareFile(f)}
+                    >
+                      {sharing === f.path ? "Teile…" : "Ins Team teilen"}
+                    </button>
+                  )}
                 </div>
+                {shareError && shareErrPath === f.path && (
+                  <p role="alert" className="cfp-share-error mt-1 text-sm">
+                    {shareError}
+                  </p>
+                )}
                 {aiPath === f.path && (
                   <div className="cfp-ai-panel mt-1 rounded-lg border border-border p-2">
                     <p className="cfp-ai-title mb-1 text-xs font-semibold uppercase tracking-wide text-dim">

@@ -174,6 +174,44 @@ export async function postCloudShare(path: string): Promise<{ url: string }> {
   return res.json() as Promise<{ url: string }>;
 }
 
+/**
+ * Stores raw bytes in the cloud (PUT /api/cloud/files — the portal's
+ * existing upload bridge, service-account WebDAV) and returns the
+ * relative path, i.e. exactly the input `postCloudShare` expects. Used
+ * by the notes composer's "In Cloud ablegen" (portal-intercom): a
+ * locally picked file becomes a durable cloud share on explicit demand.
+ * A Blob is passed straight through as the fetch body (a File is a Blob),
+ * so no arrayBuffer round-trip is needed.
+ */
+export async function uploadCloudFile(
+  name: string,
+  blob: Blob,
+  mime?: string,
+): Promise<{ path: string }> {
+  const res = await fetch(
+    `/api/cloud/files?path=${encodeURIComponent("")}&name=${encodeURIComponent(name)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": mime || blob.type || "application/octet-stream",
+      },
+      body: blob,
+    },
+  );
+  if (res.status === 401) throw new AuthError();
+  if (!res.ok) {
+    let error = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data?.error) error = data.error;
+    } catch {
+      /* keep HTTP fallback */
+    }
+    throw new Error(error);
+  }
+  return res.json() as Promise<{ path: string }>;
+}
+
 export async function chatWithAi(req: AiChatRequest): Promise<AiChatResponse> {
   const res = await fetch("/api/ai/chat", {
     method: "POST",

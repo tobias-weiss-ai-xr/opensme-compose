@@ -1,6 +1,7 @@
 import { render, screen, act } from "@testing-library/react";
 import FeedColumn from "./FeedColumn";
 import { fetchFeeds } from "@/lib/api";
+import { registerProvider, resetBridgeForTests } from "@/lib/bridge";
 import type { FeedResponse } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({ fetchFeeds: vi.fn() }));
@@ -40,6 +41,7 @@ function columnCard() {
 describe("FeedColumn", () => {
   beforeEach(() => {
     mocked.mockReset();
+    resetBridgeForTests();
   });
 
   it("shows the loading state until the feed resolves", () => {
@@ -105,5 +107,30 @@ describe("FeedColumn", () => {
     expect(clearSpy).toHaveBeenCalled();
     clearSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it("renders no share affordance while no share.open host is registered (fail-soft)", async () => {
+    mocked.mockResolvedValue(response());
+    render(<FeedColumn placeholder={{ id: "startup", title: "Startup" }} />);
+    await screen.findByRole("link", { name: "Neuer Bericht" });
+    expect(
+      screen.queryByRole("button", { name: /Ins Team teilen/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers 'ins Team teilen' per entry and forwards title+url through the slot", async () => {
+    const open = vi.fn();
+    registerProvider("share.open", { open });
+    mocked.mockResolvedValue(response());
+    render(<FeedColumn placeholder={{ id: "startup", title: "Startup" }} />);
+    const buttons = await screen.findAllByRole("button", {
+      name: /Ins Team teilen/,
+    });
+    expect(buttons).toHaveLength(2);
+    act(() => buttons[0].click());
+    expect(open).toHaveBeenCalledWith({
+      text: "Neuer Bericht",
+      url: "https://news.example/bericht",
+    });
   });
 });

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { humanSize, markVoted, votedSet } from "@/lib/format";
 import LoginRequired from "@/components/LoginRequired";
+import { postCloudShare } from "@/lib/api";
+import { useSlot } from "@/lib/bridge";
 import type { Poll, SurveySummary, SurveysListResponse } from "@/lib/types";
 
 /**
@@ -25,6 +27,23 @@ export default function PollsPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // portal-intercom: the shared cloud-pick slot (same picker as the notes
+  // composer). Only offered while a provider is registered — the plain URL
+  // input below stays the fallback.
+  const cloudPicker = useSlot("cloud.pick");
+
+  async function pickFromCloud() {
+    try {
+      const picked = await cloudPicker?.pick();
+      if (!picked) return; // cancelled
+      const shared = await postCloudShare(picked.path);
+      setUrl(shared.url);
+    } catch (err) {
+      setError(
+        `Cloud-Freigabe fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -315,6 +334,15 @@ export default function PollsPanel() {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />
+              {cloudPicker && (
+                <button
+                  type="button"
+                  className="pl-cloud mt-2 text-sm text-accent"
+                  onClick={() => void pickFromCloud()}
+                >
+                  ☁ Aus der Cloud anhängen
+                </button>
+              )}
               <div className="mt-2 flex items-center gap-3">
                 <label className="cursor-pointer text-sm text-accent" htmlFor="pl-file">
                   📎 Datei…
