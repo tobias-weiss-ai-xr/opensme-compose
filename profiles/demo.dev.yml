@@ -125,6 +125,24 @@ services:
       # demo's TLS face; any consumer of the `web` profile is unaffected
       # because portal-web keeps priority 100 and owns the Host in that case.
       - "traefik.http.routers.portal-https.priority=200"
+      # ── Rate-limit probe route (demo/e2e only) ────────────────────
+      # The production limiter (ratelimit@file, avg 100 / burst 200) needs
+      # >100 req/s sustained to trip. A Python flood client on a 2-core CI
+      # runner cannot reliably reach that, so tests/05-e2e/rate_limit.py
+      # could never trip it there even though the edge limiter works
+      # (lab-proven: 1000-req flood → ~650×429 with the real portal image).
+      # This dedicated host uses Traefik's OWN rateLimit middleware with a
+      # demo-sized budget so the flood is deterministic on any runner. The
+      # entrypoint chain (compress → ratelimit@file → hsts) is still applied
+      # first — this just adds a tighter per-route budget on top. No real
+      # route or live deployment is touched.
+      - "traefik.http.middlewares.demo-rl.rateLimit.average=5"
+      - "traefik.http.middlewares.demo-rl.rateLimit.burst=15"
+      - "traefik.http.routers.portal-rlprobe.rule=Host(`rlprobe.${OPENSME_DOMAIN:-opensme.local}`)"
+      - "traefik.http.routers.portal-rlprobe.entrypoints=websecure"
+      - "traefik.http.routers.portal-rlprobe.tls=true"
+      - "traefik.http.routers.portal-rlprobe.service=portal"
+      - "traefik.http.routers.portal-rlprobe.middlewares=demo-rl@docker"
 
   # ── Zitadel (minimal, direct PG, no pool) ──
   zitadel:
