@@ -14,9 +14,9 @@ present.
 
 All cross-component integration in the portal frontend SHALL pass through one
 typed registry (`lib/bridge.ts`). Providers SHALL register named capabilities
-(e.g. `share.provider`, `cloud.pick`); host components SHALL declare and
-render the corresponding slots. No host component SHALL import a peer
-component module directly. The registry SHALL be safe for server-side
+(`share.provider`, `cloud.pick`, `task.create`); host components SHALL
+declare and render the corresponding slots. No host component SHALL import a
+peer component module directly. The registry SHALL be safe for server-side
 rendering (no client-only import effect at module load) and SHALL be fail-
 soft: a host with zero registered providers MUST behave exactly as it does
 without the registry.
@@ -32,6 +32,13 @@ without the registry.
 - **WHEN** a provider registers a capability that a host consumes
 - **THEN** the host renders the provider-driven affordance
 
+#### Scenario: task.create slot is declared and fail-soft
+
+- **WHEN** the shell registers `task.create` and a feed card, note or cloud
+  row consumes it
+- **THEN** each renders an "Als Aufgabe anlegen" action; without a registered
+  provider none is rendered
+
 #### Scenario: Static guard pins the contract
 
 - **WHEN** an integration's registration is removed from the bridge wiring
@@ -44,14 +51,22 @@ any data source (news-feed article, cloud file/share, calendar booking once
 available) can offer. Activating the action SHALL open the team-note composer
 prefilled with a human-readable reference (source title/name) and the link,
 without a separate navigation; posting SHALL create a note through the portal
-note API. When no share provider is registered the host SHALL render no
-share affordance and stay fully functional.
+note API. In addition, the same sources SHALL offer a `task.create` action
+("Als Aufgabe anlegen") that opens the task composer prefilled instead. When
+no provider is registered the host SHALL render no such affordance and stay
+fully functional.
 
 #### Scenario: Share a feed article into team notes
 
 - **WHEN** a feed card offers "ins Team teilen" and the user activates it
 - **THEN** the team-note composer opens with the article title and link
   prefilled, and the post creates a note containing both
+
+#### Scenario: Feed article becomes a task
+
+- **WHEN** a feed card offers "Als Aufgabe anlegen" and the user activates it
+- **THEN** the task composer opens with the article title and link prefilled,
+  and saving creates a task via the task API
 
 #### Scenario: Share a cloud file into team notes
 
@@ -60,10 +75,18 @@ share affordance and stay fully functional.
 - **THEN** the composer opens prefilled and the created note carries the
   cloud share link as its attachment
 
+#### Scenario: Cloud file becomes a task
+
+- **WHEN** a cloud picker row offers "Als Aufgabe anlegen" and the user
+  activates it
+- **THEN** the task composer opens prefilled with the file name and cloud
+  path
+
 #### Scenario: No share source available
 
-- **WHEN** no component registers a share provider (e.g. feeds unconfigured)
-- **THEN** hosts render no share affordance at all and remain usable
+- **WHEN** no component registers a share or task provider (e.g. feeds
+  unconfigured)
+- **THEN** hosts render no such affordance at all and remain usable
 
 #### Scenario: Share post failure
 
