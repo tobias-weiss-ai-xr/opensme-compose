@@ -116,6 +116,15 @@ services:
       - "traefik.http.routers.portal-https.entrypoints=websecure"
       - "traefik.http.routers.portal-https.tls=true"
       - "traefik.http.routers.portal-https.service=portal"
+      # Beat the inherited `portal-web` router (base compose, priority 100,
+      # backend :3000) on :443. The Web app (profile `web`) is NOT started in
+      # the demo, so with the default rule-length priority Traefik routed
+      # https://portal.<domain> onto the dead :3000 backend → 502 for every
+      # plain-HTTP-to-HTTPS bounce (traefik's web entrypoint globally
+      # redirects to websecure). This line restores the Rust portal as the
+      # demo's TLS face; any consumer of the `web` profile is unaffected
+      # because portal-web keeps priority 100 and owns the Host in that case.
+      - "traefik.http.routers.portal-https.priority=200"
 
   # ── Zitadel (minimal, direct PG, no pool) ──
   zitadel:
