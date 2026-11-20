@@ -256,11 +256,12 @@ export default function CloudFilePicker({
                         <button
                           type="button"
                           className="cfp-task shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
-                          onClick={() =>
+                          onClick={() => {
                             // cloud entries carry no share link yet — title
                             // only; shares are created on demand on the row
-                            taskProvider.create({ title: f.name })
-                          }
+                            taskProvider.create({ title: f.name });
+                            onClose();
+                          }}
                         >
                           Als Aufgabe anlegen
                         </button>
