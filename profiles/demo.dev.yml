@@ -162,11 +162,13 @@ services:
   # ── OpenCloud (minimal, local storage, no antivirus) ─
   opencloud:
     environment:
-      # Serve all internal URLs over http in demo; OIDC issuer stays https
-      # (OC_OIDC_ISSUER, OpenCloud refuses plain-http issuers) — the demo
-      # Traefik routes only :80, so https OC_URL bounces the UI to a dead
-      # :443.
-      OC_URL: http://${OPENCLOUD_DOMAIN:-cloud.opensme.local}
+      # Serve all internal URLs over https in the demo — the demo edge now
+      # has a working :443 (opencloud-https router), so OC_URL must use the
+      # https scheme. With http:// here, ocis's proxy answered / with 404
+      # (scheme mismatch between the request and the configured proxy URL),
+      # which is what broke the opencloud web UI + catalog tile in CI e2e.
+      # OIDC issuer stays https (OpenCloud refuses plain-http issuers).
+      OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.local}
       OC_ADD_RUN_SERVICES: "notifications"
       STORAGE_USERS_DRIVER: ocis
     deploy:
