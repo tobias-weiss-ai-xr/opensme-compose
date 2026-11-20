@@ -169,6 +169,21 @@ services:
       # which is what broke the opencloud web UI + catalog tile in CI e2e.
       # OIDC issuer stays https (OpenCloud refuses plain-http issuers).
       OC_URL: https://${OPENCLOUD_DOMAIN:-cloud.opensme.local}
+      # Fresh demo boots (no persisted config volume) hit a metadata-prefix
+      # mismatch: storage-users (ocis driver -> user.ocis.) vs storage-system
+      # (default -> user.oc.) crash the server. Pin the prefix so a fresh
+      # init stays consistent. Live keeps its persisted config and is
+      # unaffected (this is demo-only).
+      OC_METADATA_PREFIX: user.ocis.
+      # The notifications service (OC_ADD_RUN_SERVICES=notifications) validates
+      # its smtp_sender at startup; an unset/empty value is fatal and takes
+      # the whole server down. Live sets these via .env; the demo generates
+      # .env without them, so provide sane defaults here.
+      NOTIFICATIONS_SMTP_SENDER: noreply@opensme.local
+      NOTIFICATIONS_SMTP_HOST: localhost
+      NOTIFICATIONS_SMTP_PORT: "25"
+      NOTIFICATIONS_SMTP_AUTHENTICATION: none
+      NOTIFICATIONS_SMTP_TLS_INSECURE: "true"
       OC_ADD_RUN_SERVICES: "notifications"
       STORAGE_USERS_DRIVER: ocis
     deploy:
