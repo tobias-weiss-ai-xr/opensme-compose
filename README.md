@@ -1292,7 +1292,7 @@ packages in [`nix/`](nix/), re-exported by the repository-root
 root:
 
 ```sh
-. /home/weiss/.nix-profile/etc/profile.d/nix.sh   # Nix 2.35.6, single-user
+. "$HOME/.nix-profile/etc/profile.d/nix.sh"   # single-user install
 nix build .#vc-room .#portal .#calrs
 ./result | docker load                             # streamLayeredImage results are scripts
 ```

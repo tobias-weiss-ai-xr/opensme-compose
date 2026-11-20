@@ -2,7 +2,7 @@
 # Nix flake for building the openSME opencloud Docker image.
 #
 # Build (run from THIS directory, or see nix/README.md):
-#   . /home/weiss/.nix-profile/etc/profile.d/nix.sh
+#   . "$HOME/.nix-profile/etc/profile.d/nix.sh"
 #   nix build .#opencloud
 #   docker load < result
 #   docker tag opencloud:9.1.0-nix-flake ghcr.io/tobias-weiss-ai-xr/opencloud:9.1.0-nix-flake

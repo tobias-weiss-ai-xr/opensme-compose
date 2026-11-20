@@ -21,7 +21,7 @@ err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 # execute as commands — under `set -e` that aborts the whole check.
 if [[ -f .env ]]; then
     while IFS= read -r line; do
-        [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && export "$line"
+        [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && declare -x "$line"
     done < .env
 fi
 

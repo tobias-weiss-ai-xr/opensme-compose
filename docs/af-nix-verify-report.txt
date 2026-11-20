@@ -1,7 +1,7 @@
 nix-images campaign — full verification sweep (task T5-verify-sweep)
 =====================================================================
 Date:      2026-11-14
-Branch:    tf/T5-verify-sweep @ 814991d (worktree of /home/weiss/git/openSME-compose)
+Branch:    tf/T5-verify-sweep @ 814991d (worktree of ~/git/openSME-compose)
 Verdict:   GREEN — the one failure below (bootstrap seed email) was fixed on
            main as 48bd564 after this attempt ran; everything was re-verified
            on main afterwards (see RE-VERIFICATION ON MAIN).

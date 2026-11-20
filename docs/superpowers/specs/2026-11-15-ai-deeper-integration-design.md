@@ -64,7 +64,7 @@ Element #support (and others)  ←  ai-room-bot.py (extended: !ai, !entwurf, !br
 
 ## Execution
 
-Agentflow campaign `ai-deeper` (root `/home/weiss/af-camps/ai-deeper`), 1 worker (`oc`, glm-5.3-flash), `AF_MAX_PARALLEL=1`, recovery playbook validated 6/6 in the prior campaign.
+Agentflow campaign `ai-deeper` (root `~/af-camps/ai-deeper`), 1 worker (`oc`, glm-5.3-flash), `AF_MAX_PARALLEL=1`, recovery playbook validated 6/6 in the prior campaign.
 
 ## Open questions (resolved)
 

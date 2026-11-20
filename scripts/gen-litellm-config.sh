@@ -9,7 +9,7 @@
 # times out, the router retries against the local small model.
 #
 # Env:
-#   LITELLM_UPSTREAM_BASE_URL   default http://192.168.42.20:4000
+#   LITELLM_UPSTREAM_BASE_URL   default http://<upstream-host-ip>:4000
 #   LITELLM_UPSTREAM_API_KEY    upstream bearer key (or LITELLM_API_KEY)
 #   OLLAMA_MODEL                fallback model, default llama3.2:1b
 #

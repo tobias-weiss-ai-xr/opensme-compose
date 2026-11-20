@@ -173,7 +173,7 @@ zitadel_admin() { # $1 = apply|check
 # or any username starting with tweiss (case-insensitive). Verification is
 # a second shell query. Nothing secret is handled here.
 paperless_admin() { # $1 = apply|check
-    local mode="$1" py out rc
+    local mode="$1" py out
     # mode is injected as DPY_MODE: check NEVER mutates (read-only query)
     py="$(cat <<PY
 import os

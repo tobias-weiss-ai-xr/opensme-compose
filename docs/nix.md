@@ -59,7 +59,7 @@ shipped a broken build with zero notice. Key properties:
 Build it:
 
 ```sh
-. /home/weiss/.nix-profile/etc/profile.d/nix.sh
+. "$HOME/.nix-profile/etc/profile.d/nix.sh"
 cd nix/ && nix build .#opencloud && ./result | docker load
 ```
 

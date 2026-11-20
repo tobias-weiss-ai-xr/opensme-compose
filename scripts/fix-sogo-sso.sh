@@ -44,7 +44,7 @@ USER="sogo"
 # .env carries e.g. OAUTH_SCOPES=openid email profile which is not shell-safe).
 if [[ -f .env ]]; then
   while IFS= read -r l; do
-    [[ "$l" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && export "$l"
+    [[ "$l" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && declare -x "$l"
   done < .env
 fi
 

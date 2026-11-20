@@ -10,7 +10,7 @@ picked file to a note. Branch: tf/T1-cloud-filepicker (worktree).
 -----------------------------
 Allowed scope for this task: portal/web/src/ and docs/ (repo root).
 The orchestrator gate command contains `test -f docs/af-int-T1-filepicker.txt`
-while running `cd /home/weiss/git/openSME-compose/portal/web` — i.e. it
+while running `cd ~/git/openSME-compose/portal/web` — i.e. it
 resolves to portal/web/docs/, which is OUTSIDE the allowed scope (this
 exact mismatch got attempt 1 rejected). Decision: the scope constraint is
 authoritative; this report lives at REPO-ROOT docs/af-int-T1-filepicker.txt
@@ -90,7 +90,7 @@ verbatim from portal/web must resolve the docs/ path against the repo root.
     empty). Existing 18 tests untouched and green.
 
 3. VERIFICATION (worktree portal/web, node_modules symlinked from the
-   main checkout /home/weiss/git/openSME-compose/portal/web/node_modules,
+   main checkout ~/git/openSME-compose/portal/web/node_modules,
    PATH=/opt/node-host/bin:$PATH)
    - vitest run src/components/CloudFilePicker.test.tsx → 9/9 passed
    - vitest run (full suite)            → 21 files, 147/147 passed

@@ -47,7 +47,7 @@
 set -uo pipefail
 
 COMPOSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$COMPOSE_DIR"
+cd "$COMPOSE_DIR" || exit 1
 
 ALERT_TO="${ALERT_TO:-tobias@tobias-weiss.org}"
 WINDOW_MIN="${WINDOW_MIN:-10}"
@@ -61,7 +61,7 @@ MAIL_FROM="suite-monitor@openedusuite.org"
 # load .env without choking on values with spaces (OAUTH_SCOPES quirk)
 if [[ -f .env ]]; then
     while IFS= read -r line; do
-        [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && export "$line"
+        [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^\"[:space:]]*$ ]] && declare -x "$line"
     done < .env
 fi
 

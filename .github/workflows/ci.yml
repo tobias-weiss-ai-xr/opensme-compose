@@ -168,9 +168,17 @@ jobs:
           { git grep -hoE 'ipv4_address:[[:space:]]*[0-9.]+' -- '*.yml' '*.yaml' 2>/dev/null \
               | sed -E 's/.*ipv4_address:[[:space:]]*//'
             # …plus the compose network's own ipam subnet (172.19.0.0/16),
-            # which is what makes those static addresses resolvable.
+            # which is what makes those static addresses resolvable. Each
+            # subnet network address becomes a dotted PREFIX (172.19.) so
+            # every address inside the block is treated as topology (the
+            # plain literal "172.19.0.0" would never match e.g. 172.19.0.17).
             git grep -hoE 'subnet:[[:space:]]*[0-9.]+/[0-9]+' -- '*.yml' '*.yaml' 2>/dev/null \
-              | sed -E 's/.*subnet:[[:space:]]*//; s#/[0-9]+$##'
+              | sed -E 's/.*subnet:[[:space:]]*//; s#/[0-9]+$##' \
+              | awk -F. '{
+                  if ($2 != 0 && $3 == 0 && $4 == 0) print $1"."$2".";   # /16-class
+                  else if ($3 != 0 && $4 == 0)      print $1"."$2"."$3"."; # /24-class
+                  else                              print $0;              # /32 static
+                }'
           } | sort -u > "$ALLOW" || true
           allow_filter() {
             if [ -s "$ALLOW" ]; then grep -vFf "$ALLOW"; else cat; fi

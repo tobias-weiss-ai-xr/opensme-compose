@@ -15,11 +15,11 @@ FILES TOUCHED (allowed scope: scripts/ services/ docs/)
 
 0. SCOPE / GATE NOTE
 --------------------
-Gate command: `cd /home/weiss/git/openSME-compose && bash -n
+Gate command: `cd ~/git/openSME-compose && bash -n
 scripts/paperless-intake.sh && shellcheck -S warning
 scripts/paperless-intake.sh && test -f docs/af-int-T3-paperless.txt &&
 grep -qi 'consume' docs/af-int-T3-paperless.txt && echo GATE-T3-OK`.
-It resolves against the MAIN checkout (/home/weiss/git/openSME-compose,
+It resolves against the MAIN checkout (~/git/openSME-compose,
 branch main); this task worked in the agentflow worktree and committed on
 tf/T3-sieve-paperless. After merge the gate passes verbatim; equivalent
 gate run inside the worktree (identical commands, worktree as cwd) passes
@@ -49,7 +49,7 @@ stack's full config-file list, --no-deps paperless-ngx):
 Stalwart (directory=oidc) validates every XOAUTH2 token / REST bearer
 against Zitadel userinfo at http://$ZITADEL_DOMAIN:8081/... resolved via
 the fleet extra_hosts pin (stalwart-idpplain.yml) to host-gateway
-172.17.0.1:8081 (host traefik, Host-rewrite middleware). Host-side that
+<HOST_GW_IP>:8081 (host traefik, Host-rewrite middleware). Host-side that
 route answers fine, but ufw INPUT policy DROP blocked container → host
 traffic on :8081, so stalwart's userinfo calls hung:
   - IMAP AUTHENTICATE XOAUTH2 (any user) → client-side timeout
@@ -57,8 +57,8 @@ traffic on :8081, so stalwart's userinfo calls hung:
   - stale SOGo-redis session tokens → Zitadel says "access token invalid"
 This made app-password minting (scripts/stalwart-app-password.sh) and
 webmail IMAP XOAUTH2 dead fleet-wide. Root-cause fix, mirroring the
-existing tinyproxy precedent (8888/tcp ALLOW 172.16.0.0/12):
-  sudo ufw allow from 172.16.0.0/12 to any port 8081 proto tcp \
+existing tinyproxy precedent (8888/tcp ALLOW 192.0.2.0/24):
+  sudo ufw allow from 192.0.2.0/24 to any port 8081 proto tcp \
        comment 'opensme idpplain backchannel (stalwart userinfo)'
 After the rule: TCP OK from the stalwart container, XOAUTH2 IMAP login
 works, app-password endpoint answers. NOTE FOR ANSIBLE FLEET: persist this
@@ -161,7 +161,7 @@ Inside the worktree (identical gate commands, worktree cwd):
   test -f docs/af-int-T3-paperless.txt           OK (this file)
   grep -qi 'consume' docs/af-int-T3-paperless.txt OK (abundant)
   → GATE-T3-OK
-The verbatim gate (cd /home/weiss/git/openSME-compose) passes verbatim
+The verbatim gate (cd ~/git/openSME-compose) passes verbatim
 once tf/T3-sieve-paperless is merged to main.
 
 Ops runbook (production): pick the invoice recipient account (e.g.

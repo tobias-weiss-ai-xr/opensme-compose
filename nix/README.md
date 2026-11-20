@@ -23,7 +23,7 @@ self-contained flake with `srcRoot = ./..` for the source-backed packages
 because the flake lives here:
 
 ```sh
-. /home/weiss/.nix-profile/etc/profile.d/nix.sh   # Nix 2.35.6, single-user
+. "$HOME/.nix-profile/etc/profile.d/nix.sh"   # single-user install
 cd nix/
 nix build .#vc-room .#portal .#calrs --no-link --print-out-paths
 ./result | docker load                             # streamLayeredImage results are scripts
@@ -104,7 +104,7 @@ Default user is `1000:1000`; the compose stack overrides it with
 ## Build + load (opencloud)
 
 ```sh
-. /home/weiss/.nix-profile/etc/profile.d/nix.sh   # Nix 2.35.6, single-user
+. "$HOME/.nix-profile/etc/profile.d/nix.sh"   # single-user install
 cd nix/                                           # this flake lives in nix/
 nix build .#opencloud
 ./result | docker load                            # streamLayeredImage result is a script

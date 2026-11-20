@@ -5,7 +5,7 @@ TASK: Booking-to-Element notification bridge — build scripts/booking-notify.sh
 (idempotent, --dry-run/--check/--loop N), post a Matrix m.room.message into
 the support Element room when a calrs booking is confirmed, document the
 discovered provisioning path, verify against the live stack.
-Worktree branch: tf/T2-booking-notify (worktree of /home/weiss/git/openSME-compose).
+Worktree branch: tf/T2-booking-notify (worktree of ~/git/openSME-compose).
 
 FILES
 -----

@@ -31,9 +31,9 @@ via the Paperless REST API (get-or-create tags). Idempotent via scripts/.paperle
 
 GATE-T2-OK
 EOF
-cd /home/weiss/git/openSME-compose && git add scripts/paperless-classify.py scripts/paperless-classify.py 2>/dev/null; git add scripts/paperless-classify.py docs/af-ai-T5-paperless.txt && git commit -q -m "feat(ai): Paperless auto-classification via LiteLLM gateway (T2)" && git push -q origin main && python3 - <<'EOF'
+cd ~/git/openSME-compose && git add scripts/paperless-classify.py scripts/paperless-classify.py 2>/dev/null; git add scripts/paperless-classify.py docs/af-ai-T5-paperless.txt && git commit -q -m "feat(ai): Paperless auto-classification via LiteLLM gateway (T2)" && git push -q origin main && python3 - <<'EOF'
 import json
-p='/home/weiss/af-camps/ai-deeper/state-ai-deeper/run-state.json'
+p='~/af-camps/ai-deeper/state-ai-deeper/run-state.json'
 s=json.load(open(p))
 s['T2-paperless-classify']={'state':'done','attempts':2,'last_error':None,'phase':'gate_passed','attempt_started_ts':None,'attempt_worker':None}
 json.dump(s,open(p,'w'),indent=2)
