@@ -66,7 +66,7 @@
       (Layer 0 inkl. Mutationen), `openspec validate --changes`
 - [x] {n} Docs: `docs/ARC42.md` §7, `docs/VALIDATION.md` aktualisieren;
       Commit(s) nach Konvention (R23-Präfix)
-- [ ] 5.3 VPS-Deploy (buildx --network host) + Smoke (`docker exec`
+- [x] 5.3 VPS-Deploy (buildx --network host) + Smoke (`docker exec`
       health, `/` 200); Live-Playwright: Aufgabe aus Feed anlegen →
       in Liste; Notiz → Aufgabe; Cloud-Datei → Aufgabe; 403-Pfad
       (anderer User darf nicht erledigen); Filter/Sortierung
