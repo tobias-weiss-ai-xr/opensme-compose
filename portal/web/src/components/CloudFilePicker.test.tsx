@@ -233,33 +233,18 @@ describe("CloudFilePicker", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("task: 'Als Aufgabe anlegen' forwards file name + share link through the task.create slot", async () => {
+  it("task: 'Als Aufgabe anlegen' forwards the file name through the task.create slot", async () => {
     const create = vi.fn();
     registerProvider("task.create", { create });
     fetchMock.mockResolvedValue(jsonResponse(FILES));
-    // files carry a share url in FILES? build one with url here
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse([
-        {
-          path: "docs/bericht.pdf",
-          name: "bericht.pdf",
-          mime: "application/pdf",
-          size: 2048,
-          url: "https://cloud.example/s/task-link",
-        },
-      ]),
-    );
     renderPicker();
     const buttons = await screen.findAllByRole("button", {
       name: /Als Aufgabe anlegen/,
     });
-    expect(buttons).toHaveLength(1);
+    expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[0]);
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith({
-        title: "bericht.pdf",
-        url: "https://cloud.example/s/task-link",
-      }),
+      expect(create).toHaveBeenCalledWith({ title: "bericht.pdf" }),
     );
   });
 

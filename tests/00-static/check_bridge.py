@@ -156,9 +156,11 @@ def main():
             "R6: notes must forward the attachment link (if any) into task.create"
         )
     picker = src_text(PICKER)
-    if "url: f.url ?? undefined" not in picker:
+    # cloud entries carry no share link yet — title only is the contract
+    if "taskProvider.create({ title: f.name })" not in picker:
         failures.append(
-            "R6: cloud rows must forward the share link (if any) into task.create"
+            "R6: cloud rows must forward the file name into task.create "
+            "(title only — no fabricated share link)"
         )
 
     if failures:
