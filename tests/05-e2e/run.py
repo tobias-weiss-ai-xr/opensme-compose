@@ -579,6 +579,21 @@ def section_sso_matrix(result: Result, session, disc: dict, idp_base: str,
                     raise E2EError("start hop gave no authorize redirect "
                                    "(component down, or misconfigured login "
                                    "route — check the Traefik router/backend)")
+                if name == "portal":
+                    # Dev-mode edge: plain-HTTP 301s to https on the SAME host
+                    # (Traefik's web entrypoint redirect); allow_redirects=False
+                    # sees that bounce, whose Location carries no query — the
+                    # root of "authorize URL carries no redirect_uri".
+                    # Walk the self-bounce (portal_login does the same); the
+                    # portal's own 303 to the IdP (different host) stops the
+                    # loop and IS the authorize Location we check below.
+                    for _ in range(3):
+                        if authz.startswith("http") and "/api/auth/login" in authz:
+                            authz = session.get(authz, allow_redirects=False,
+                                                timeout=T
+                                                ).headers.get("Location", "")
+                        else:
+                            break
                 redirect_uri, got_client = _extract_redirect_uri(authz)
                 if name == "portal":
                     # portal start already redirected; the Location IS authorize
@@ -594,8 +609,20 @@ def section_sso_matrix(result: Result, session, disc: dict, idp_base: str,
 
             qs, _sess = api_login(session, idp_base, lc_pat, client_uid,
                                   authz, uid, pw)
-            r = session.get(_cb_url(redirect_uri, qs), allow_redirects=False,
-                            timeout=T)
+            cb_url = _cb_url(redirect_uri, qs)
+            r = session.get(cb_url, allow_redirects=False, timeout=T)
+            # Same dev-mode self-bounce as the start hops: http-based callback
+            # pages (cloud/notes) 301 to https on the same host before the
+            # component answers. Walk that one hop so the marker judges the
+            # component's real response, not the edge's 301.
+            for _ in range(3):
+                loc = r.headers.get("Location", "")
+                if r.status_code in REDIRECTS and loc.startswith("http") \
+                        and urlparse(loc).netloc == urlparse(cb_url).netloc:
+                    cb_url = loc
+                    r = session.get(cb_url, allow_redirects=False, timeout=T)
+                else:
+                    break
             u = urlparse(redirect_uri)
             problem = marker(r, session, f"{u.scheme}://{u.netloc}")
             if name == "notes":
