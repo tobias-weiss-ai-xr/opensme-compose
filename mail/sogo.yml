@@ -93,6 +93,14 @@ services:
       SOGO_CALDAV_SERVER: ${SOGO_CALDAV_SERVER:-https://cloud.${OPENCLOUD_DOMAIN}}
       SOGO_CALDAV_AUTH_METHODS: ${SOGO_CALDAV_AUTH_METHODS:-Basic,All}
       SOGO_CALDAV_USER_SCRIPT: ${SOGO_CALDAV_USER_SCRIPT:-/usr/lib/GNUstep/SOGo/CALDAVUserScript.sh}
+      # Apache2 listener port inside the container. The image's ports.conf is
+      # written as `Listen ${HTTP_PORT}` and the upstream rebuild of
+      # salvoxia/sogo:latest on 2026-11-18 bumped the baked-in default from 80
+      # to 8080 — the container stayed HEALTHY (healthcheck probes sogod on
+      # 127.0.0.1:20000) while the edge's sogo backend (label port 80) went
+      # dead: webmail.* answered 502 in CI until this pin. Keep apache2 on
+      # :80 so the traefik-backed edge contract survives image drift.
+      HTTP_PORT: "80"
     entrypoint: ["/sogo-entrypoint.sh"]
     command: ["sogod"]
     healthcheck:
