@@ -1,0 +1,76 @@
+# portal-intercom Specification (delta: team-tasks)
+
+## MODIFIED Requirements
+
+### Requirement: Typed provider registry (bridge)
+
+All cross-component integration in the portal frontend SHALL pass through one
+typed registry (`lib/bridge.ts`). Providers SHALL register named capabilities
+(`share.provider`, `cloud.pick`, **`task.create`**); host components SHALL
+declare and render the corresponding slots. No host component SHALL import a
+peer component module directly. The registry SHALL be safe for server-side
+rendering (no client-only import effect at module load) and SHALL be fail-
+soft: a host with zero registered providers MUST behave exactly as it does
+without the registry.
+
+#### Scenario: Registry works without any provider
+
+- **WHEN** a host component is rendered with an empty registry
+- **THEN** the component behaves unchanged and renders no provider-driven affordances
+
+#### Scenario: A registered provider lights up its slot
+
+- **WHEN** a provider registers a capability that a host consumes
+- **THEN** the host renders the provider-driven affordance
+
+#### Scenario: task.create slot is declared and fail-soft
+
+- **WHEN** the shell registers `task.create` and a feed card, note or cloud row consumes it
+- **THEN** each renders an "Als Aufgabe anlegen" action; without a registered provider none is rendered
+
+#### Scenario: Static guard pins the contract
+
+- **WHEN** an integration's registration is removed from the bridge wiring
+- **THEN** the static test layer fails, signalling the detached integration
+
+### Requirement: Cross-component share-to-team action
+
+The portal SHALL provide a registered "share to team notes" action slot that
+any data source (news-feed article, cloud file/share, calendar booking once
+available) can offer. Activating the action SHALL open the team-note composer
+prefilled with a human-readable reference (source title/name) and the link,
+without a separate navigation; posting SHALL create a note through the portal
+note API. **In addition, the same sources SHALL offer a `task.create` action
+("Als Aufgabe anlegen") that opens the task composer prefilled instead.** When
+no provider is registered the host SHALL render no such affordance and stay
+fully functional.
+
+#### Scenario: Share a feed article into team notes
+
+- **WHEN** a feed card offers "ins Team teilen" and the user activates it
+- **THEN** the team-note composer opens with the article title and link prefilled, and the post creates a note containing both
+
+#### Scenario: Feed article becomes a task
+
+- **WHEN** a feed card offers "Als Aufgabe anlegen" and the user activates it
+- **THEN** the task composer opens with the article title and link prefilled, and saving creates a task via the task API
+
+#### Scenario: Share a cloud file into team notes
+
+- **WHEN** a cloud file/share offers "ins Team teilen" and the user activates it
+- **THEN** the composer opens prefilled and the created note carries the cloud share link as its attachment
+
+#### Scenario: Cloud file becomes a task
+
+- **WHEN** a cloud picker row offers "Als Aufgabe anlegen" and the user activates it
+- **THEN** the task composer opens prefilled with the file name and cloud path
+
+#### Scenario: No share source available
+
+- **WHEN** no component registers a share or task provider (e.g. feeds unconfigured)
+- **THEN** hosts render no such affordance at all and remain usable
+
+#### Scenario: Share post failure
+
+- **WHEN** the note API rejects the share post (e.g. session expired)
+- **THEN** an inline error is shown and the prefilled composer content is preserved for retry
