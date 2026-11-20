@@ -5,8 +5,9 @@ tests/05-e2e/observability.py — health + log hygiene (Epic W).
 The operator's contract with the stack: services self-report health,
 logs are structured, and — above all — logs never leak secrets.
 
-  W1  every running opensme-* container WITH a healthcheck reports
-      healthy (containers younger than their start period are skipped)
+  W1  every running opensme-* container WITH an ENABLED healthcheck
+      reports healthy (containers younger than their start period, and
+      ones with a deliberately disabled healthcheck, are skipped)
   W2  every secret-shaped .env value (PASS/SECRET/TOKEN/KEY/SALT,
       >=10 chars) is absent from the last 4000 log lines of every
       opensme container
@@ -115,21 +116,35 @@ def main() -> int:
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc)
         young = []
+        disabled = []
         unhealthy = []
         for name, d in with_hc:
             started = datetime.datetime.fromisoformat(
                 d["started"].replace("Z", "+00:00"))
             start_period = parse_go_duration(d.get("start_period") or "0s")
-            if (now - started).total_seconds() < max(start_period, 60.0):
+            status = d["status"]
+            if not status or status == "none":
+                # A healthcheck can be deliberately disabled (compose
+                # `test: ["NONE"]` / `docker run --no-healthcheck`). Docker
+                # keeps a Health object whose Status is ""/"none" forever —
+                # that means "not applicable", NOT "unhealthy". opencloud's
+                # nix image cannot run exec probes at all, so it disables
+                # its healthcheck and is monitored at the edge instead.
+                disabled.append(name)
+            elif (now - started).total_seconds() < max(start_period, 60.0):
                 young.append(name)
-            elif d["status"] != "healthy":
-                unhealthy.append(f"{name}={d['status'] or '?'}")
+            elif status != "healthy":
+                unhealthy.append(f"{name}={status}")
+        # Only containers whose health can actually be judged count here.
+        judged = [n for n, _ in with_hc if n not in disabled]
         (result.ok if not unhealthy else result.fail)(
-            f"{len(with_hc)} healthchecked containers report healthy"
+            f"{len(judged)} healthchecked containers report healthy"
             if not unhealthy else f"unhealthy: {', '.join(unhealthy)}"
         )
         for n in young:
             result.info(f"{n} inside its start period — skipped, not judged")
+        for n in disabled:
+            result.info(f"{n} healthcheck disabled — skipped, not judged")
 
     # ── W2: secrets never reach the logs ────────────────────────────
     secrets = load_env_secrets()
