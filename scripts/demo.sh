@@ -345,14 +345,6 @@ if [[ "$IDP_READY" == "yes" ]]; then
   if ! "${SCRIPT_DIR}/zitadel-client.sh"; then
     warn "OIDC client registration failed — see the message above (the e2e suite degrades to a warning)"
   fi
-  info "Registering the webmail (SOGo) OIDC client in Zitadel (idempotent)..."
-  # The webmail SSO is part of the mail profile: sogo.conf.template always
-  # runs SOGoAuthenticationType=openid and interpolates the client id, so the
-  # app must exist BEFORE the mail profile boots or SOGo serves a redirect to
-  # an empty client. Idempotent: an existing app is re-used via its label.
-  if ! "${SCRIPT_DIR}/zitadel-client.sh" --app sogo; then
-    warn "SOGo OIDC client registration failed — webmail SSO stays unwired"
-  fi
   info "Registering the portal OIDC client in Zitadel (idempotent)..."
   # Signs in users on the portal so intercom/polls only work for them: the
   # callback URI must exist before humans click Anmelden, and the minted
