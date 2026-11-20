@@ -167,7 +167,7 @@ pub fn validate_due(raw: Option<&str>) -> Result<Option<String>, String> {
     let y: u32 = raw[0..4].parse().map_err(|_| bad())?;
     let m: u32 = raw[5..7].parse().map_err(|_| bad())?;
     let d: u32 = raw[8..10].parse().map_err(|_| bad())?;
-    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let leap = (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400);
     let days_in_month = [
         31,
         if leap { 29 } else { 28 },
