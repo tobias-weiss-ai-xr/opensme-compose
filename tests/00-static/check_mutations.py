@@ -288,6 +288,21 @@ MUTATIONS = [
               "JWKS-validating backend (ocis: 'invalid number of segments')",
     },
     {
+        "name": "suite-c3-event-store-regression",
+        "file": "scripts/suite-monitor.sh",
+        "old": 'JWT_APPS="${MONITOR_JWT_APPS:-${OC_OIDC_CLIENT_ID:-}}"',
+        "new": 'JWT_APPS="${MONITOR_JWT_APPS:-${OC_OIDC_CLIENT_ID:-}}"\n'
+               '    events=$(curl -sk -X POST "$IDP/admin/v1/events/_search" -d "{}")',
+        "check": "tests/00-static/check_monitoring.py",
+        "why": "M2 — the C3 guard must read oidcConfig.accessTokenType from "
+              "the LIVE app config (apps/_search). The former admin "
+              "event-store query false-failed a healthy fleet for a day "
+              "(openedusuite.org 2026-11-19..20): this Zitadel version "
+              "silently ignores the query's aggregate filters, so login "
+              "churn scrolled the oidc_config event out of the window. "
+              "Reinstating the events/_search query must fail Layer 0.",
+    },
+    {
         "name": "suite-c5-edge-latency",
         "file": "scripts/suite-monitor.sh",
         "old": 'slow=$(docker logs traefik --since "$since" 2>&1 \\\n    | grep -E \'"cloud-.*@file"\' \\',

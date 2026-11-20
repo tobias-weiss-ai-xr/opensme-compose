@@ -72,7 +72,10 @@ SOGO_DOMAIN="${SOGO_DOMAIN:-webmail.${DOMAIN}}"
 IDP="https://${ZITADEL_DOMAIN:-auth.home.${DOMAIN}}"
 ZITADEL_PAT="${ZITADEL_PAT:-}"
 
-log()  { echo "$(date '+%F %T') $*" | tee -a "$MONITOR_LOG"; }
+# stdout only — the cron entry owns the `>> $MONITOR_LOG` redirect. A
+# tee-append here wrote every line twice into the same file (openedusuite.org
+# 2026-11-20: log() appended AND cron redirected stdout to the same path).
+log()  { echo "$(date '+%F %T') $*"; }
 
 # ── alert plumbing: mail with per-failure cooldown ──────────────────
 mkdir -p "$STATE_DIR" 2>/dev/null || true
@@ -147,15 +150,20 @@ portal https://${PORTAL_DOMAIN}/ 200 302
 idp-discovery ${IDP}/.well-known/openid-configuration 200
 EOF
 
-# C3 — OIDC token type via Zitadel event store (the R15 regression guard)
+# C3 — OIDC token type read from the LIVE app config (the R15 regression
+# guard). The former admin event-store query is retired: this Zitadel
+# version silently ignores the aggregate filters of the admin event-store
+# search endpoint, so the query returned every event type and login churn (~2 auth_request
+# events/min) scrolled the oidc_config event out of the newest-1000 window
+# — C3 false-failed a HEALTHY fleet from 2026-11-19 to 2026-11-20 on
+# openedusuite.org. The management API app object is the source of truth
+# NOW; the R15 failure mode (JWT flipped to OPAQUE by a follow-up
+# oidc_config PUT) is still caught, because the live config shows it.
 JWT_APPS="${MONITOR_JWT_APPS:-${OC_OIDC_CLIENT_ID:-}}"
 if [[ -n "$ZITADEL_PAT" && -n "$JWT_APPS" ]]; then
-    events=$(curl -sk -X POST "$IDP/admin/v1/events/_search" \
-        -H "Authorization: Bearer $ZITADEL_PAT" -H 'Content-Type: application/json' \
-        --max-time 20 -d '{"queries":[{"aggregateTypes":["app"],"limit":200,"desc":true}]}' 2>/dev/null)
     for client in $JWT_APPS; do
-        # resolve client id -> app id (events carry the app aggregate id)
-        app_id=$(curl -sk -X POST "$IDP/management/v1/projects/_search" \
+        # resolve client id -> "accessTokenType|app id" from the live config
+        hit=$(curl -sk -X POST "$IDP/management/v1/projects/_search" \
             -H "Authorization: Bearer $ZITADEL_PAT" -H 'Content-Type: application/json' \
             --max-time 20 -d '{}' 2>/dev/null \
             | jq -r '.result[]?.id' 2>/dev/null \
@@ -163,23 +171,17 @@ if [[ -n "$ZITADEL_PAT" && -n "$JWT_APPS" ]]; then
                 curl -sk -X POST "$IDP/management/v1/projects/$pid/apps/_search" \
                     -H "Authorization: Bearer $ZITADEL_PAT" -H 'Content-Type: application/json' \
                     --max-time 20 -d '{}' 2>/dev/null \
-                    | jq -r --arg c "$client" '.result[]? | select(.oidcConfig.clientId == $c) | .id' 2>/dev/null
+                    | jq -r --arg c "$client" '.result[]? | select(.oidcConfig.clientId == $c) | "\(.oidcConfig.accessTokenType)|\(.id)"' 2>/dev/null
               done | head -1)
-        if [[ -z "$app_id" ]]; then
+        tok="${hit%%|*}"; app_id="${hit#*|}"
+        if [[ -z "$app_id" || "$app_id" == "$hit" ]]; then
             fail "C3-token-type-$client" "client $client not found in Zitadel — OIDC app missing/deregistered"
             continue
         fi
-        # latest event with an accessTokenType payload for this app
-        tok=$(echo "$events" | jq -r --arg a "$app_id" '
-            [.events[] | select(.payload.accessTokenType != null)
-                         | select(.aggregate.id == $a or .payload.appId == $a)]
-            | sort_by(.creationDate) | last | .payload.accessTokenType // "never"' 2>/dev/null)
-        if [[ "$tok" == "1" ]]; then
-            log "C3 ok: client $client mints JWT access tokens"
-        elif [[ "$tok" == "never" ]]; then
-            fail "C3-token-type-$client" "no accessTokenType event for app $app_id — client likely mints OPAQUE tokens (Zitadel v4.19 default); JWKS-validating backends will reject every login ('invalid number of segments')"
+        if [[ "$tok" == "OIDC_TOKEN_TYPE_JWT" ]]; then
+            log "C3 ok: client $client mints JWT access tokens (live app config)"
         else
-            fail "C3-token-type-$client" "app $app_id accessTokenType=$tok (1=JWT required) — an oidc_config PUT reset the token type; re-run scripts/zitadel-client.sh"
+            fail "C3-token-type-$client" "app $app_id accessTokenType=$tok (OIDC_TOKEN_TYPE_JWT required) — an oidc_config PUT reset the token type; backends minting/expecting OPAQUE tokens fail JWKS validation ('invalid number of segments'). Re-run scripts/zitadel-client.sh"
         fi
     done
 else

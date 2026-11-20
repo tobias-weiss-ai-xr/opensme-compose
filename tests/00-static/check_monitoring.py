@@ -24,8 +24,17 @@ Additionally the alert channel itself was broken: exim4 was configured as
 R16 pins the monitoring contract statically:
 
   M1 — scripts/suite-monitor.sh exists (the cron-driven live monitor).
-  M2 — it verifies OIDC access-token type via the Zitadel admin event store
-       (accessTokenType must be JWT/1 for every JWKS-validating backend).
+  M2 — it verifies OIDC access-token type against the LIVE app config via
+       the management API (oidcConfig.accessTokenType must be
+       OIDC_TOKEN_TYPE_JWT for every JWKS-validating backend). The former
+       event-store query was retired 2026-11-20: this Zitadel version
+       silently ignores the aggregate filters in admin/v1/events/_search,
+       so login churn scrolled the oidc_config event out of the window and
+       C3 false-FAILED for a healthy fleet. Event-store queries must not
+       come back.
+  M2b — the log helper writes to stdout ONLY (the cron entry owns the
+        `>> $MONITOR_LOG` redirect). A `tee -a` of the same file doubles
+        every log line (observed 2026-11-20 on openedusuite.org).
   M3 — it scans opencloud logs for the opaque-token error signature.
   M4 — it enforces request latency bounds (edge probe durations + opencloud
        access-log 'duration=' values).
@@ -66,14 +75,37 @@ def main() -> bool:
         print(result.summary())
         return result.failed == 0
 
-    # M2 — OIDC token-type guard via Zitadel event store
-    if "events/_search" in text and "accessTokenType" in text:
-        result.ok("M2: OIDC access-token type verified via Zitadel event store")
+    # M2 — OIDC token-type guard against the LIVE app config (management API)
+    if ("apps/_search" in text and "accessTokenType" in text
+            and "OIDC_TOKEN_TYPE_JWT" in text
+            and "events/_search" not in text):
+        result.ok("M2: OIDC access-token type verified from the live app "
+                  "config (management API; event-store query retired — "
+                  "its aggregate filters are ignored by this Zitadel "
+                  "version and login churn broke the window)")
     else:
         result.fail(
-            "suite-monitor.sh lacks the accessTokenType event-store guard "
-            "(M2) — the exact R15 failure mode (JWT flipped back to OPAQUE "
-            "by a follow-up oidc_config PUT) would go unnoticed again"
+            "suite-monitor.sh C3 guard is wrong (M2) — it must read "
+            "oidcConfig.accessTokenType directly from apps/_search and "
+            "require OIDC_TOKEN_TYPE_JWT; the admin event-store query "
+            "(events/_search) must NOT return — this Zitadel version "
+            "ignores its aggregate filters, so login churn scrolls the "
+            "oidc_config event out of the window and C3 false-fails a "
+            "healthy fleet (openedusuite.org 2026-11-19..20). The R15 "
+            "failure mode (JWT flipped to OPAQUE by a follow-up "
+            "oidc_config PUT) is still caught: the live config shows it."
+        )
+
+    # M2b — log helper must not append to MONITOR_LOG itself (cron does)
+    if "tee -a" not in text:
+        result.ok("M2b: log helper writes stdout only (cron owns the "
+                  "MONITOR_LOG redirect — no doubled lines)")
+    else:
+        result.fail(
+            "suite-monitor.sh log helper uses tee -a on MONITOR_LOG (M2b) "
+            "— the cron entry ALSO appends stdout to the same file, so "
+            "every line is written twice (observed on openedusuite.org "
+            "2026-11-20)"
         )
 
     # M3 — opaque-token log signature scan
