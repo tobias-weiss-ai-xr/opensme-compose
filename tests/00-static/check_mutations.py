@@ -151,6 +151,78 @@ MUTATIONS = [
               "path; the guard must flag the missing feed affordance",
     },
     {
+        "name": "tasks-firewall-removed",
+        "file": "portal/src/main.rs",
+        "old": "session::require_session,",
+        "new": "session::require_session_MUT,",
+        "check": "tests/00-static/check_tasks.py",
+        "why": "portal-tasks — the /api/tasks routes must sit behind the session "
+              "firewall; dropping require_session exposes task CRUD anonymously",
+    },
+    {
+        "name": "tasks-cap-evicts-open",
+        "file": "portal/src/tasks.rs",
+        "old": "tasks.iter().position(|t| t.status == TaskStatus::Done)",
+        "new": "tasks.iter().position(|t| t.status == TaskStatus::Open)",
+        "check": "tests/00-static/check_tasks.py",
+        "why": "portal-tasks — the cap must evict the oldest DONE task; evicting "
+              "OPEN tasks would silently delete unfinished work",
+    },
+    {
+        "name": "tasks-author-client-supplied",
+        "file": "portal/src/tasks.rs",
+        "old": "pub struct TaskCreate {\n    pub title: String,",
+        "new": "pub struct TaskCreate {\n    pub author: String,\n    pub title: String,",
+        "check": "tests/00-static/check_tasks.py",
+        "why": "portal-tasks — the author must be stamped from the session server-"
+              "side; a client-supplied author field enables forged attribution",
+    },
+    {
+        "name": "tasks-status-guard-removed",
+        "file": "portal/src/main.rs",
+        "old": "if patch.status.is_some() && !tasks::may_complete(&session.email, &session.name, &task) {",
+        "new": "if patch.status.is_some() {",
+        "check": "tests/00-static/check_tasks.py",
+        "why": "portal-tasks — status changes are restricted to assignee/author; "
+              "dropping the may_complete guard lets anyone complete any task",
+    },
+    {
+        "name": "tasks-bridge-slot-registry",
+        "file": "portal/web/src/lib/bridge.ts",
+        "old": '"task.create": TaskCreateProvider;',
+        "new": '"task_create_MUT": TaskCreateProvider;',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-tasks — a renamed task.create slot detaches the drei "
+              "sources; the guard must flag the missing documented slot",
+    },
+    {
+        "name": "tasks-bridge-feed-consumer",
+        "file": "portal/web/src/components/FeedColumn.tsx",
+        "old": 'const taskProvider = useSlot("task.create");',
+        "new": 'const taskProvider = useSlot("task_create_MUT");',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-tasks — a detached feed task source breaks 'Als Aufgabe "
+              "anlegen' from feed cards; the guard must flag it",
+    },
+    {
+        "name": "tasks-bridge-note-consumer",
+        "file": "portal/web/src/components/IntercomPanel.tsx",
+        "old": 'const taskProvider = useSlot("task.create");',
+        "new": 'const taskProvider = useSlot("task_create_MUT");',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-tasks — a detached notes task source breaks 'Als Aufgabe "
+              "anlegen' from team notes; the guard must flag it",
+    },
+    {
+        "name": "tasks-bridge-cloud-consumer",
+        "file": "portal/web/src/components/CloudFilePicker.tsx",
+        "old": 'const taskProvider = useSlot("task.create");',
+        "new": 'const taskProvider = useSlot("task_create_MUT");',
+        "check": "tests/00-static/check_bridge.py",
+        "why": "portal-tasks — a detached cloud task source breaks 'Als Aufgabe "
+              "anlegen' from cloud file rows; the guard must flag it",
+    },
+    {
         "name": "slo-portal-csp-idp",
         "file": "portal/web/src/middleware.ts",
         "old": "process.env.IDP_URL",

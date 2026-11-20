@@ -44,10 +44,24 @@ export interface CloudPickProvider {
   pick(): Promise<CloudPickResult | null>;
 }
 
+/** Payload for the "create a team task" slot — a source hands a reference. */
+export interface TaskCreatePayload {
+  /** Prefilled task title (feed title / note excerpt / cloud file name). */
+  title: string;
+  /** Optional link to the source, stored as the task's source_url. */
+  url?: string;
+}
+
+/** Provider for the "Als Aufgabe anlegen" slot (`task.create`). */
+export interface TaskCreateProvider {
+  create(task: TaskCreatePayload): void;
+}
+
 /** Slot name → provider contract. Add new slots here (and in the static guard). */
 export interface BridgeProviderMap {
   "share.open": ShareOpenProvider;
   "cloud.pick": CloudPickProvider;
+  "task.create": TaskCreateProvider;
 }
 
 export type BridgeSlot = keyof BridgeProviderMap;

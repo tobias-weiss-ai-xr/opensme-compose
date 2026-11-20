@@ -177,4 +177,34 @@ describe("PortalShell — Dienste tiles only for signed-in visitors", () => {
     expect(ta.value).toContain("t3n — KI-Briefing");
     expect(ta.value).toContain("https://feeds.example/a1");
   });
+
+  it("registers the task.create provider that prefills the task form and switches to the Aufgaben tab", async () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} />);
+
+    const create = getProvider("task.create");
+    expect(create).not.toBeNull();
+
+    // a source component (feed card, note, cloud file row) calls the slot
+    act(() => {
+      create!.create({ title: "Cloud-Datei sichten", url: "https://cloud.example/s/abc" });
+    });
+
+    const aufgabenPanels = screen.getAllByRole("region", { name: "Aufgaben" });
+    expect(aufgabenPanels[0]).not.toHaveAttribute("hidden");
+    const titleInput = (await screen.findByPlaceholderText(
+      "Titel der Aufgabe",
+    )) as HTMLInputElement;
+    expect(titleInput.value).toBe("Cloud-Datei sichten");
+    const urlInput = (await screen.findByPlaceholderText(
+      "Quellen-Link (https://…)",
+    )) as HTMLInputElement;
+    expect(urlInput.value).toBe("https://cloud.example/s/abc");
+  });
+
+  it("offers the Aufgaben tab in the header", () => {
+    stubFetch(true);
+    render(<PortalShell {...base} authenticated={true} />);
+    expect(screen.getByRole("tab", { name: "Aufgaben" })).toBeInTheDocument();
+  });
 });

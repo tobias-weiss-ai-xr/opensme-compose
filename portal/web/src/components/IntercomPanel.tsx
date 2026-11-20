@@ -172,6 +172,12 @@ export default function IntercomPanel({
    * validator rejects relative paths but allowlists these share URLs).
    */
   const cloudPicker = useSlot("cloud.pick");
+  // portal-tasks: turn a team note into an "Aufgabe" (title = note text,
+  // attachment link = source_url). No host → no affordance.
+  const taskProvider = useSlot("task.create");
+  /** One-line note excerpt usable as a task title. */
+  const taskTitle = (text: string) =>
+    text.length > 80 ? `${text.slice(0, 79)}…` : text.trim();
   async function onCloudPick(picked: CloudPickResult) {
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
@@ -426,6 +432,20 @@ export default function IntercomPanel({
                       : ""}
                     {m.attachment.content_type ? ` · ${m.attachment.content_type}` : ""}
                   </a>
+                )}
+                {taskProvider && (
+                  <button
+                    type="button"
+                    className="ic-task mt-1 block text-xs text-accent underline"
+                    onClick={() =>
+                      taskProvider.create({
+                        title: taskTitle(m.text) || "Team-Notiz",
+                        url: m.attachment?.url ?? undefined,
+                      })
+                    }
+                  >
+                    Als Aufgabe anlegen
+                  </button>
                 )}
               </li>
             ))}

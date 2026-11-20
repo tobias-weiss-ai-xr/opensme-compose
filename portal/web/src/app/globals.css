@@ -214,6 +214,63 @@ body {
   background: var(--accent-hover);
 }
 
+/* Tasks panel ("Aufgaben") */
+.ts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ts-list li {
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0;
+}
+.ts-item.ts-done .ts-title {
+  text-decoration: line-through;
+  color: var(--foreground-dim);
+}
+.ts-send {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ts-send:hover {
+  background: var(--accent-hover);
+}
+.ts-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ts-filters .ts-filter {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
+  border-radius: 999px;
+  padding: 0.2rem 0.8rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.ts-filters .ts-filter-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.ts-del {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.ts-del:hover {
+  color: #dc2626;
+}
+.ts-overdue {
+  color: #dc2626;
+  font-weight: 600;
+}
+
 /* Poll result bars */
 .poll-opt {
   position: relative;

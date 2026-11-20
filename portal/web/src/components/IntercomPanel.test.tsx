@@ -114,6 +114,36 @@ describe("IntercomPanel", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
+
+  it("offers 'Als Aufgabe anlegen' per note through the task.create slot", async () => {
+    const create = vi.fn();
+    registerProvider("task.create", { create });
+    mockedFetch.mockResolvedValue(
+      listResponse([
+        msg({
+          id: 5,
+          text: "Eine lange Notiz über die Rechnungsprüfung und die Belege",
+          attachment: {
+            url: "https://cloud.example/s/note-link",
+            name: "beleg.pdf",
+            size: 1024,
+            content_type: "application/pdf",
+          },
+        }),
+      ]),
+    );
+    render(<IntercomPanel />);
+    const btns = await screen.findAllByRole("button", {
+      name: /Als Aufgabe anlegen/,
+    });
+    expect(btns).toHaveLength(1);
+    act(() => btns[0].click());
+    expect(create).toHaveBeenCalledWith({
+      title: "Eine lange Notiz über die Rechnungsprüfung und die Belege",
+      url: "https://cloud.example/s/note-link",
+    });
+  });
+
   it("renders message text plus attachment link with humanSize suffix and content type", async () => {
     mockedFetch.mockResolvedValue(
       listResponse(

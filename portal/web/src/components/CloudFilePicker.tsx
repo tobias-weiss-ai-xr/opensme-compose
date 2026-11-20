@@ -52,6 +52,8 @@ export default function CloudFilePicker({
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   // portal-intercom share state — one row at a time.
   const shareProvider = useSlot("share.open");
+  // portal-tasks: create a team task straight from a cloud file row.
+  const taskProvider = useSlot("task.create");
   const [sharing, setSharing] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareErrPath, setShareErrPath] = useState<string | null>(null);
@@ -238,15 +240,33 @@ export default function CloudFilePicker({
                   >
                     KI-Analyse
                   </button>
-                  {shareProvider && (
-                    <button
-                      type="button"
-                      className="cfp-share shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
-                      disabled={sharing === f.path}
-                      onClick={() => void shareFile(f)}
-                    >
-                      {sharing === f.path ? "Teile…" : "Ins Team teilen"}
-                    </button>
+                  {(shareProvider || taskProvider) && (
+                    <>
+                      {shareProvider && (
+                        <button
+                          type="button"
+                          className="cfp-share shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
+                          disabled={sharing === f.path}
+                          onClick={() => void shareFile(f)}
+                        >
+                          {sharing === f.path ? "Teile…" : "Ins Team teilen"}
+                        </button>
+                      )}
+                      {taskProvider && (
+                        <button
+                          type="button"
+                          className="cfp-task shrink-0 rounded-lg border border-border px-2 py-2 text-xs text-accent hover:bg-accent/10"
+                          onClick={() =>
+                            taskProvider.create({
+                              title: f.name,
+                              url: f.url ?? undefined,
+                            })
+                          }
+                        >
+                          Als Aufgabe anlegen
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
                 {shareError && shareErrPath === f.path && (

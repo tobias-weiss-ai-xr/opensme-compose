@@ -29,6 +29,7 @@ describe("bridge registry", () => {
   it("returns null when no provider is registered (fail-soft)", () => {
     expect(getProvider("share.open")).toBeNull();
     expect(getProvider("cloud.pick")).toBeNull();
+    expect(getProvider("task.create")).toBeNull();
   });
 
   it("returns the registered share.open provider", () => {
@@ -79,6 +80,19 @@ describe("bridge registry", () => {
     registerProvider("share.open", { open: vi.fn() });
     expect(getProvider("share.open")).not.toBeNull();
     expect(getProvider("cloud.pick")).toBeNull();
+  });
+
+  it("returns the registered task.create provider", () => {
+    const create = vi.fn();
+    registerProvider("task.create", { create } satisfies BridgeProviderMap["task.create"]);
+    const got = getProvider("task.create");
+    expect(got).not.toBeNull();
+    got?.create({ title: "Feed-Beitrag", url: "https://news.example/a" });
+    expect(create).toHaveBeenCalledWith({
+      title: "Feed-Beitrag",
+      url: "https://news.example/a",
+    });
+    expect(getProvider("share.open")).toBeNull();
   });
 
   it("is SSR-safe: renderToStaticMarkup falls back to the null server snapshot", () => {

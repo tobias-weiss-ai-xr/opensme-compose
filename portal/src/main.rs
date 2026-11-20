@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware,
     response::{Html, IntoResponse, Json},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,7 @@ mod logout;
 mod metrics;
 mod polls;
 mod session;
+mod tasks;
 
 #[derive(Clone)]
 struct AppConfig {
@@ -45,6 +46,7 @@ struct AppConfig {
     ai_client: reqwest::Client,
     intercom: intercom::IntercomConfig,
     intercom_store: Arc<intercom::IntercomStore>,
+    task_store: Arc<tasks::TaskStore>,
     intercom_client: reqwest::Client,
     polls: Option<Arc<polls::PollStore>>,
     /// Cloud files bridge (`/api/cloud/*`): `None` (→ 503 on every
@@ -1142,6 +1144,15 @@ fn build_router(config: Arc<AppConfig>) -> Router {
             .route("/api/files/:token/:name", get(handle_polls_file));
     }
 
+    // Team tasks ("Aufgaben") — same session firewall as every other
+    // interactive surface: anonymous callers get 401.
+    protected = protected
+        .route("/api/tasks", get(handle_tasks_list))
+        .route("/api/tasks", post(handle_tasks_create))
+        .route("/api/tasks/users", get(handle_tasks_users))
+        .route("/api/tasks/:id", patch(handle_tasks_patch))
+        .route("/api/tasks/:id", delete(handle_tasks_delete));
+
     // The session firewall is scoped to the protected sub-router only —
     // every other route on the portal stays public.
     protected = protected.route_layer(middleware::from_fn_with_state(
@@ -1221,6 +1232,22 @@ fn intercom_store_from_env() -> intercom::IntercomStore {
     }
 }
 
+/// Team-tasks persistence: TASKS_DATA_PATH holds the JSON store; the cap
+/// comes from TASKS_MAX_TASKS (clamped 10..=MAX_TASKS, default MAX_TASKS).
+fn tasks_store_from_env() -> tasks::TaskStore {
+    let max = std::env::var(tasks::ENV_MAX_TASKS)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|n| n.clamp(10, tasks::MAX_TASKS))
+        .unwrap_or(tasks::MAX_TASKS);
+    match std::env::var(tasks::ENV_DATA_PATH) {
+        Ok(path) if !path.trim().is_empty() => {
+            tasks::TaskStore::open(Some(PathBuf::from(path.trim())), max)
+        }
+        _ => tasks::TaskStore::open(None, max),
+    }
+}
+
 #[derive(Deserialize)]
 struct IntercomUploadQuery {
     text: String,
@@ -1295,6 +1322,147 @@ async fn handle_intercom_upload(
         Json(serde_json::json!({ "message": msg })),
     )
         .into_response()
+}
+
+#[derive(Deserialize)]
+struct TasksListQuery {
+    #[serde(default)]
+    filter: Option<String>,
+    #[serde(default)]
+    since: Option<u64>,
+}
+
+fn task_json(t: &tasks::Task) -> serde_json::Value {
+    serde_json::to_value(t).unwrap_or(serde_json::Value::Null)
+}
+
+fn bad_request(msg: String) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
+}
+
+fn forbidden_tasks() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({ "error": "nur Zuständiger oder Autor darf Aufgaben abschließen oder löschen" })),
+    )
+        .into_response()
+}
+
+async fn handle_tasks_list(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    axum::extract::Query(q): axum::extract::Query<TasksListQuery>,
+) -> impl IntoResponse {
+    let me = vec![session.email.clone(), session.name.clone()];
+    let all = match q.since {
+        Some(since) => config.task_store.list_since(since),
+        None => config.task_store.list(),
+    };
+    let filtered = tasks::apply_filter(&all, q.filter.as_deref().unwrap_or("all"), &me);
+    Json(serde_json::json!({
+        "tasks": filtered,
+        "latest": config.task_store.latest_id(),
+    }))
+}
+
+async fn handle_tasks_create(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    Json(input): Json<tasks::TaskCreate>,
+) -> impl IntoResponse {
+    // Author is stamped from the session — never client-supplied.
+    let author = if session.email.trim().is_empty() {
+        session.name.clone()
+    } else {
+        session.email.clone()
+    };
+    match config.task_store.create(input, author) {
+        Ok(t) => (StatusCode::CREATED, Json(task_json(&t))).into_response(),
+        Err(e) => bad_request(e),
+    }
+}
+
+async fn handle_tasks_patch(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    axum::extract::Path(id): axum::extract::Path<u64>,
+    Json(patch): Json<tasks::TaskPatch>,
+) -> impl IntoResponse {
+    use axum::response::IntoResponse;
+    let Some(task) = config.task_store.get(id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Aufgabe nicht gefunden" })),
+        )
+            .into_response();
+    };
+    // Status changes are restricted to assignee or author; anyone may
+    // edit title/description/due/priority and (re)assign.
+    if patch.status.is_some() && !tasks::may_complete(&session.email, &session.name, &task) {
+        return forbidden_tasks();
+    }
+    match config.task_store.patch(id, patch) {
+        Ok(t) => Json(task_json(&t)).into_response(),
+        Err(tasks::PatchError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Aufgabe nicht gefunden" })),
+        )
+            .into_response(),
+        Err(tasks::PatchError::Invalid(e)) => bad_request(e),
+    }
+}
+
+async fn handle_tasks_delete(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    axum::extract::Path(id): axum::extract::Path<u64>,
+) -> impl IntoResponse {
+    use axum::response::IntoResponse;
+    let Some(task) = config.task_store.get(id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Aufgabe nicht gefunden" })),
+        )
+            .into_response();
+    };
+    if !tasks::may_complete(&session.email, &session.name, &task) {
+        return forbidden_tasks();
+    }
+    if config.task_store.delete(id) {
+        (StatusCode::NO_CONTENT, "").into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Aufgabe nicht gefunden" })),
+        )
+            .into_response()
+    }
+}
+
+/// Known team members for the assignee dropdown: note authors + task
+/// authors/assignees, distinct and sorted. No IdM call.
+async fn handle_tasks_users(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+) -> impl IntoResponse {
+    let note_authors: Vec<String> = config
+        .intercom_store
+        .list()
+        .iter()
+        .filter_map(|m| m.author.clone())
+        .collect();
+    let mut users = tasks::users_from(&config.task_store.list(), &note_authors);
+    for me in [session.email.trim(), session.name.trim()] {
+        if !me.is_empty() && !users.iter().any(|u| u.eq_ignore_ascii_case(me)) {
+            users.push(me.to_string());
+        }
+    }
+    users.sort();
+    Json(serde_json::json!({ "users": users }))
 }
 
 /// Moderation delete: remove one note by id. 204 on success (no body),
@@ -2425,6 +2593,7 @@ fn load_config() -> Arc<AppConfig> {
             "opensme.graphwiz.ai",
         )),
         intercom_store: Arc::new(intercom_store_from_env()),
+        task_store: Arc::new(tasks_store_from_env()),
         polls: polls_store_from_env(&intercom_client),
         // Cloud files bridge client — rides the shared wired client
         // (timeout, no redirects, egress proxy + internal-host bypass).
@@ -2526,6 +2695,7 @@ mod tests {
                 allow_http: false,
             },
             intercom_store: Arc::new(intercom::IntercomStore::default()),
+            task_store: Arc::new(tasks::TaskStore::default()),
             polls: None,
             cloud: None,
             intercom_client: reqwest::Client::new(),
@@ -3110,6 +3280,145 @@ mod tests {
             None => builder.body(Body::empty()).unwrap(),
         };
         build_router(Arc::new(cfg)).oneshot(request).await.unwrap()
+    }
+
+    async fn tasks_res(
+        cfg: AppConfig,
+        method: &str,
+        uri: &str,
+        body: Option<serde_json::Value>,
+        authenticated: bool,
+    ) -> axum::http::Response<Body> {
+        let mut builder = axum::http::Request::builder().method(method).uri(uri);
+        if authenticated {
+            let cookie = session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
+            builder = builder.header(
+                "cookie",
+                format!("{}={cookie}", session::PORTAL_SESSION_COOKIE),
+            );
+        }
+        let request = match body {
+            Some(b) => builder
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&b).unwrap()))
+                .unwrap(),
+            None => builder.body(Body::empty()).unwrap(),
+        };
+        build_router(Arc::new(cfg)).oneshot(request).await.unwrap()
+    }
+
+    async fn tasks_body(resp: axum::http::Response<Body>) -> serde_json::Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn tasks_api_is_behind_the_session_firewall() {
+        let cfg = cfg_with("", None, "");
+        for (method, uri) in [
+            ("GET", "/api/tasks"),
+            ("POST", "/api/tasks"),
+            ("GET", "/api/tasks/users"),
+            ("PATCH", "/api/tasks/1"),
+            ("DELETE", "/api/tasks/1"),
+        ] {
+            let resp = tasks_res(cfg.clone(), method, uri, None, false).await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tasks_crud_and_permission_rules_over_http() {
+        let cfg = cfg_with("", None, "");
+        // invalid create → 400, stores nothing
+        let resp = tasks_res(cfg.clone(), "POST", "/api/tasks", Some(serde_json::json!({"title": "", "assignee": "bob"})), true).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // create ok → 201, author stamped from session email
+        let resp = tasks_res(cfg.clone(), "POST", "/api/tasks", Some(serde_json::json!({"title": "Rechnung prüfen", "assignee": "bob@firma.de", "due": "2026-12-24", "priority": "high"})), true).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created = tasks_body(resp).await;
+        let id = created["id"].as_u64().unwrap();
+        assert_eq!(created["author"], "t@example");
+        assert_eq!(created["status"], "open");
+        // list + filter + since
+        let resp = tasks_res(cfg.clone(), "GET", "/api/tasks", None, true).await;
+        let body = tasks_body(resp).await;
+        assert_eq!(body["tasks"].as_array().unwrap().len(), 1);
+        let resp = tasks_res(cfg.clone(), "GET", &format!("/api/tasks?since={id}"), None, true).await;
+        assert_eq!(tasks_body(resp).await["tasks"].as_array().unwrap().len(), 0);
+        let resp = tasks_res(cfg.clone(), "GET", "/api/tasks?filter=done", None, true).await;
+        assert_eq!(tasks_body(resp).await["tasks"].as_array().unwrap().len(), 0);
+        // users endpoint lists the assignee + session identity
+        let resp = tasks_res(cfg.clone(), "GET", "/api/tasks/users", None, true).await;
+        let users = tasks_body(resp).await["users"].as_array().unwrap().clone();
+        let users: Vec<&str> = users.iter().map(|u| u.as_str().unwrap()).collect();
+        assert!(users.contains(&"bob@firma.de") && users.contains(&"t@example"));
+        // PATCH status by unrelated rule: session t@example is author → allowed
+        let resp = tasks_res(cfg.clone(), "PATCH", &format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), true).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let done_body = tasks_body(resp).await;
+        assert_eq!(done_body["status"], "done");
+        assert!(done_body["done_at"].is_string());
+        // invalid patch → 400
+        let resp = tasks_res(cfg.clone(), "PATCH", &format!("/api/tasks/{id}"), Some(serde_json::json!({"due": "morgen"})), true).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // unknown id → 404
+        let resp = tasks_res(cfg.clone(), "PATCH", "/api/tasks/999", Some(serde_json::json!({"title": "x"})), true).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        // delete by author → 204
+        let resp = tasks_res(cfg.clone(), "DELETE", &format!("/api/tasks/{id}"), None, true).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn tasks_forbidden_for_unrelated_member() {
+        let cfg = cfg_with("", None, "");
+        let author_cookie = session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
+        let other_cookie = session::mint_session(&cfg.session, "other-user", "Other User", "other@example");
+        let req = |method: &str, uri: String, body: Option<serde_json::Value>, cookie: &str| {
+            let mut b = axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("cookie", format!("{}={cookie}", session::PORTAL_SESSION_COOKIE));
+            if body.is_some() {
+                b = b.header("content-type", "application/json");
+            }
+            match body {
+                Some(v) => b.body(Body::from(serde_json::to_vec(&v).unwrap())).unwrap(),
+                None => b.body(Body::empty()).unwrap(),
+            }
+        };
+        // author creates the task
+        let resp = build_router(Arc::new(cfg.clone()))
+            .oneshot(req("POST", "/api/tasks".into(), Some(serde_json::json!({"title": "A", "assignee": "bob@firma.de"})), &author_cookie))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let id = tasks_body(resp).await["id"].as_u64().unwrap();
+        // unrelated member: status change → 403, delete → 403, but reassign → 200
+        let resp = build_router(Arc::new(cfg.clone()))
+            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), &other_cookie))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let resp = build_router(Arc::new(cfg.clone()))
+            .oneshot(req("DELETE", format!("/api/tasks/{id}"), None, &other_cookie))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        // assignee CAN complete their own task
+        let bob_cookie = session::mint_session(&cfg.session, "bob", "Bob", "bob@firma.de");
+        let resp = build_router(Arc::new(cfg.clone()))
+            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), &bob_cookie))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // anyone may (re)assign
+        let resp = build_router(Arc::new(cfg.clone()))
+            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"assignee": "caro@firma.de"})), &other_cookie))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "anyone may (re)assign");
     }
 
     fn cloud_cfg(cloud: Option<cloud::CloudFiles>) -> AppConfig {

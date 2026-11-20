@@ -1,5 +1,7 @@
 import type {
   Announcement,
+  TaskListResponse,
+  TeamTask,
   AiChatRequest,
   AiChatResponse,
   FeedResponse,
@@ -86,6 +88,78 @@ export async function postIntercom(
     throw new Error(error);
   }
   return res.json() as Promise<{ message: IntercomMessage }>;
+}
+
+// ── Team tasks ("Aufgaben") ──────────────────────────────────────────
+
+/** Full list or delta `?since=<id>`; optional server-side filter. */
+export function fetchTasks(
+  filter?: string,
+  since?: number,
+): Promise<TaskListResponse> {
+  const params = new URLSearchParams();
+  if (filter) params.set("filter", filter);
+  if (since != null && since > 0) params.set("since", String(since));
+  const qs = params.toString();
+  return getJson<TaskListResponse>(`/api/tasks${qs ? `?${qs}` : ""}`);
+}
+
+export interface TaskInput {
+  title: string;
+  description?: string;
+  assignee: string;
+  priority?: string;
+  due?: string;
+  source_url?: string;
+}
+
+export type TaskPatchInput = Partial<TaskInput> & { status?: "open" | "done" };
+
+async function taskError(res: Response, path: string): Promise<Error> {
+  if (res.status === 401) return new AuthError();
+  let error = `HTTP ${res.status} ${path}`;
+  try {
+    const data = await res.json();
+    if (data?.error) error = String(data.error);
+  } catch {
+    /* keep HTTP fallback */
+  }
+  return new Error(error);
+}
+
+async function taskJson<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: "no-store",
+    ...init,
+  });
+  if (!res.ok) throw await taskError(res, path);
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export function createTask(input: TaskInput): Promise<TeamTask> {
+  return taskJson<TeamTask>("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function patchTask(id: number, patch: TaskPatchInput): Promise<TeamTask> {
+  return taskJson<TeamTask>(`/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteTask(id: number): Promise<void> {
+  return taskJson<void>(`/api/tasks/${id}`, { method: "DELETE" });
+}
+
+/** Distinct known members for the assignee dropdown (notes + tasks authors). */
+export function fetchTaskUsers(): Promise<{ users: string[] }> {
+  return getJson<{ users: string[] }>("/api/tasks/users");
 }
 
 export interface FanoutChannel {

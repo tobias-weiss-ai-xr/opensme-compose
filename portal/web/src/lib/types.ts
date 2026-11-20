@@ -58,6 +58,32 @@ export interface IntercomListResponse {
   latest: number;
 }
 
+export type TaskPriority = "low" | "normal" | "high";
+export type TaskStatus = "open" | "done";
+
+export interface TeamTask {
+  /** Monotonic store id — React key + delta-poll cursor. */
+  id: number;
+  title: string;
+  description?: string | null;
+  assignee: string;
+  /** Session-stamped author (email, or name when no email). */
+  author: string;
+  priority: TaskPriority;
+  /** ISO date YYYY-MM-DD, server-validated. */
+  due?: string | null;
+  status: TaskStatus;
+  source_url?: string | null;
+  created_at?: string;
+  done_at?: string | null;
+}
+
+export interface TaskListResponse {
+  tasks: TeamTask[];
+  /** Highest id currently held — the delta-poll cursor seed. */
+  latest: number;
+}
+
 export interface PollOption {
   option: string;
   count: number;

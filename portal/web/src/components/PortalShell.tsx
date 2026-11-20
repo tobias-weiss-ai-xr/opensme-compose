@@ -11,10 +11,11 @@ import ArtGallery from "./ArtGallery";
 import FeedColumn from "./FeedColumn";
 import IntercomPanel from "./IntercomPanel";
 import PollsPanel from "./PollsPanel";
+import TasksPanel from "./TasksPanel";
 import QuickSwitchPalette from "./QuickSwitchPalette";
 import CloudPickerProvider from "./CloudPickerProvider";
 import { registerProvider } from "@/lib/bridge";
-import type { SharePayload } from "@/lib/bridge";
+import type { SharePayload, TaskCreatePayload } from "@/lib/bridge";
 import type { Announcement, Service } from "@/lib/types";
 import type { FeedColumnSpec } from "@/lib/config";
 
@@ -34,6 +35,7 @@ const TABS = [
   { id: "dienste", label: "Dienste" },
   { id: "umfragen", label: "Umfragen" },
   { id: "notizen", label: "Notizen" },
+  { id: "aufgaben", label: "Aufgaben" },
 ];
 
 /**
@@ -65,6 +67,20 @@ export default function PortalShell({
       open(payload) {
         setSharePrefill(payload);
         setTab("notizen");
+      },
+    });
+  }, []);
+
+  // portal-tasks: host the task.create slot. Sources (feed cards, notes,
+  // cloud file rows) never import the tasks panel — they call this
+  // provider; the shell owns the tab state and forwards the prefill as a
+  // prop. Fail-soft: with no consumer the sources render no affordance.
+  const [taskPrefill, setTaskPrefill] = useState<TaskCreatePayload | null>(null);
+  useEffect(() => {
+    return registerProvider("task.create", {
+      create(payload) {
+        setTaskPrefill(payload);
+        setTab("aufgaben");
       },
     });
   }, []);
@@ -104,6 +120,10 @@ export default function PortalShell({
 
         <section className="tab-panel" hidden={tab !== "notizen"} aria-label="Notizen">
           <IntercomPanel broadcastEnabled={broadcastEnabled} sharePrefill={sharePrefill} />
+        </section>
+
+        <section className="tab-panel" hidden={tab !== "aufgaben"} aria-label="Aufgaben">
+          <TasksPanel taskPrefill={taskPrefill} />
         </section>
 
         {/* Kunstgalerie: nur für anonyme Besucher — eine angemeldete

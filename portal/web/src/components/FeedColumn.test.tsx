@@ -116,6 +116,9 @@ describe("FeedColumn", () => {
     expect(
       screen.queryByRole("button", { name: /Ins Team teilen/ }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Als Aufgabe anlegen/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("offers 'ins Team teilen' per entry and forwards title+url through the slot", async () => {
@@ -130,6 +133,22 @@ describe("FeedColumn", () => {
     act(() => buttons[0].click());
     expect(open).toHaveBeenCalledWith({
       text: "Neuer Bericht",
+      url: "https://news.example/bericht",
+    });
+  });
+
+  it("offers 'Als Aufgabe anlegen' per entry through the task.create slot", async () => {
+    const create = vi.fn();
+    registerProvider("task.create", { create });
+    mocked.mockResolvedValue(response());
+    render(<FeedColumn placeholder={{ id: "startup", title: "Startup" }} />);
+    const buttons = await screen.findAllByRole("button", {
+      name: /Als Aufgabe anlegen/,
+    });
+    expect(buttons).toHaveLength(2);
+    act(() => buttons[0].click());
+    expect(create).toHaveBeenCalledWith({
+      title: "Neuer Bericht",
       url: "https://news.example/bericht",
     });
   });

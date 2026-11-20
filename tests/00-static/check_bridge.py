@@ -9,7 +9,8 @@ provider registry in portal/web/src/lib/bridge.ts — never through peer
 imports. This check pins the bridge contract statically:
 
   R1 — Contract: lib/bridge.ts exists and declares the BridgeProviderMap
-       with exactly the documented slots ("share.open", "cloud.pick").
+       with exactly the documented slots ("share.open", "cloud.pick",
+       "task.create").
   R2 — Every defined slot is consumed outside the registry: a slot that no
        component uses is dead integration surface ("nice-to-have" drift).
   R3 — Share wiring: the shell registers the share.open provider and
@@ -19,6 +20,10 @@ imports. This check pins the bridge contract statically:
        must be the existing intercom post function (no new endpoint).
   R5 — Feed source: feed cards render the "ins Team teilen" affordance
        only through the registered slot.
+  R6 — Task source (portal-tasks): feed cards, notes and cloud file rows
+       each offer "Als Aufgabe anlegen" via the task.create slot with the
+       source title + link (feed=>url, note=>attachment url, cloud=>share
+       url). Absent host => no affordance.
 
 Pure file inspection — no docker, runs on any fresh checkout.
 
@@ -39,7 +44,7 @@ INTERCOM = WEB / "components" / "IntercomPanel.tsx"
 FEED = WEB / "components" / "FeedColumn.tsx"
 PICKER = WEB / "components" / "CloudFilePicker.tsx"
 
-SLOTS = ["share.open", "cloud.pick"]
+SLOTS = ["share.open", "cloud.pick", "task.create"]
 
 
 def src_text(path: Path) -> str:
@@ -124,6 +129,36 @@ def main():
         failures.append(
             "R5: FeedColumn must offer 'ins Team teilen' through the "
             "share.open provider (no affordance when no host registered)"
+        )
+
+    # ── R6: task.create consumed by feed, notes and cloud rows ──────────
+    for name, path in [("feed", FEED), ("notes", INTERCOM), ("cloud", PICKER)]:
+        text = src_text(path)
+        if 'useSlot("task.create")' not in text:
+            failures.append(
+                f"R6: {name} must consume the task.create slot (useSlot) for "
+                '"Als Aufgabe anlegen"'
+            )
+            continue
+        if "taskProvider.create({" not in text:
+            failures.append(
+                f"R6: {name} must call taskProvider.create({{ title, url }}) to "
+                "hand a real reference to the tasks panel"
+            )
+    feed = src_text(FEED)
+    if "taskProvider.create({ title: e.title, url: e.url })" not in feed:
+        failures.append(
+            "R6: feed cards must forward the entry title + url into task.create"
+        )
+    intercom = src_text(INTERCOM)
+    if "url: m.attachment?.url ?? undefined" not in intercom:
+        failures.append(
+            "R6: notes must forward the attachment link (if any) into task.create"
+        )
+    picker = src_text(PICKER)
+    if "url: f.url ?? undefined" not in picker:
+        failures.append(
+            "R6: cloud rows must forward the share link (if any) into task.create"
         )
 
     if failures:

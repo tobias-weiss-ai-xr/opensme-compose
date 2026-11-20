@@ -228,6 +228,39 @@ describe("CloudFilePicker", () => {
     expect(
       screen.queryByRole("button", { name: /Ins Team teilen/ }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Als Aufgabe anlegen/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("task: 'Als Aufgabe anlegen' forwards file name + share link through the task.create slot", async () => {
+    const create = vi.fn();
+    registerProvider("task.create", { create });
+    fetchMock.mockResolvedValue(jsonResponse(FILES));
+    // files carry a share url in FILES? build one with url here
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          path: "docs/bericht.pdf",
+          name: "bericht.pdf",
+          mime: "application/pdf",
+          size: 2048,
+          url: "https://cloud.example/s/task-link",
+        },
+      ]),
+    );
+    renderPicker();
+    const buttons = await screen.findAllByRole("button", {
+      name: /Als Aufgabe anlegen/,
+    });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        title: "bericht.pdf",
+        url: "https://cloud.example/s/task-link",
+      }),
+    );
   });
 
   it("share: 'Ins Team teilen' creates the share and forwards text+attachment link through the slot", async () => {

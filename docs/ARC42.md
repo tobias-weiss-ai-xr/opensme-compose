@@ -119,6 +119,20 @@ Retention).
   Slots; ohne registrierten Provider verschwinden die Aktionen
   (fail-soft, SSR-sicher, kein Peer-Import). Geprüft von
   `tests/00-static/check_bridge.py` inkl. Mutationen.
+- **Team-Aufgaben (portal-tasks)**: Portal-eigener Aufgaben-Tab
+  („Aufgaben“) — ein Team-Backlog, bewusst ohne externen Task-Dienst.
+  CRUD hinter der Session-Firewall (`/api/tasks*`; 401 anonym, 403 für
+  ID/Status-Fremdeingriffe), Author wird serverseitig aus der Session
+  gestempelt, Fälligkeit/Priorität serverseitig validiert, Persistenz
+  atomar (tmp+rename) mit Cap 500 (älteste erledigte zuerst; offene
+  Aufgaben werden nie evakuiert). Der Bridge-Slot `task.create`
+  („Als Aufgabe anlegen“) verbindet Feed-Karten, Team-Notizen und
+  Cloud-Dateizeilen mit dem Aufgaben-Formular — Titel + Quellen-Link
+  werden vorbefüllt, der Shell wechselt in den Aufgaben-Tab
+  (fail-soft, kein Peer-Import). Live-Delta-Polling über `?since=`
+  wie beim Intercom-Slot. Backend-Contract statisch gepinnt von
+  `tests/00-static/check_tasks.py`, Bridge-Flächen von
+  `tests/00-static/check_bridge.py` — jeweils inkl. Mutationen.
 
 ## 8. Architektur-Entscheidungen
 

@@ -48,6 +48,9 @@ export default function FeedColumn({ placeholder }: FeedColumnProps) {
   // "ins Team teilen" per entry (title + url → prefilled note). No host →
   // no affordance — the card is unchanged.
   const shareProvider = useSlot("share.open");
+  // portal-tasks: when the shell hosts the task.create provider, also offer
+  // "Als Aufgabe anlegen" per entry. No host → no affordance.
+  const taskProvider = useSlot("task.create");
 
   return (
     <div className="feed-card" data-feed-column={placeholder.id}>
@@ -64,16 +67,31 @@ export default function FeedColumn({ placeholder }: FeedColumnProps) {
                 {e.title}
               </a>
               <span className="date">{feedMetaLabel(e)}</span>
-              {shareProvider && (
-                <button
-                  type="button"
-                  className="feed-share mt-1 block text-xs text-accent underline"
-                  onClick={() =>
-                    shareProvider.open({ text: e.title, url: e.url })
-                  }
-                >
-                  Ins Team teilen
-                </button>
+              {(shareProvider || taskProvider) && (
+                <span className="mt-1 block space-x-3">
+                  {shareProvider && (
+                    <button
+                      type="button"
+                      className="feed-share text-xs text-accent underline"
+                      onClick={() =>
+                        shareProvider.open({ text: e.title, url: e.url })
+                      }
+                    >
+                      Ins Team teilen
+                    </button>
+                  )}
+                  {taskProvider && (
+                    <button
+                      type="button"
+                      className="feed-task text-xs text-accent underline"
+                      onClick={() =>
+                        taskProvider.create({ title: e.title, url: e.url })
+                      }
+                    >
+                      Als Aufgabe anlegen
+                    </button>
+                  )}
+                </span>
               )}
             </li>
           ))}
