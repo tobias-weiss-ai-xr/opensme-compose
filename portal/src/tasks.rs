@@ -110,7 +110,10 @@ pub fn validate_title(raw: &str) -> Result<String, String> {
         return Err("Titel darf nicht leer sein".into());
     }
     if t.chars().count() > MAX_TITLE_LEN {
-        return Err(format!("Titel darf höchstens {} Zeichen haben", MAX_TITLE_LEN));
+        return Err(format!(
+            "Titel darf höchstens {} Zeichen haben",
+            MAX_TITLE_LEN
+        ));
     }
     Ok(t.to_string())
 }
@@ -121,7 +124,10 @@ pub fn validate_assignee(raw: &str) -> Result<String, String> {
         return Err("Zuständiger darf nicht leer sein".into());
     }
     if a.chars().count() > MAX_ASSIGNEE_LEN {
-        return Err(format!("Zuständiger darf höchstens {} Zeichen haben", MAX_ASSIGNEE_LEN));
+        return Err(format!(
+            "Zuständiger darf höchstens {} Zeichen haben",
+            MAX_ASSIGNEE_LEN
+        ));
     }
     Ok(a.to_string())
 }
@@ -133,7 +139,10 @@ pub fn validate_description(raw: Option<&str>) -> Result<Option<String>, String>
         return Ok(None);
     }
     if d.chars().count() > MAX_DESCRIPTION_LEN {
-        return Err(format!("Beschreibung darf höchstens {} Zeichen haben", MAX_DESCRIPTION_LEN));
+        return Err(format!(
+            "Beschreibung darf höchstens {} Zeichen haben",
+            MAX_DESCRIPTION_LEN
+        ));
     }
     Ok(Some(d.to_string()))
 }
@@ -162,7 +171,16 @@ pub fn validate_due(raw: Option<&str>) -> Result<Option<String>, String> {
     let days_in_month = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     if !(1..=12).contains(&m) || d < 1 || d > days_in_month[(m - 1) as usize] {
         return Err(bad());
@@ -171,7 +189,9 @@ pub fn validate_due(raw: Option<&str>) -> Result<Option<String>, String> {
 }
 
 pub fn parse_priority(raw: Option<&str>) -> Result<Priority, String> {
-    let Some(raw) = raw else { return Ok(Priority::Normal) };
+    let Some(raw) = raw else {
+        return Ok(Priority::Normal);
+    };
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "normal" => Ok(Priority::Normal),
         "low" | "niedrig" => Ok(Priority::Low),
@@ -305,7 +325,9 @@ impl TaskStore {
     /// Atomic write-through: serialize then rename over the target.
     fn persist(&self, tasks: &[Task]) {
         let Some(path) = &self.data_path else { return };
-        let Ok(json) = serde_json::to_vec(tasks) else { return };
+        let Ok(json) = serde_json::to_vec(tasks) else {
+            return;
+        };
         let tmp = path.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() {
             let _ = std::fs::rename(&tmp, path);
@@ -358,16 +380,16 @@ impl TaskStore {
             Some(t) => Some(validate_title(t).map_err(PatchError::Invalid)?),
             None => None,
         };
-        let description = validate_description(patch.description.as_deref())
-            .map_err(PatchError::Invalid)?;
+        let description =
+            validate_description(patch.description.as_deref()).map_err(PatchError::Invalid)?;
         let assignee = match &patch.assignee {
             Some(a) => Some(validate_assignee(a).map_err(PatchError::Invalid)?),
             None => None,
         };
         let priority = parse_priority(patch.priority.as_deref()).map_err(PatchError::Invalid)?;
         let due = validate_due(patch.due.as_deref()).map_err(PatchError::Invalid)?;
-        let source_url = validate_source_url(patch.source_url.as_deref())
-            .map_err(PatchError::Invalid)?;
+        let source_url =
+            validate_source_url(patch.source_url.as_deref()).map_err(PatchError::Invalid)?;
         let status = patch.status;
 
         let mut tasks = self.tasks.write().unwrap_or_else(|e| e.into_inner());
@@ -473,7 +495,11 @@ mod tests {
 
     fn test_path() -> std::path::PathBuf {
         let n = TEST_SEQ.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("opensme-tasks-test-{}-{}.json", std::process::id(), n))
+        std::env::temp_dir().join(format!(
+            "opensme-tasks-test-{}-{}.json",
+            std::process::id(),
+            n
+        ))
     }
 
     fn cleanup(path: &std::path::Path) {
@@ -509,7 +535,10 @@ mod tests {
     #[test]
     fn validate_assignee_bounds() {
         assert!(validate_assignee(" ").is_err());
-        assert_eq!(validate_assignee(" anna@firma.de ").unwrap(), "anna@firma.de");
+        assert_eq!(
+            validate_assignee(" anna@firma.de ").unwrap(),
+            "anna@firma.de"
+        );
         let long = "a".repeat(MAX_ASSIGNEE_LEN + 1);
         assert!(validate_assignee(&long).is_err());
     }
@@ -517,10 +546,23 @@ mod tests {
     #[test]
     fn validate_due_accepts_only_iso_dates() {
         assert_eq!(validate_due(None).unwrap(), None);
-        assert_eq!(validate_due(Some("2026-12-24")).unwrap(), Some("2026-12-24".to_string()));
+        assert_eq!(
+            validate_due(Some("2026-12-24")).unwrap(),
+            Some("2026-12-24".to_string())
+        );
         assert_eq!(validate_due(Some("")).unwrap(), None, "empty due = no due");
-        for bad in ["tomorrow", "2026/12/24", "2026-13-01", "2026-02-30", "2026-00-10", "2026-1-1"] {
-            assert!(validate_due(Some(bad)).is_err(), "due {bad:?} must be rejected");
+        for bad in [
+            "tomorrow",
+            "2026/12/24",
+            "2026-13-01",
+            "2026-02-30",
+            "2026-00-10",
+            "2026-1-1",
+        ] {
+            assert!(
+                validate_due(Some(bad)).is_err(),
+                "due {bad:?} must be rejected"
+            );
         }
         // leap day valid in 2028, invalid in 2026
         assert!(validate_due(Some("2028-02-29")).is_ok());
@@ -540,16 +582,26 @@ mod tests {
         assert_eq!(validate_source_url(None).unwrap(), None);
         assert!(validate_source_url(Some("https://cloud.example/s/abc")).is_ok());
         assert!(validate_source_url(Some("http://news.internal/a")).is_ok());
-        assert_eq!(validate_source_url(Some("")).unwrap(), None, "empty url = no url");
+        assert_eq!(
+            validate_source_url(Some("")).unwrap(),
+            None,
+            "empty url = no url"
+        );
         for bad in ["javascript:alert(1)", "ftp://x", "cloud.example/s/abc"] {
-            assert!(validate_source_url(Some(bad)).is_err(), "url {bad:?} must be rejected");
+            assert!(
+                validate_source_url(Some(bad)).is_err(),
+                "url {bad:?} must be rejected"
+            );
         }
     }
 
     #[test]
     fn validate_description_bounds() {
         assert_eq!(validate_description(None).unwrap(), None);
-        assert_eq!(validate_description(Some("  hi ")).unwrap(), Some("hi".to_string()));
+        assert_eq!(
+            validate_description(Some("  hi ")).unwrap(),
+            Some("hi".to_string())
+        );
         let long = "x".repeat(MAX_DESCRIPTION_LEN + 1);
         assert!(validate_description(Some(&long)).is_err());
     }
@@ -588,7 +640,12 @@ mod tests {
     #[test]
     fn create_stamps_author_validates_and_lists_newest_first() {
         let store = TaskStore::open(None, MAX_TASKS);
-        let t = store.create(create_input("  Rechnung prüfen ", "bob@firma.de"), "anna@firma.de".into()).unwrap();
+        let t = store
+            .create(
+                create_input("  Rechnung prüfen ", "bob@firma.de"),
+                "anna@firma.de".into(),
+            )
+            .unwrap();
         assert_eq!(t.title, "Rechnung prüfen");
         assert_eq!(t.author, "anna@firma.de");
         assert_eq!(t.status, TaskStatus::Open);
@@ -596,7 +653,12 @@ mod tests {
         assert!(t.done_at.is_none());
         let bad = store.create(create_input("", "bob"), "anna@firma.de".into());
         assert!(bad.is_err());
-        let t2 = store.create(create_input("Zweites", "bob@firma.de"), "anna@firma.de".into()).unwrap();
+        let t2 = store
+            .create(
+                create_input("Zweites", "bob@firma.de"),
+                "anna@firma.de".into(),
+            )
+            .unwrap();
         let all = store.list();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].id, t2.id, "newest first");
@@ -607,7 +669,9 @@ mod tests {
     #[test]
     fn patch_applies_partial_fields_and_sets_done_at() {
         let store = TaskStore::open(None, MAX_TASKS);
-        let t = store.create(create_input("A", "bob@firma.de"), "anna@firma.de".into()).unwrap();
+        let t = store
+            .create(create_input("A", "bob@firma.de"), "anna@firma.de".into())
+            .unwrap();
         let done = store
             .patch(
                 t.id,
@@ -629,22 +693,39 @@ mod tests {
         assert_eq!(done.description.as_deref(), Some("erledigt weil"));
         // reopen clears done_at
         let reopened = store
-            .patch(t.id, TaskPatch { status: Some(TaskStatus::Open), ..Default::default() })
+            .patch(
+                t.id,
+                TaskPatch {
+                    status: Some(TaskStatus::Open),
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(reopened.status, TaskStatus::Open);
         assert!(reopened.done_at.is_none());
         // invalid patch is an error and changes nothing
-        let err = store.patch(t.id, TaskPatch { title: Some("".into()), ..Default::default() });
+        let err = store.patch(
+            t.id,
+            TaskPatch {
+                title: Some("".into()),
+                ..Default::default()
+            },
+        );
         assert!(matches!(err, Err(PatchError::Invalid(_))));
         assert_eq!(store.get(t.id).unwrap().title, "A");
         // unknown id
-        assert!(matches!(store.patch(999, TaskPatch::default()), Err(PatchError::NotFound)));
+        assert!(matches!(
+            store.patch(999, TaskPatch::default()),
+            Err(PatchError::NotFound)
+        ));
     }
 
     #[test]
     fn delete_removes_and_reports() {
         let store = TaskStore::open(None, MAX_TASKS);
-        let t = store.create(create_input("A", "bob"), "anna".into()).unwrap();
+        let t = store
+            .create(create_input("A", "bob"), "anna".into())
+            .unwrap();
         assert!(store.delete(t.id));
         assert!(!store.delete(t.id));
         assert!(store.get(t.id).is_none());
@@ -655,18 +736,44 @@ mod tests {
     #[test]
     fn cap_evicts_oldest_done_first_and_never_open() {
         let store = TaskStore::open(None, 3);
-        let t1 = store.create(create_input("open1", "a"), "x".into()).unwrap();
-        let t2 = store.create(create_input("open2", "a"), "x".into()).unwrap();
-        let t3 = store.create(create_input("done1", "a"), "x".into()).unwrap();
-        store.patch(t3.id, TaskPatch { status: Some(TaskStatus::Done), ..Default::default() }).unwrap();
+        let t1 = store
+            .create(create_input("open1", "a"), "x".into())
+            .unwrap();
+        let t2 = store
+            .create(create_input("open2", "a"), "x".into())
+            .unwrap();
+        let t3 = store
+            .create(create_input("done1", "a"), "x".into())
+            .unwrap();
+        store
+            .patch(
+                t3.id,
+                TaskPatch {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         // at cap (3); adding a 4th evicts t3 (the only done), keeps open t1/t2
-        let t4 = store.create(create_input("open3", "a"), "x".into()).unwrap();
+        let t4 = store
+            .create(create_input("open3", "a"), "x".into())
+            .unwrap();
         let ids: Vec<u64> = store.list().iter().map(|t| t.id).collect();
         assert!(!ids.contains(&t3.id), "done task must be evicted at cap");
         assert!(ids.contains(&t1.id) && ids.contains(&t2.id) && ids.contains(&t4.id));
         // mark t1 done, add another → oldest done (t1) evicted
-        store.patch(t1.id, TaskPatch { status: Some(TaskStatus::Done), ..Default::default() }).unwrap();
-        let t5 = store.create(create_input("open4", "a"), "x".into()).unwrap();
+        store
+            .patch(
+                t1.id,
+                TaskPatch {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let t5 = store
+            .create(create_input("open4", "a"), "x".into())
+            .unwrap();
         let ids: Vec<u64> = store.list().iter().map(|t| t.id).collect();
         assert!(!ids.contains(&t1.id));
         assert!(ids.contains(&t2.id) && ids.contains(&t4.id) && ids.contains(&t5.id));
@@ -676,9 +783,15 @@ mod tests {
     fn cap_never_evicts_open_even_when_all_open() {
         let store = TaskStore::open(None, 2);
         for i in 0..4 {
-            store.create(create_input(&format!("open{i}"), "a"), "x".into()).unwrap();
+            store
+                .create(create_input(&format!("open{i}"), "a"), "x".into())
+                .unwrap();
         }
-        assert_eq!(store.list().len(), 4, "open tasks must survive beyond the cap");
+        assert_eq!(
+            store.list().len(),
+            4,
+            "open tasks must survive beyond the cap"
+        );
     }
 
     // ── persistence ───────────────────────────────────────────────
@@ -688,8 +801,21 @@ mod tests {
         let path = test_path();
         {
             let store = TaskStore::open(Some(path.clone()), MAX_TASKS);
-            let t = store.create(create_input("Persistiert", "bob@firma.de"), "anna@firma.de".into()).unwrap();
-            store.patch(t.id, TaskPatch { status: Some(TaskStatus::Done), ..Default::default() }).unwrap();
+            let t = store
+                .create(
+                    create_input("Persistiert", "bob@firma.de"),
+                    "anna@firma.de".into(),
+                )
+                .unwrap();
+            store
+                .patch(
+                    t.id,
+                    TaskPatch {
+                        status: Some(TaskStatus::Done),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
             assert!(path.exists());
         }
         {
@@ -700,7 +826,9 @@ mod tests {
             assert_eq!(all[0].status, TaskStatus::Done);
             assert!(all[0].done_at.is_some());
             // id sequence continues past restored max
-            let t2 = store.create(create_input("Neu", "bob"), "anna".into()).unwrap();
+            let t2 = store
+                .create(create_input("Neu", "bob"), "anna".into())
+                .unwrap();
             assert!(t2.id > all[0].id);
         }
         cleanup(&path);
@@ -761,7 +889,10 @@ mod tests {
         let mut b = task_with("bob@firma.de", "anna@firma.de");
         b.id = 2;
         let users = users_from(&[a, b], &["".to_string(), "caro@firma.de".to_string()]);
-        assert_eq!(users, vec!["Bob", "anna@firma.de", "bob@firma.de", "caro@firma.de"]);
+        assert_eq!(
+            users,
+            vec!["Bob", "anna@firma.de", "bob@firma.de", "caro@firma.de"]
+        );
         // case-insensitive dedupe keeps first-seen spelling
         let dup = users_from(&[task_with("Anna@Firma.de", "anna@firma.de")], &[]);
         assert_eq!(dup, vec!["Anna@Firma.de"]);

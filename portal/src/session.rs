@@ -454,9 +454,7 @@ pub async fn handle_callback(
                 ),
             };
             builder = builder.header(SET_COOKIE, id_token_hdr);
-            builder
-                .body(axum::body::Body::empty())
-                .expect("static")
+            builder.body(axum::body::Body::empty()).expect("static")
         }
         Err(e) => {
             tracing::warn!(error = %e, "OIDC callback token/userinfo exchange failed");
@@ -1103,10 +1101,22 @@ mod tests {
             .iter()
             .find(|c| c.starts_with("OPENSMESESSION="))
             .expect("id_token cookie set from the token response");
-        let id_token = id_token_cookie.split_once('=').unwrap().1.split(';').next().unwrap();
+        let id_token = id_token_cookie
+            .split_once('=')
+            .unwrap()
+            .1
+            .split(';')
+            .next()
+            .unwrap();
         assert_eq!(id_token, "it-123");
-        assert!(id_token_cookie.contains("HttpOnly"), "id_token cookie must be HttpOnly");
-        assert!(id_token_cookie.contains("Secure"), "id_token cookie must be Secure");
+        assert!(
+            id_token_cookie.contains("HttpOnly"),
+            "id_token cookie must be HttpOnly"
+        );
+        assert!(
+            id_token_cookie.contains("Secure"),
+            "id_token cookie must be Secure"
+        );
 
         // wrong state → 400, no session cookie
         let mut app = crate::tests::cfg_with("", None, "");

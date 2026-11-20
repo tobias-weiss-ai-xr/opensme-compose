@@ -3331,7 +3331,14 @@ mod tests {
     async fn tasks_crud_and_permission_rules_over_http() {
         let cfg = cfg_with("", None, "");
         // invalid create → 400, stores nothing
-        let resp = tasks_res(cfg.clone(), "POST", "/api/tasks", Some(serde_json::json!({"title": "", "assignee": "bob"})), true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "POST",
+            "/api/tasks",
+            Some(serde_json::json!({"title": "", "assignee": "bob"})),
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         // create ok → 201, author stamped from session email
         let resp = tasks_res(cfg.clone(), "POST", "/api/tasks", Some(serde_json::json!({"title": "Rechnung prüfen", "assignee": "bob@firma.de", "due": "2026-12-24", "priority": "high"})), true).await;
@@ -3344,7 +3351,14 @@ mod tests {
         let resp = tasks_res(cfg.clone(), "GET", "/api/tasks", None, true).await;
         let body = tasks_body(resp).await;
         assert_eq!(body["tasks"].as_array().unwrap().len(), 1);
-        let resp = tasks_res(cfg.clone(), "GET", &format!("/api/tasks?since={id}"), None, true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "GET",
+            &format!("/api/tasks?since={id}"),
+            None,
+            true,
+        )
+        .await;
         assert_eq!(tasks_body(resp).await["tasks"].as_array().unwrap().len(), 0);
         let resp = tasks_res(cfg.clone(), "GET", "/api/tasks?filter=done", None, true).await;
         assert_eq!(tasks_body(resp).await["tasks"].as_array().unwrap().len(), 0);
@@ -3354,32 +3368,65 @@ mod tests {
         let users: Vec<&str> = users.iter().map(|u| u.as_str().unwrap()).collect();
         assert!(users.contains(&"bob@firma.de") && users.contains(&"t@example"));
         // PATCH status by unrelated rule: session t@example is author → allowed
-        let resp = tasks_res(cfg.clone(), "PATCH", &format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "PATCH",
+            &format!("/api/tasks/{id}"),
+            Some(serde_json::json!({"status": "done"})),
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
         let done_body = tasks_body(resp).await;
         assert_eq!(done_body["status"], "done");
         assert!(done_body["done_at"].is_string());
         // invalid patch → 400
-        let resp = tasks_res(cfg.clone(), "PATCH", &format!("/api/tasks/{id}"), Some(serde_json::json!({"due": "morgen"})), true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "PATCH",
+            &format!("/api/tasks/{id}"),
+            Some(serde_json::json!({"due": "morgen"})),
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         // unknown id → 404
-        let resp = tasks_res(cfg.clone(), "PATCH", "/api/tasks/999", Some(serde_json::json!({"title": "x"})), true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "PATCH",
+            "/api/tasks/999",
+            Some(serde_json::json!({"title": "x"})),
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         // delete by author → 204
-        let resp = tasks_res(cfg.clone(), "DELETE", &format!("/api/tasks/{id}"), None, true).await;
+        let resp = tasks_res(
+            cfg.clone(),
+            "DELETE",
+            &format!("/api/tasks/{id}"),
+            None,
+            true,
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]
     async fn tasks_forbidden_for_unrelated_member() {
         let cfg = cfg_with("", None, "");
-        let author_cookie = session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
-        let other_cookie = session::mint_session(&cfg.session, "other-user", "Other User", "other@example");
+        let author_cookie =
+            session::mint_session(&cfg.session, "test-user", "Test User", "t@example");
+        let other_cookie =
+            session::mint_session(&cfg.session, "other-user", "Other User", "other@example");
         let req = |method: &str, uri: String, body: Option<serde_json::Value>, cookie: &str| {
             let mut b = axum::http::Request::builder()
                 .method(method)
                 .uri(uri)
-                .header("cookie", format!("{}={cookie}", session::PORTAL_SESSION_COOKIE));
+                .header(
+                    "cookie",
+                    format!("{}={cookie}", session::PORTAL_SESSION_COOKIE),
+                );
             if body.is_some() {
                 b = b.header("content-type", "application/json");
             }
@@ -3390,32 +3437,57 @@ mod tests {
         };
         // author creates the task
         let resp = build_router(Arc::new(cfg.clone()))
-            .oneshot(req("POST", "/api/tasks".into(), Some(serde_json::json!({"title": "A", "assignee": "bob@firma.de"})), &author_cookie))
+            .oneshot(req(
+                "POST",
+                "/api/tasks".into(),
+                Some(serde_json::json!({"title": "A", "assignee": "bob@firma.de"})),
+                &author_cookie,
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
         let id = tasks_body(resp).await["id"].as_u64().unwrap();
         // unrelated member: status change → 403, delete → 403, but reassign → 200
         let resp = build_router(Arc::new(cfg.clone()))
-            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), &other_cookie))
+            .oneshot(req(
+                "PATCH",
+                format!("/api/tasks/{id}"),
+                Some(serde_json::json!({"status": "done"})),
+                &other_cookie,
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
         let resp = build_router(Arc::new(cfg.clone()))
-            .oneshot(req("DELETE", format!("/api/tasks/{id}"), None, &other_cookie))
+            .oneshot(req(
+                "DELETE",
+                format!("/api/tasks/{id}"),
+                None,
+                &other_cookie,
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
         // assignee CAN complete their own task
         let bob_cookie = session::mint_session(&cfg.session, "bob", "Bob", "bob@firma.de");
         let resp = build_router(Arc::new(cfg.clone()))
-            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"status": "done"})), &bob_cookie))
+            .oneshot(req(
+                "PATCH",
+                format!("/api/tasks/{id}"),
+                Some(serde_json::json!({"status": "done"})),
+                &bob_cookie,
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         // anyone may (re)assign
         let resp = build_router(Arc::new(cfg.clone()))
-            .oneshot(req("PATCH", format!("/api/tasks/{id}"), Some(serde_json::json!({"assignee": "caro@firma.de"})), &other_cookie))
+            .oneshot(req(
+                "PATCH",
+                format!("/api/tasks/{id}"),
+                Some(serde_json::json!({"assignee": "caro@firma.de"})),
+                &other_cookie,
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "anyone may (re)assign");
