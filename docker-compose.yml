@@ -379,6 +379,7 @@ services:
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:-home.opensme.graphwiz.ai}
       OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
       INTERCOM_DATA_PATH: ${INTERCOM_DATA_PATH:-/data/intercom.json}
+      TASKS_DATA_PATH: ${TASKS_DATA_PATH:-/data/tasks.json}
       POLLS_ENABLED: ${POLLS_ENABLED:-}
       POLLS_DATA_PATH: ${POLLS_DATA_PATH:-/data/polls.json}
       CLOUD_WEBDAV_URL: ${CLOUD_WEBDAV_URL:-}
