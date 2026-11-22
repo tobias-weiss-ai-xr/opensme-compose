@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """tests/05-e2e/realtime.py — real-time intercom journey (slice 1).
 
-Two authenticated portal sessions: one posts a note and creates a task; the
-other listens on /api/events. The team note must arrive over SSE within
-seconds; the recipient-scoped task event must NOT reach a different viewer.
-When the event bus is disabled (/api/events answers 204 — the polling
-fallback path), the journey skips cleanly instead of failing.
+Two authenticated portal sessions with DISTINCT OIDC identities: one posts a
+note and creates a task; the other listens on /api/events. The team note must
+arrive over SSE within seconds; the recipient-scoped task event must NOT reach
+the other viewer. Only a disabled/unreachable stream (HTTP 204 / transport
+error) skips cleanly: with SSE enabled, an inability to establish two distinct
+identities or to run the privacy assertion is a hard failure.
 
 Usage:
     python3 tests/05-e2e/realtime.py [domain]   # default: opensme.local
@@ -62,6 +63,35 @@ def new_session():
     return s
 
 
+def safe_cleanup(result, cleanup, what):
+    """Run a cleanup step without ever letting it escape the Result-based rc."""
+    try:
+        cleanup()
+    except Exception as exc:
+        result.warn(f"{what} cleanup failed ({exc.__class__.__name__}: {exc})")
+
+
+def safe_close(result, session, what):
+    try:
+        session.close()
+    except Exception as exc:
+        result.warn(f"{what} close failed ({exc.__class__.__name__}: {exc})")
+
+
+def restore_credentials(result, saved):
+    """Undo the temporary OIDC login override, one key at a time."""
+    for key, value in zip(
+        ("E2E_ZITADEL_LOGIN_NAME", "ZITADEL_ADMIN_PASSWORD"), saved
+    ):
+        try:
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        except Exception as exc:
+            result.warn(f"could not restore {key} ({exc.__class__.__name__}: {exc})")
+
+
 def viewer_sub(session, base):
     """OIDC sub of the signed-in viewer, or None when unreadable."""
     try:
@@ -104,58 +134,68 @@ def collect(stream, seconds, expect=None):
     return payloads
 
 
-def second_session(base, idp):
-    """Log session B in as a distinct IdP user when provisioning is possible.
+def second_session(result, base, idp):
+    """Log session B in as a DISTINCT throw-away IdP user.
 
-    portal_login() always uses E2E_ZITADEL_LOGIN_NAME/ZITADEL_ADMIN_PASSWORD,
-    so a throw-away user (created with the seeded machine PAT) is logged in by
-    temporarily overriding those two settings. Returns (session, cleanup,
-    reason): `reason` is set when B had to fall back to the admin identity, in
-    which case recipient-scoped privacy cannot be judged from the pair.
+    portal_login() always reads E2E_ZITADEL_LOGIN_NAME/ZITADEL_ADMIN_PASSWORD,
+    so the throw-away user (created with the seeded machine PAT) is logged in
+    by temporarily overriding those two settings. Returns (session, cleanup,
+    error); `error` is None only when B really is a different identity. There
+    is deliberately NO shared-admin fallback: with SSE enabled the privacy
+    assertion is mandatory, so a setup failure must fail the journey. The
+    caller owns `cleanup` and must run it through safe_cleanup().
     """
     session = new_session()
-    pat = (os.environ.get("E2E_ZITADEL_PAT")
-           or load_env_file().get("E2E_ZITADEL_PAT")
-           or fetch_seeded("/machinekey/pat"))
-    if pat:
-        uname = "e2e-realtime-" + secrets.token_hex(3)
+
+    def noop():
+        pass
+
+    try:
+        pat = (os.environ.get("E2E_ZITADEL_PAT")
+               or load_env_file().get("E2E_ZITADEL_PAT")
+               or fetch_seeded("/machinekey/pat"))
+    except Exception as exc:
+        return None, noop, f"machine PAT lookup failed ({exc.__class__.__name__})"
+    if not pat:
+        return None, noop, "no seeded machine PAT for user provisioning"
+
+    uname = "e2e-realtime-" + secrets.token_hex(3)
+    try:
         uid, pw = provision_user(session, idp, pat, uname)
-        if uid:
-            saved = (os.environ.get("E2E_ZITADEL_LOGIN_NAME"),
-                     os.environ.get("ZITADEL_ADMIN_PASSWORD"))
-            try:
-                os.environ["E2E_ZITADEL_LOGIN_NAME"] = uname
-                os.environ["ZITADEL_ADMIN_PASSWORD"] = pw
-                logged_in = portal_login(session, base, idp)
-            finally:
-                for key, value in zip(
-                    ("E2E_ZITADEL_LOGIN_NAME", "ZITADEL_ADMIN_PASSWORD"), saved
-                ):
-                    if value is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = value
-            if logged_in:
-                def cleanup():
-                    purge_user(new_session(), idp, pat, uname)
+    except Exception as exc:
+        return None, noop, f"user provisioning failed ({exc.__class__.__name__}: {exc})"
+    if not uid:
+        return None, noop, "user provisioning returned no user id"
 
-                return session, cleanup, None
-            reason = "throw-away user OIDC login failed"
-        else:
-            reason = "throw-away user provisioning failed"
-        purge_user(session, idp, pat, uname)
-    else:
-        reason = "no seeded machine PAT for user provisioning"
+    def cleanup():
+        purge_user(new_session(), idp, pat, uname)
 
-    # Fallback: a second session for the admin — usable for the team event,
-    # but both sessions then share the OIDC sub used by the privacy filter.
-    session = new_session()
-    if not portal_login(session, base, idp):
-        return None, None, reason
-    return session, lambda: None, reason
+    saved = (os.environ.get("E2E_ZITADEL_LOGIN_NAME"),
+             os.environ.get("ZITADEL_ADMIN_PASSWORD"))
+    try:
+        os.environ["E2E_ZITADEL_LOGIN_NAME"] = uname
+        os.environ["ZITADEL_ADMIN_PASSWORD"] = pw
+    except Exception as exc:
+        result.warn(f"login override failed ({exc.__class__.__name__}: {exc})")
+        restore_credentials(result, saved)
+        safe_cleanup(result, cleanup, "throw-away IdP user")
+        return None, noop, "could not override login credentials"
+
+    try:
+        logged_in = portal_login(session, base, idp)
+    except Exception as exc:
+        logged_in = False
+        result.warn(f"distinct user login raised {exc.__class__.__name__}: {exc}")
+    finally:
+        restore_credentials(result, saved)
+
+    if not logged_in:
+        safe_cleanup(result, cleanup, "throw-away IdP user")
+        return None, noop, "throw-away user OIDC login failed"
+    return session, cleanup, None
 
 
-def run_journey(result, a, b, base, reason):
+def run_journey(result, a, b, base):
     try:
         probe = open_stream(b, base)
     except requests.RequestException as exc:
@@ -168,11 +208,16 @@ def run_journey(result, a, b, base, reason):
         return 0
     result.ok("SSE endpoint reachable (EVENTS_ENABLED)")
 
+    # The privacy filter compares OIDC subs. Without two readable, different
+    # subs the task leg cannot prove anything — fail, never skip.
     sub_a, sub_b = viewer_sub(a, base), viewer_sub(b, base)
     if sub_a is None or sub_b is None:
-        reason = reason or "OIDC sub not readable from /api/session"
-    elif sub_a == sub_b:
-        reason = reason or "both sessions share the same OIDC sub"
+        result.fail(f"OIDC sub not readable from /api/session (A={sub_a!r}, B={sub_b!r})")
+        return 1
+    if sub_a == sub_b:
+        result.fail(f"both portal sessions share the same OIDC sub ({sub_a!r})")
+        return 1
+    result.ok("two distinct OIDC identities confirmed")
 
     # A fresh connection starts its XREAD cursor at `$`, so the listener must
     # be attached BEFORE the POST — otherwise the event is published while no
@@ -198,10 +243,6 @@ def run_journey(result, a, b, base, reason):
         else f"intercom.created event missing (saw {kinds})"
     )
 
-    if reason:
-        result.skip(f"private task privacy leg skipped: {reason}")
-        return 1 if result.failed else 0
-
     # TaskCreate requires `assignee`; recipients are the actor's sub, the
     # stamped author (A's email) and this unrelated assignee — never B's sub.
     created = {}
@@ -217,9 +258,9 @@ def run_journey(result, a, b, base, reason):
         return 1
     r = created.get("r")
     if r is None or r.status_code != 201:
-        result.ok(f"task creation unavailable (HTTP {r.status_code if r else 'no response'})"
-                  " — privacy leg skipped")
-        return 1 if result.failed else 0
+        result.fail(f"task creation failed (HTTP {r.status_code if r else 'no response'})"
+                    " — privacy assertion cannot run")
+        return 1
     kinds2 = [e.get("kind") for e in seen2]
     (result.ok if "task.created" not in kinds2 else result.fail)(
         "private task event not leaked"
@@ -244,24 +285,35 @@ def main():
     idp = f"https://auth.{args.domain}"
 
     a = new_session()
-    if not portal_login(a, base, idp):
+    try:
+        primary_ok = portal_login(a, base, idp)
+    except Exception as exc:
+        primary_ok = False
+        result.warn(f"primary portal login raised {exc.__class__.__name__}: {exc}")
+    if not primary_ok:
         result.fail("primary portal login failed")
+        safe_close(result, a, "primary session")
         result.summary()
         return 1
-    b, cleanup_b, reason = second_session(base, idp)
+
+    b, cleanup_b, setup_error = second_session(result, base, idp)
     if b is None:
-        result.fail(f"secondary portal login failed ({reason})")
+        result.fail(f"distinct second session unavailable: {setup_error}")
+        safe_cleanup(result, cleanup_b, "throw-away IdP user")
+        safe_close(result, a, "primary session")
         result.summary()
         return 1
-    result.ok("two portal sessions established"
-              + (" (distinct identities)" if reason is None else f" — {reason}"))
+    result.ok("two portal sessions established (distinct identities)")
 
     try:
-        rc = run_journey(result, a, b, base, reason)
+        rc = run_journey(result, a, b, base)
+    except Exception as exc:
+        result.fail(f"journey error: {exc.__class__.__name__}: {exc}")
+        rc = 1
     finally:
-        cleanup_b()
-        a.close()
-        b.close()
+        safe_cleanup(result, cleanup_b, "throw-away IdP user")
+        safe_close(result, a, "primary session")
+        safe_close(result, b, "secondary session")
     result.summary()
     return rc
 
