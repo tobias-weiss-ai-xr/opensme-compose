@@ -559,6 +559,21 @@ MUTATIONS = [
                "call leaves the publish with no recipient scope and the E4 "
                "pin must catch it",
     },
+    {
+        "name": "events-reader-sleep-stall",
+        "file": "portal/src/events.rs",
+        "old": '            if tx.send(Ok(": keep-alive\\n\\n".into())).await.is_err() {\n'
+               '                return;\n'
+               '            }\n',
+        "new": '            if tx.send(Ok(": keep-alive\\n\\n".into())).await.is_err() {\n'
+               '                return;\n'
+               '            }\n'
+               '            tokio::time::sleep(std::time::Duration::from_secs(15)).await;\n',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — a sleep between XREAD cycles delays every "
+               "published SSE event by up to 15 s; XREAD's 1 s BLOCK already "
+               "throttles the loop, so E6 must flag any reintroduced sleep",
+    },
 ]
 
 

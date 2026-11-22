@@ -9,6 +9,9 @@ E4 — every publish call passes an explicit Visibility; task kinds never use
      Visibility::Team.
 E5 — polling fallback still exists and Traefik excludes text/event-stream
      from compression.
+E6 — the XREAD reader loop has no sleep between cycles (a 15 s sleep would
+     delay every published event by up to 15 s; XREAD's 1 s block throttles
+     the loop instead).
 """
 import re
 import sys
@@ -79,6 +82,9 @@ def main():
           "E5 polling fallback retained")
     check("excludedContentTypes=text/event-stream" in COMPOSE.read_text(),
           "E5 Traefik compression excludes text/event-stream")
+    # E6
+    check("tokio::time::sleep" not in events,
+          "E6 no sleep stall between XREAD cycles (events delivered within ~1s)")
 
     return result.summary()
 

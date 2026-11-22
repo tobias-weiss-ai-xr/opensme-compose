@@ -294,7 +294,6 @@ pub async fn stream_events(
             if tx.send(Ok(": keep-alive\n\n".into())).await.is_err() {
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
         }
     });
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
