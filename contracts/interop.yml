@@ -45,6 +45,14 @@ surfaces:
       The portal fetches http(s) URLs only, renders an empty column
       on feed failure and never depends on feeds for availability.
 
+  # ── Portal real-time events: Redis Streams + same-origin SSE ──
+  portal_events:
+    stream: opensme:events
+    sse_path: /api/events
+    transport: text/event-stream
+    auth: portal-session-cookie
+    visibility: server-side (team | recipients)
+
   # ── File shares: link shape, no proxying ──
   share_links:
     portal_env: INTERCOM_ATTACHMENT_HOSTS

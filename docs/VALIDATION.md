@@ -88,6 +88,7 @@ CI step or on its documented allowlist.
 - [x] `check_platform.py` — platform versions (k3s/docker)
 - [x] `check_suite_coverage.py` — this inventory's keeper; CI static job must be single-entry (`tests/run.py --static` only — any direct `tests/00-static/*.py` call in ci.yml is a failure)
 - [x] `check_bridge.py` — portal-web component bridge: typed registry contract (slots share.open/cloud.pick/task.create), every slot consumed outside the registry, shell wires share.open → notes tab + task.create → Aufgaben tab, composer posts via existing note API, feed/notes/cloud „Als Aufgabe anlegen“ forward title+link through task.create
+- [x] `check_events.py` — portal real-time events: Event/Visibility/EventBus + XADD/XREAD, /api/events behind the session firewall, SSE proxy forwards cookie/last-event-id as a ReadableStream with same-origin EventSource, explicit recipient-scoped task events, polling fallback + Traefik compression exclusion
 - [x] `check_tasks.py` — portal team-tasks backend contract: stores-Pfad `TASKS_DATA_PATH`/Cap `TASKS_MAX_TASKS`, Cap-Eviction nur erledigter Aufgaben, `may_complete`-Guard (nur Zuständiger/Autor bei Status/Löschen), 5 `/api/tasks`-Routen hinter `require_session`, Author aus Session, 403-Helper
 - [x] `check_tiles.py` — portal function catalog
 - [x] `compose_config.py` — overlay matrix

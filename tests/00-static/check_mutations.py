@@ -538,6 +538,16 @@ MUTATIONS = [
               ".env` assign PORTAL_TAGLINE=open and EXECUTE the word "
               "`Source` ('Source: command not found' aborted calendar-setup)",
     },
+    {
+        "name": "events-sse-compression-exclusion",
+        "file": "docker-compose.yml",
+        "old": "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream",
+        "new": "traefik.http.middlewares.compress.compress.excludedContentTypes=application/json",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — Traefik must not compress text/event-stream; "
+               "buffering/compressing SSE hides frame boundaries from "
+               "EventSource and stalls live intercom/task updates",
+    },
 ]
 
 

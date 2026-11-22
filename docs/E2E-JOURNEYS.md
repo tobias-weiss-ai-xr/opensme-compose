@@ -309,6 +309,10 @@ is now empty, mail stays opt-in.
 | T4 | Als Betreiber sind Nachrichten begrenzt | empty text and >2000 chars rejected with 400; store capped at 50 (FIFO, `INTERCOM_MAX_MESSAGES` 10..=500); rotated-out picked-file uploads are garbage-collected |
 | T5 | Als Teammitglied sehe ich, WER eine Notiz geschrieben hat | the message carries `author` = OIDC login display name (from the portal session); rendered as a muted meta line (SSR + app.js) |
 | T6 | Neue Notizen erscheinen ohne Reload | `GET /api/intercom?since=<id>` returns only newer messages + `latest` cursor; app.js polls every 30 s and merges (delta keeps each poll tiny; store reset behind the cursor triggers a full reload) |
+| T7 | Echtzeit-Notiz ohne Wartezeit (Realtime-Journey, Task 8) | signed-in browser opens same-origin `EventSource('/api/events')` through the Next.js proxy (cookie + `Last-Event-ID` forwarded); a second session's `POST /api/intercom` emits `intercom.created` and the first panel renders it without waiting for the poll |
+| T8 | Aufgaben-Updates erreichen nur die Beteiligten | task create/patch/delete publish `task.*` with server-side `Visibility::Recipients` (never `Visibility::Team`); only sessions in the recipient set receive the frame, author/assignee decided server-side from the OIDC session |
+| T9 | Reconnect verliert kein Ereignis | after a dropped connection the browser reconnects with `Last-Event-ID`; each SSE connection owns its Redis `XREAD` cursor (no consumer groups) and only newer frames are replayed; while disconnected the panels keep the `?since=` / `POLL_MS` fallback alive |
+| T10 | Ausfall und Anonymität sind harmlos | with `EVENTS_ENABLED` empty `/api/events` answers 204 (EventSource terminal), polling continues unchanged; anonymous `GET /api/events` → 401 from the session firewall; Traefik leaves `text/event-stream` uncompressed so SSE frame boundaries survive; CSP keeps `connect-src 'self'` |
 
 The store is in-memory by design (v1): messages are conversational
 ephemera, not records. The journey never assumes persistence across

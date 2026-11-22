@@ -133,6 +133,20 @@ Retention).
   wie beim Intercom-Slot. Backend-Contract statisch gepinnt von
   `tests/00-static/check_tasks.py`, Bridge-Flächen von
   `tests/00-static/check_bridge.py` — jeweils inkl. Mutationen.
+- **Echtzeit-Ereignisse (portal-events)**: Der Rust-Portal schreibt
+  Intercom- und Aufgaben-Änderungen als `Event` mit serverseitiger
+  `Visibility` (`Team` oder `Recipients`) per `XADD` in einen Redis-Stream
+  (`opensme:events`, `EVENTS_ENABLED=1`). Jede SSE-Verbindung liest mit
+  eigenem `XREAD`-Cursor ab `Last-Event-ID` (sonst `$`) — keine Consumer
+  Groups, kein geteilter Offset, kein Client-lesbarer Empfängerfilter.
+  `GET /api/events` liegt hinter der Session-Firewall; der Next.js-Proxy
+  reicht nur Session-Cookie und `Last-Event-ID` durch und gibt den
+  Upstream-`ReadableStream` unverändert zurück (same-origin EventSource,
+  CSP `connect-src 'self'`). Traefik nimmt `text/event-stream` von der
+  Kompression aus, damit Frame-Grenzen erhalten bleiben; ohne
+  `EVENTS_ENABLED` (oder bei Verbindungsabbruch) bleibt der bewährte
+  Polling-Fallback aktiv. Contract: `contracts/interop.yml` (`portal_events`),
+  statisch gepinnt von `tests/00-static/check_events.py`.
 
 ## 8. Architektur-Entscheidungen
 

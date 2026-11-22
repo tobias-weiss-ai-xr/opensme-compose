@@ -139,6 +139,9 @@ services:
       - "traefik.http.routers.dashboard.middlewares=auth"
       # Compression middleware (file provider config in traefik-data)
       - "traefik.http.middlewares.compress.compress=true"
+      # SSE frames must stay uncompressed or EventSource never sees a frame
+      # boundary until the stream ends (Traefik v2/v3 field: excludedContentTypes).
+      - "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream"
       # NOTE: Set TRAEFIK_USERS to a valid htpasswd entry (htpasswd -nb user pass)
       #       Default placeholder will reject all requests — change before using.
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_USERS:-admin:$$apr1$$CHANGEME}"
@@ -436,6 +439,11 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       INTERCOM_ATTACHMENT_HOSTS: ${INTERCOM_ATTACHMENT_HOSTS:-}
       INTERCOM_ALLOW_HTTP: ${INTERCOM_ALLOW_HTTP:-}
+      # Redis Streams event backbone (portal real-time intercom, slice 1).
+      EVENTS_ENABLED: ${EVENTS_ENABLED:-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379
+      EVENTS_STREAM: ${EVENTS_STREAM:-opensme:events}
+      EVENTS_MAXLEN: ${EVENTS_MAXLEN:-10000}
       RUST_LOG: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
