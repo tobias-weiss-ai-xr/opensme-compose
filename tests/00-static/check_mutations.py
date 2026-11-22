@@ -574,6 +574,53 @@ MUTATIONS = [
                "published SSE event by up to 15 s; XREAD's 1 s BLOCK already "
                "throttles the loop, so E6 must flag any reintroduced sleep",
     },
+    {
+        "name": "events-read-errors-swallowed",
+        "file": "portal/src/events.rs",
+        "old": "if errors >= 3 {",
+        "new": "if false {",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — swallowing read errors keeps the HTTP stream "
+               "open while no events arrive, so the browser never resumes its "
+               "poller; E7 must pin error propagation",
+    },
+    {
+        "name": "events-ready-frame-removed",
+        "file": "portal/src/events.rs",
+        "old": '"event: ready\\ndata: {}\\n\\n"',
+        "new": '"event: nope\\ndata: {}\\n\\n"',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — without the ready frame the client pauses "
+               "polling on headers alone and can miss an event posted before "
+               "XREAD starts",
+    },
+    {
+        "name": "events-tenant-filter-dropped",
+        "file": "portal/src/events.rs",
+        "old": "e.tenant == viewer.tenant && e.visibility.visible_to(viewer)",
+        "new": "e.visibility.visible_to(viewer)",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — the shared stream will carry other tenants; "
+               "dropping the tenant check leaks their Team events",
+    },
+    {
+        "name": "events-cursor-sanitize-dropped",
+        "file": "portal/src/events.rs",
+        "old": "sanitize_cursor(last_id)",
+        "new": 'last_id.unwrap_or_else(|| "$".into())',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — a crafted Last-Event-ID must not wedge the "
+               "reader in an endless XREAD error loop",
+    },
+    {
+        "name": "events-client-pauses-on-open",
+        "file": "portal/web/src/lib/useEventStream.ts",
+        "old": 'es.addEventListener("ready", () => setConnected(true));',
+        "new": 'es.onopen = () => setConnected(true);',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — onopen fires before the backend issues XREAD; "
+               "pausing polling there loses events posted in the gap",
+    },
 ]
 
 

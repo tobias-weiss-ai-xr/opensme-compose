@@ -1287,7 +1287,7 @@ def main():
     # E5
     check("POLL_MS" in (WEB / "components" / "IntercomPanel.tsx").read_text(),
           "E5 polling fallback retained")
-    check("excludedMimeTypes=text/event-stream" in COMPOSE.read_text(),
+    check("excludedContentTypes=text/event-stream" in COMPOSE.read_text(),
           "E5 Traefik compression excludes text/event-stream")
 
     if failures:
@@ -1308,7 +1308,7 @@ In `tests/run.py`, add `("Portal real-time events (contract)", "tests/00-static/
 - [ ] **Step 3: Run the check to verify it fails before the config work**
 
 Run: `python3 tests/00-static/check_events.py`
-Expected: FAIL on E5 (`excludedMimeTypes` absent). (E1–E4 should already pass from Tasks 1–6.)
+Expected: FAIL on E5 (`excludedContentTypes` absent). (E1–E4 should already pass from Tasks 1–6.)
 
 - [ ] **Step 4: Compose env and Traefik label**
 
@@ -1325,7 +1325,7 @@ In `docker-compose.yml` portal `environment:` block add:
 On the Traefik `compress` middleware label line, append the exclusion (demo/CI also need it):
 
 ```yaml
-      - "traefik.http.middlewares.compress.compress.excludedMimeTypes=text/event-stream"
+      - "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream"
 ```
 
 Verify with `docker compose -f docker-compose.yml config >/dev/null` and confirm the exact label key against the running Traefik version (`docker exec opensme-traefik traefik version`). If v3 expects a different key, adjust the label and the static check together.

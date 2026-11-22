@@ -9,14 +9,15 @@ class FakeEventSource {
   onerror: (() => void) | null = null;
   onopen: (() => void) | null = null;
   constructor(url: string) { this.url = url; FakeEventSource.last = this; }
+  listeners: Record<string, (e: MessageEvent) => void> = {};
   addEventListener(type: string, cb: (e: MessageEvent) => void) {
-    if (type === "intercom.created") this.created = cb;
+    this.listeners[type] = cb;
   }
-  created: ((e: MessageEvent) => void) | null = null;
   close() {}
-  emit(data: unknown) {
-    this.created?.(new MessageEvent("intercom.created", { data: JSON.stringify(data) }));
+  emit(type: string, data: unknown) {
+    this.listeners[type]?.(new MessageEvent(type, { data: JSON.stringify(data) }));
   }
+  ready() { this.emit("ready", {}); }
 }
 
 beforeEach(() => { resetEventSourceForTests(); resetEventsForTests(); FakeEventSource.last = null; });
@@ -29,7 +30,7 @@ describe("useEventStream", () => {
     subscribeEvents((e) => received.push(e));
     renderHook(() => useEventStream(true));
     expect(FakeEventSource.last?.url).toBe("/api/events");
-    act(() => FakeEventSource.last?.emit({ id: "1-0", kind: "intercom.created", payload: { id: 5 } }));
+    act(() => FakeEventSource.last?.emit("intercom.created", { id: "1-0", kind: "intercom.created", payload: { id: 5 } }));
     expect(received).toHaveLength(1);
   });
 
@@ -39,9 +40,14 @@ describe("useEventStream", () => {
     expect(FakeEventSource.last).toBeNull();
   });
 
-  it("reports disconnected on error so the poller resumes", () => {
+  it("keeps polling until the reader is ready, then pauses; errors resume polling", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     const { result } = renderHook(() => useEventStream(true));
+    expect(result.current.connected).toBe(false);
+    act(() => FakeEventSource.last?.onopen?.());
+    expect(result.current.connected).toBe(false); // headers alone are not enough
+    act(() => FakeEventSource.last?.ready());
+    expect(result.current.connected).toBe(true);
     act(() => FakeEventSource.last?.onerror?.());
     expect(result.current.connected).toBe(false);
     dispatchEvent({ id: "x", kind: "x", payload: {} }); // no throw

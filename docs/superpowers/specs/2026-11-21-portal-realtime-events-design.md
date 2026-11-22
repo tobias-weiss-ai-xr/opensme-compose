@@ -54,8 +54,12 @@ will publish/consume the same stream in later slices.
 - `Event` payload: `{ kind: String, actor_sub: String, tenant: String,
   visibility: Visibility, payload: serde_json::Value, created_at: i64 }`.
   `Visibility::Team` (all authenticated users) or
-  `Visibility::Recipients(Vec<String>)` (author + assignee, by OIDC `sub`).
-  Redis assigns the stream ID; that ID becomes the SSE `id:`.
+  `Visibility::Recipients(Vec<String>)` (author + assignee). The server-side
+  viewer matches recipients against OIDC `sub`, email and display name — the
+  stores stamp people by email/name, so matching only `sub` would silently drop
+  every task event for non-actors while polling is paused. Events are also
+  tenant-scoped; the stream is shared with future producers. Redis assigns the
+  stream ID; that ID becomes the SSE `id:`.
 - `EventSink` trait: `publish(&self, event) -> Result<()>`. Two implementations:
   - `RedisEventBus` — `XADD key MAXLEN ~ <maxlen> * <fields>` via the `redis`
     async crate (new dependency). Connection is created lazily; the bus is
@@ -77,9 +81,14 @@ will publish/consume the same stream in later slices.
   real-time delivery. Response headers:
   `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`,
   `X-Accel-Buffering: no`, `Connection: keep-alive`.
-- Cap concurrent SSE connections per session (small limit, e.g. 3) and close
-  backpressured consumers after a bounded pending/timeout threshold so a slow reader
-  cannot pin memory indefinitely; replay covers the gap on reconnect.
+- Cap concurrent SSE connections per session (3) — a 4th gets `429` and keeps
+  polling. The first successful XREAD emits an explicit `event: ready` frame;
+  the client pauses polling only then, so an event posted in the header→XREAD
+  window is not missed by both paths. The pending queue is bounded (16 frames);
+  backpressure blocks that reader task rather than growing memory, and the slot
+  is released when the client disconnects. A separate idle timeout is not used:
+  the 1 s keep-alive already bounds liveness detection, and a healthy idle
+  stream is the desired state.
 
 ### Publishers (handlers in `portal/src/main.rs`)
 
@@ -132,7 +141,7 @@ must not be used for SSE). Same-origin keeps CSP `connect-src 'self'` intact.
 The `compress@docker` middleware (`docker-compose.yml:141`,
 `traefik.http.middlewares.compress.compress=true`) must explicitly exclude
 `text/event-stream` from compression so it does not buffer the stream. Add
-`traefik.http.middlewares.compress.compress.excludedMimeTypes=text/event-stream`
+`traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream`
 to that router's labels (verify the exact v3 label key against the running
 Traefik version during implementation).
 
@@ -153,20 +162,27 @@ by this slice.
 
 - `GET /api/events` is behind `require_session`; the Next proxy forwards the
   HttpOnly session cookie; the client cannot select an arbitrary channel.
-- Visibility filtering runs server-side **before** serialization. Recipient
-  lists are OIDC `sub` values; a user never receives another's private note or
-  task payload/metadata.
-- `Last-Event-ID` is a read cursor only, never an authorization input.
+- Visibility filtering runs server-side **before** serialization and includes
+  a tenant check. Recipient lists hold store identifiers (OIDC `sub`, email,
+  display name); a user never receives another's private note or task
+  payload/metadata. Entries with missing/invalid visibility metadata fail
+  closed.
+- `Last-Event-ID` is a read cursor only, never an authorization input; malformed
+  IDs reset to `$`.
 - Redis password required; no secrets in event payloads; no new public port.
-- Per-session connection cap and idle-stream timeout bound resource usage.
+- Per-session connection cap (3) bounds resource usage; keep-alive frames make a
+  separate idle timeout redundant.
 
 ## Error handling and degradation
 
-- Redis unavailable at startup → bus disabled (`204` from SSE); UI keeps 7 s
-  polling; writes still work through normal POST routes.
+- A malformed Redis URL disables the bus at startup (`204` from SSE). A reachable
+  but unavailable Redis cannot be detected at construction (URL parsing does not
+  connect), so repeated read failures terminate the SSE body after 3 attempts.
+  `EventSource.onerror` then resumes 7 s polling and the browser retries with
+  backoff; writes never fail because publishing is fail-soft.
 - Stream drops → `EventSource` reconnects with `Last-Event-ID`; XREAD from that
   cursor replays entries after it; polling resumes immediately on error and is
-  suppressed only while the stream is healthy.
+  suppressed only after the `ready` frame confirms the reader is live.
 - Next proxy aborts upstream on client disconnect; backend `401`/`502` ends the
   stream so the client retries rather than hanging.
 - Backpressured/slow consumers are closed and rely on replay.
@@ -182,9 +198,10 @@ by this slice.
   `require_session`, no Redis host exposure in client code, and every publish
   site passes an explicit visibility scope.
 - E2E: `tests/05-e2e/realtime.py` — two sessions, one posts a note/task, the
-  other sees it within ~2 s; private task invisible to a third user; polling
-  fallback when events disabled. Wire into the CI SSO job via
-  `scripts/ci-e2e-step.sh`.
+  other sees it within ~2 s; a Team liveness marker proves the stream is alive,
+  the actor's own `task.created` proves the task event was actually published,
+  then the unrelated viewer's absence of it is asserted. Polling fallback when
+  events disabled. Wire into the CI SSO job via `scripts/ci-e2e-step.sh`.
 - Docs: update `docs/ARC42.md` §7, `docs/VALIDATION.md`,
   `docs/E2E-JOURNEYS.md` with the new event path and journey.
 

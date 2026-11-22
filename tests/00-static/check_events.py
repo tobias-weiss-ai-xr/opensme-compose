@@ -12,6 +12,8 @@ E5 — polling fallback still exists and Traefik excludes text/event-stream
 E6 — the XREAD reader loop has no sleep between cycles (a 15 s sleep would
      delay every published event by up to 15 s; XREAD's 1 s block throttles
      the loop instead).
+E7 — fail-soft wiring: read errors terminate the stream (poller resumes), a
+     ready frame gates the poller pause, and cursor/cap/tenant guards exist.
 """
 import re
 import sys
@@ -76,15 +78,29 @@ def main():
               f"E4 {kind} publish passes explicit recipient visibility")
     check(not re.search(r'task\.(created|updated|deleted)[\s\S]{0,200}Visibility::Team', main),
           "E4 task events never use Visibility::Team")
-    # E5
-    panel = WEB / "components" / "IntercomPanel.tsx"
-    check("POLL_MS" in (panel.read_text() if panel.exists() else ""),
-          "E5 polling fallback retained")
+    # E5 — pin the poller structurally, not just the POLL_MS identifier.
+    for panel_name in ("IntercomPanel.tsx", "TasksPanel.tsx"):
+        panel = (WEB / "components" / panel_name)
+        text = panel.read_text() if panel.exists() else ""
+        check(all(t in text for t in [
+            "setInterval", "POLL_MS", "pollDelta", "data-events-connected", "fetch",
+        ]), f"E5 {panel_name}: delta poller + SSE guard retained")
     check("excludedContentTypes=text/event-stream" in COMPOSE.read_text(),
           "E5 Traefik compression excludes text/event-stream")
     # E6
     check("tokio::time::sleep" not in events,
           "E6 no sleep stall between XREAD cycles (events delivered within ~1s)")
+    # E7 — fail-soft and delivery-wiring guards that protect the polling
+    # fallback from silently becoming the only live data path.
+    check(all(t in events for t in [
+        "errors >= 3", "std::io::Error::other", "event: ready", "sanitize_cursor(last_id)",
+        "e.tenant == viewer.tenant", "StreamSlot", "get_multiplexed_async_connection",
+    ]), "E7 reader: error propagation, ready frame, cursor/cap/tenant guards")
+    hook = (WEB / "lib" / "useEventStream.ts")
+    hook = hook.read_text() if hook.exists() else ""
+    check('addEventListener("ready"' in hook
+          and 'onopen = () => setConnected(true)' not in hook,
+          "E7 client pauses polling only after the ready frame")
 
     return result.summary()
 

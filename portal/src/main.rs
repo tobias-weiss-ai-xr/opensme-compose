@@ -1230,7 +1230,17 @@ async fn handle_events(
         .get("last-event-id")
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    config.event_bus.stream(session.sub.clone(), last).await
+    // Stores identify authors/assignees by email (or display name), while the
+    // auth layer supplies the OIDC sub. Matching all of them keeps scoped task
+    // events deliverable to their real recipients; unrelated users still don't
+    // match. Tenant pins the event to this deployment's stream namespace.
+    let viewer = events::Viewer {
+        sub: session.sub.clone(),
+        email: session.email.clone(),
+        name: session.name.clone(),
+        tenant: config.opensme_domain.clone(),
+    };
+    config.event_bus.stream(viewer, last).await
 }
 
 /// Team-notes persistence layout: INTERCOM_DATA_PATH holds the JSON store,
@@ -1356,10 +1366,10 @@ fn task_json(t: &tasks::Task) -> serde_json::Value {
     serde_json::to_value(t).unwrap_or(serde_json::Value::Null)
 }
 
-/// Authors and assignees are identified by email in the store; the SSE
-/// visibility filter compares against the OIDC `sub`. The acting user's
-/// `sub` is included so they always see their own write. A future slice
-/// should map store emails to `sub` via `/api/tasks/users`.
+/// Authors and assignees are identified by email in the store, while the auth
+/// layer supplies the OIDC `sub`. Both are listed so the SSE viewer filter
+/// (which checks sub, email and display name) reaches every real recipient;
+/// the acting user's `sub` is included so they always see their own write.
 fn recipients_for_task(t: &tasks::Task, actor_sub: &str) -> Vec<String> {
     let mut ids = vec![actor_sub.to_string(), t.author.clone(), t.assignee.clone()];
     ids.retain(|id| !id.trim().is_empty());
@@ -4600,7 +4610,12 @@ mod tests {
         let all = bus.replay(None).await.unwrap();
         assert_eq!(all[0].kind, "intercom.created");
         assert_eq!(all[0].payload["id"], 1);
-        assert!(all[0].visibility.visible_to("bob"));
+        assert!(all[0].visibility.visible_to(&events::Viewer {
+            sub: "bob".into(),
+            email: "".into(),
+            name: "".into(),
+            tenant: "t".into(),
+        }));
     }
 
     #[tokio::test]
@@ -4612,6 +4627,11 @@ mod tests {
             events::Visibility::Recipients(vec!["alice".into(), "bob".into()]),
             serde_json::json!({"id": 3, "assignee": "bob"}),
         );
-        assert!(!e.visibility.visible_to("carol"));
+        assert!(!e.visibility.visible_to(&events::Viewer {
+            sub: "carol".into(),
+            email: "".into(),
+            name: "".into(),
+            tenant: "t".into(),
+        }));
     }
 }

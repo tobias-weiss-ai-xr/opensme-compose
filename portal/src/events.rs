@@ -21,11 +21,31 @@ pub enum Visibility {
     Recipients(Vec<String>),
 }
 
+/// The signed-in viewer, as the task/intercom stores identify them.
+///
+/// The stores stamp authors/assignees with email (or the display name as a
+/// fallback), while the OIDC `sub` is an opaque token. Matching against all
+/// three identifiers keeps recipient-scoped events deliverable without a
+/// separate email→sub lookup service.
+#[derive(Clone, Debug)]
+pub struct Viewer {
+    pub sub: String,
+    pub email: String,
+    pub name: String,
+    pub tenant: String,
+}
+
+impl Viewer {
+    fn matches(&self, id: &str) -> bool {
+        self.sub == id || self.email.eq_ignore_ascii_case(id) || self.name.eq_ignore_ascii_case(id)
+    }
+}
+
 impl Visibility {
-    pub fn visible_to(&self, sub: &str) -> bool {
+    pub fn visible_to(&self, viewer: &Viewer) -> bool {
         match self {
             Visibility::Team => true,
-            Visibility::Recipients(ids) => ids.iter().any(|id| id == sub),
+            Visibility::Recipients(ids) => ids.iter().any(|id| viewer.matches(id)),
         }
     }
 }
@@ -78,10 +98,12 @@ pub fn sse_frame(event: &Event) -> String {
 }
 
 /// Server-side authorization filter. Must run BEFORE `sse_frame` for every event.
-pub fn filter_visible(events: Vec<Event>, viewer_sub: &str) -> Vec<Event> {
+/// Tenant is checked too: the stream is shared with future producers, and a
+/// Team event from another tenant must never reach this deployment's viewers.
+pub fn filter_visible(events: Vec<Event>, viewer: &Viewer) -> Vec<Event> {
     events
         .into_iter()
-        .filter(|e| e.visibility.visible_to(viewer_sub))
+        .filter(|e| e.tenant == viewer.tenant && e.visibility.visible_to(viewer))
         .collect()
 }
 
@@ -102,7 +124,8 @@ impl StreamConfig {
     /// `get` is injected so unit tests need no process env.
     pub fn from_env<F: Fn(&str) -> Option<String>>(get: F) -> Self {
         Self {
-            enabled: get("EVENTS_ENABLED").as_deref() == Some("1"),
+            enabled: matches!(get("EVENTS_ENABLED").as_deref(),
+                Some(v) if v == "1" || v.eq_ignore_ascii_case("true")),
             url: get("REDIS_URL").unwrap_or_else(|| "redis://:password@redis:6379".into()),
             stream: get("EVENTS_STREAM").unwrap_or_else(|| DEFAULT_STREAM.into()),
             group: DEFAULT_GROUP.into(),
@@ -168,7 +191,7 @@ impl EventBus {
                 Some(format!("m-{n}"))
             }
             BusInner::Redis { client, config } => {
-                let mut conn = match client.get_async_connection().await {
+                let mut conn = match client.get_multiplexed_async_connection().await {
                     Ok(c) => c,
                     Err(e) => {
                         tracing::warn!(error = %e, "event bus: Redis connect failed");
@@ -223,7 +246,7 @@ impl EventBus {
     /// opens the live XREAD stream. Never panics; disabled returns 204.
     pub async fn stream(
         &self,
-        viewer_sub: String,
+        viewer: Viewer,
         last_id: Option<String>,
     ) -> axum::response::Response {
         match &self.0 {
@@ -231,7 +254,7 @@ impl EventBus {
             BusInner::Memory { .. } => {
                 // In-process contract tests can exercise replay; production uses Redis.
                 let events = self.replay(None).await.unwrap_or_default();
-                let body = filter_visible(events, &viewer_sub)
+                let body = filter_visible(events, &viewer)
                     .iter()
                     .map(sse_frame)
                     .collect::<Vec<_>>()
@@ -239,9 +262,7 @@ impl EventBus {
                 ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
             }
             BusInner::Redis { client, config } => {
-                stream_events(client.clone(), config.clone(), viewer_sub, last_id)
-                    .await
-                    .into_response()
+                stream_events(client.clone(), config.clone(), viewer, last_id).await
             }
         }
     }
@@ -263,6 +284,71 @@ fn visibility_from_str(raw: &str) -> Visibility {
     }
 }
 
+/// Bound the SSE tasks one authenticated viewer can pin. Exceeding the cap
+/// returns 429; EventSource retries with backoff and polling stays active
+/// until a stream is established.
+const MAX_STREAMS_PER_VIEWER: usize = 3;
+
+static STREAM_SLOTS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, usize>>,
+> = std::sync::OnceLock::new();
+
+fn stream_slots() -> &'static std::sync::Mutex<std::collections::HashMap<String, usize>> {
+    STREAM_SLOTS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+struct StreamSlot(String);
+
+impl StreamSlot {
+    fn acquire(viewer: &str) -> Option<Self> {
+        let mut slots = stream_slots().lock().ok()?;
+        let count = slots.entry(viewer.to_string()).or_insert(0);
+        if *count >= MAX_STREAMS_PER_VIEWER {
+            return None;
+        }
+        *count += 1;
+        Some(Self(viewer.to_string()))
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        if let Ok(mut slots) = stream_slots().lock() {
+            if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                slots.entry(self.0.clone())
+            {
+                *entry.get_mut() -= 1;
+                if *entry.get() == 0 {
+                    entry.remove();
+                }
+            }
+        }
+    }
+}
+
+/// A browser-supplied cursor is only a read offset. Accept Redis stream IDs
+/// (`<ms>-<seq>`) and reset anything else so a malformed/crafted value cannot
+/// wedge the reader in an endless error loop.
+fn sanitize_cursor(last_id: Option<String>) -> String {
+    match last_id {
+        Some(id) if valid_stream_id(&id) => id,
+        _ => "$".into(),
+    }
+}
+
+fn valid_stream_id(id: &str) -> bool {
+    let mut parts = id.split('-');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(ms), Some(seq), None) => {
+            !ms.is_empty()
+                && !seq.is_empty()
+                && ms.bytes().all(|b| b.is_ascii_digit())
+                && seq.bytes().all(|b| b.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
 /// Minimal SSE reader over the Redis Stream for one browser connection.
 /// Each connection owns its XREAD cursor (Last-Event-ID on reconnect, `$` on
 /// first connect). No consumer group: a group would load-balance entries
@@ -270,26 +356,58 @@ fn visibility_from_str(raw: &str) -> Visibility {
 pub async fn stream_events(
     client: redis::Client,
     config: StreamConfig,
-    viewer_sub: String,
+    viewer: Viewer,
     last_id: Option<String>,
-) -> impl IntoResponse {
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(16);
-    let mut reader = EventReader {
-        client,
-        config,
-        cursor: last_id.unwrap_or_else(|| "$".into()),
+) -> axum::response::Response {
+    let Some(slot) = StreamSlot::acquire(&viewer.sub) else {
+        tracing::warn!(sub = %viewer.sub, "events: per-viewer stream cap reached");
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(16);
+    let mut reader = EventReader::new(client, config, sanitize_cursor(last_id));
     tokio::spawn(async move {
+        // Keep the slot alive for the whole stream (dropped on client abort).
+        let _slot = slot;
+        let mut errors = 0u32;
+        let mut ready = false;
         loop {
             match reader.next_batch().await {
                 Ok(events) => {
-                    for event in filter_visible(events, &viewer_sub) {
+                    errors = 0;
+                    for event in filter_visible(events, &viewer) {
                         if tx.send(Ok(sse_frame(&event))).await.is_err() {
                             return;
                         }
                     }
+                    // The first successful XREAD means the cursor is live. Only
+                    // now may the client pause polling; `onopen` alone fires
+                    // before the reader task has issued XREAD.
+                    if !ready {
+                        if tx
+                            .send(Ok("event: ready\ndata: {}\n\n".into()))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                        ready = true;
+                    }
                 }
-                Err(e) => tracing::warn!(error = %e, "events: stream read failed"),
+                Err(e) => {
+                    errors += 1;
+                    tracing::warn!(error = %e, "events: stream read failed");
+                    if errors >= 3 {
+                        // Terminating the body fires EventSource.onerror, which
+                        // resumes the poller and lets the browser reconnect
+                        // from Last-Event-ID once Redis is back.
+                        let _ = tx
+                            .send(Err(std::io::Error::other(format!(
+                                "event stream unavailable: {e}"
+                            ))))
+                            .await;
+                        return;
+                    }
+                }
             }
             if tx.send(Ok(": keep-alive\n\n".into())).await.is_err() {
                 return;
@@ -302,6 +420,7 @@ pub async fn stream_events(
             (header::CONTENT_TYPE, "text/event-stream"),
             (header::CACHE_CONTROL, "no-cache, no-transform"),
             (header::CONNECTION, "keep-alive"),
+            (header::HeaderName::from_static("x-accel-buffering"), "no"),
         ],
         Body::from_stream(stream),
     )
@@ -311,16 +430,31 @@ pub async fn stream_events(
 pub struct EventReader {
     client: redis::Client,
     config: StreamConfig,
-    cursor: String, // Redis stream ID, or "$" for new entries only
+    cursor: String, // Redis stream ID (or "$" for new entries only)
+    conn: Option<redis::aio::MultiplexedConnection>,
 }
 
 impl EventReader {
+    pub fn new(client: redis::Client, config: StreamConfig, cursor: String) -> Self {
+        Self {
+            client,
+            config,
+            cursor,
+            conn: None,
+        }
+    }
+
     pub async fn next_batch(&mut self) -> Result<Vec<Event>, String> {
-        let mut conn = self
-            .client
-            .get_async_connection()
-            .await
-            .map_err(|e| e.to_string())?;
+        // Reuse one connection across cycles; reconnect only after a failure.
+        if self.conn.is_none() {
+            self.conn = Some(
+                self.client
+                    .get_multiplexed_async_connection()
+                    .await
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        let conn = self.conn.as_mut().expect("connection initialized above");
         let reply: redis::RedisResult<redis::Value> = redis::cmd("XREAD")
             .arg("COUNT")
             .arg(10)
@@ -329,8 +463,11 @@ impl EventReader {
             .arg("STREAMS")
             .arg(&self.config.stream)
             .arg(&self.cursor)
-            .query_async(&mut conn)
+            .query_async(conn)
             .await;
+        if reply.is_err() {
+            self.conn = None;
+        }
         let events = parse_entries(reply)?;
         if let Some(last) = events.last() {
             self.cursor = last.id.clone();
@@ -390,8 +527,10 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
             kind: map.get("kind").cloned().unwrap_or_default(),
             actor_sub: map.get("actor_sub").cloned().unwrap_or_default(),
             tenant: map.get("tenant").cloned().unwrap_or_default(),
+            // Fail closed: an entry without visibility metadata must not be
+            // broadcast to every authenticated viewer.
             visibility: visibility_from_str(
-                map.get("visibility").map(String::as_str).unwrap_or("team"),
+                map.get("visibility").map(String::as_str).unwrap_or("[]"),
             ),
             payload,
             created_at: map
@@ -407,14 +546,38 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
 mod tests {
     use super::*;
 
+    fn viewer(sub: &str) -> Viewer {
+        Viewer {
+            sub: sub.into(),
+            email: format!("{sub}@example.invalid"),
+            name: sub.into(),
+            tenant: "t".into(),
+        }
+    }
+
     #[test]
     fn visibility_team_is_visible_to_everyone_and_recipients_only_to_members() {
-        assert!(Visibility::Team.visible_to("alice"));
-        assert!(Visibility::Team.visible_to("bob"));
+        assert!(Visibility::Team.visible_to(&viewer("alice")));
+        assert!(Visibility::Team.visible_to(&viewer("bob")));
         let v = Visibility::Recipients(vec!["alice".into(), "carol".into()]);
-        assert!(v.visible_to("alice"));
-        assert!(v.visible_to("carol"));
-        assert!(!v.visible_to("bob"));
+        assert!(v.visible_to(&viewer("alice")));
+        assert!(v.visible_to(&viewer("carol")));
+        assert!(!v.visible_to(&viewer("bob")));
+    }
+
+    #[test]
+    fn recipients_match_store_identifiers_and_stay_off_unrelated_users() {
+        // The stores identify people by email/name, the auth layer by `sub`.
+        let recipient = Viewer {
+            sub: "oidc-42".into(),
+            email: "alice@example.invalid".into(),
+            name: "Alice".into(),
+            tenant: "t".into(),
+        };
+        let v = Visibility::Recipients(vec!["alice@example.invalid".into()]);
+        assert!(v.visible_to(&recipient));
+        assert!(!v.visible_to(&viewer("bob")));
+        assert!(!Visibility::Recipients(vec!["oidc-42".into()]).visible_to(&viewer("bob")));
     }
 
     #[test]
@@ -474,9 +637,31 @@ mod tests {
             payload: serde_json::json!({}),
             created_at: 0,
         };
-        let seen = filter_visible(vec![team, private], "bob");
+        let seen = filter_visible(vec![team, private], &viewer("bob"));
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].id, "1-0");
+    }
+
+    #[test]
+    fn filter_drops_events_from_another_tenant_even_when_team_visible() {
+        let other = Event {
+            id: "3-0".into(),
+            kind: "intercom.created".into(),
+            actor_sub: "a".into(),
+            tenant: "other.example".into(),
+            visibility: Visibility::Team,
+            payload: serde_json::json!({}),
+            created_at: 0,
+        };
+        assert!(filter_visible(vec![other], &viewer("bob")).is_empty());
+    }
+
+    #[test]
+    fn malformed_cursor_resets_to_new_entries_only() {
+        assert_eq!(sanitize_cursor(None), "$");
+        assert_eq!(sanitize_cursor(Some("garbage".into())), "$");
+        assert_eq!(sanitize_cursor(Some("12-3".into())), "12-3");
+        assert_eq!(sanitize_cursor(Some("0-0".into())), "0-0");
     }
 
     #[tokio::test]
@@ -530,16 +715,18 @@ mod tests {
     }
 
     #[test]
-    fn stream_config_enables_when_flag_is_1() {
-        let cfg = StreamConfig::from_env(|k| match k {
-            "EVENTS_ENABLED" => Some("1".into()),
-            "EVENTS_STREAM" => Some("custom".into()),
-            "EVENTS_MAXLEN" => Some("50".into()),
-            _ => None,
-        });
-        assert!(cfg.enabled);
-        assert_eq!(cfg.stream, "custom");
-        assert_eq!(cfg.maxlen, 50);
+    fn stream_config_enables_when_flag_is_1_or_true() {
+        for flag in ["1", "true", "TRUE"] {
+            let cfg = StreamConfig::from_env(|k| match k {
+                "EVENTS_ENABLED" => Some(flag.into()),
+                "EVENTS_STREAM" => Some("custom".into()),
+                "EVENTS_MAXLEN" => Some("50".into()),
+                _ => None,
+            });
+            assert!(cfg.enabled, "flag {flag} should enable events");
+            assert_eq!(cfg.stream, "custom");
+            assert_eq!(cfg.maxlen, 50);
+        }
     }
 
     fn bulk(s: &str) -> redis::Value {
@@ -566,6 +753,8 @@ mod tests {
         assert_eq!(events[0].id, "1-0");
         assert_eq!(events[0].kind, "intercom.created");
         assert_eq!(events[0].payload["id"], 1);
+        // Missing visibility metadata fails closed: nobody may see it.
+        assert!(filter_visible(events, &viewer("bob")).is_empty());
     }
 
     #[test]

@@ -119,6 +119,25 @@ def has_kind(payloads, kind, marker=None):
     )
 
 
+def wait_for_keepalive(stream, seconds):
+    """Consume frames until the reader's first keep-alive proves XREAD is live.
+
+    Response headers arrive before the backend spawns the XREAD loop, so a post
+    immediately after `open_stream()` can land before the cursor is set. The
+    first keep-alive is emitted only after a batch read has completed.
+    """
+    end = time.time() + seconds
+    try:
+        for line in stream.iter_lines(decode_unicode=True):
+            if line and line.startswith(": keep-alive"):
+                return True
+            if time.time() > end:
+                break
+    except requests.RequestException:
+        pass
+    return False
+
+
 def collect(stream, seconds, expect=None, marker=None):
     """Collect `data:` JSON payloads until the window ends or `expect` lands.
 
@@ -239,6 +258,9 @@ def run_journey(result, a, b, base):
             if stream.status_code != 200:
                 result.fail(f"note leg SSE stream HTTP {stream.status_code} — delivery assertion cannot run")
                 return 1
+            if not wait_for_keepalive(stream, WINDOW):
+                result.fail("note leg SSE reader never became live — delivery assertion cannot run")
+                return 1
             sent["r"] = a.post(base + "/api/intercom",
                                json={"text": note, "kind": "info"}, timeout=T)
             seen = collect(stream, WINDOW, expect="intercom.created")
@@ -262,10 +284,15 @@ def run_journey(result, a, b, base):
     marker = "sse-liveness-" + secrets.token_hex(6)
     control = {}
     created = {}
+    actor_seen = []
     try:
-        with open_stream(b, base) as stream:
-            if stream.status_code != 200:
-                result.fail(f"task leg SSE stream HTTP {stream.status_code} — privacy assertion cannot run")
+        with open_stream(b, base) as stream, open_stream(a, base) as actor_stream:
+            if stream.status_code != 200 or actor_stream.status_code != 200:
+                result.fail(f"task leg SSE streams not healthy (B={stream.status_code}, "
+                            f"A={actor_stream.status_code}) — privacy assertion cannot run")
+                return 1
+            if not wait_for_keepalive(stream, WINDOW) or not wait_for_keepalive(actor_stream, WINDOW):
+                result.fail("task leg SSE readers never became live — privacy assertion cannot run")
                 return 1
             control["r"] = a.post(base + "/api/intercom",
                                   json={"text": "control " + marker, "kind": "info"},
@@ -283,11 +310,12 @@ def run_journey(result, a, b, base):
 
             # TaskCreate requires `assignee`; recipients are the actor's sub,
             # the stamped author (A's email) and this unrelated assignee —
-            # never B's sub.
+            # never B's identity.
             created["r"] = a.post(base + "/api/tasks",
                                   json={"title": "realtime-private",
                                         "assignee": "realtime-journey@example.invalid"},
                                   timeout=T)
+            actor_seen = collect(actor_stream, WINDOW, expect="task.created")
             seen2 = collect(stream, WINDOW)
     except requests.RequestException as exc:
         result.fail(f"task leg request failed: {exc.__class__.__name__}")
@@ -297,6 +325,13 @@ def run_journey(result, a, b, base):
         result.fail(f"task creation failed (HTTP {r.status_code if r else 'no response'})"
                     " — privacy assertion cannot run")
         return 1
+    # A silent XADD failure would make "not leaked" pass vacuously — there
+    # would be no task event to filter at all.
+    if not has_kind(actor_seen, "task.created"):
+        result.fail(f"actor A did not receive its own task.created (saw "
+                    f"{[e.get('kind') for e in actor_seen]}) — privacy assertion would be vacuous")
+        return 1
+    result.ok("actor receives own task.created before privacy assertion")
     kinds2 = [e.get("kind") for e in seen2]
     (result.ok if "task.created" not in kinds2 else result.fail)(
         "private task event not leaked"

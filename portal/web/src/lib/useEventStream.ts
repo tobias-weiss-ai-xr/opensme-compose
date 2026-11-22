@@ -30,8 +30,11 @@ export function useEventStream(authenticated: boolean): { connected: boolean } {
     if (!Ctor) return;
     const es = new Ctor("/api/events");
     sourceRef.current = es;
-    es.onopen = () => setConnected(true);
+    // `onopen` only means headers arrived — the backend has not issued XREAD
+    // yet. Polling stays active until the explicit `ready` frame arrives, so a
+    // post in that window cannot be missed by both paths.
     es.onerror = () => setConnected(false);
+    es.addEventListener("ready", () => setConnected(true));
     for (const kind of LISTENED_KINDS) {
       es.addEventListener(kind, (raw) => {
         try {
