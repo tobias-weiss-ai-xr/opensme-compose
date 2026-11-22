@@ -669,7 +669,7 @@ Add these two methods to `impl EventBus` in `events.rs` (Task 2 already opened t
     pub fn is_disabled(&self) -> bool { matches!(self.0, BusInner::Disabled) }
 
     /// Browser entry point: memory bus replays its recorded events, Redis bus
-    /// opens the live XREADGROUP stream. Never panics; disabled returns 204.
+    /// opens the live XREAD stream. Never panics; disabled returns 204.
     pub fn stream(
         &self,
         viewer_sub: String,
@@ -1261,7 +1261,7 @@ def main():
     # E1
     check(all(t in events for t in [
         "pub enum Visibility", "pub struct Event", "pub struct EventBus",
-        'XADD', 'XAUTOCLAIM', 'XREADGROUP',
+        'XADD', 'XREAD',
     ]), "E1 events.rs: types + Redis Streams commands")
     # E2
     check('.route("/api/events", get(handle_events))' in main,
