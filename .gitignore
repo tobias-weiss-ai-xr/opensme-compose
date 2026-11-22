@@ -74,3 +74,6 @@ portal/web/tsconfig.tsbuildinfo
 tests/00-static/.internal-denylist.txt
 scripts/.paperless-intake.state.json
 scripts/.paperless-classify.state.json
+
+# Superpowers implementation worktrees (project-local)
+.worktrees/
