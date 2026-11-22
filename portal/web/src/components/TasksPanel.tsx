@@ -10,6 +10,7 @@ import {
   patchTask,
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
+import { subscribeEvents } from "@/lib/events";
 import type { TeamTask } from "@/lib/types";
 import type { TaskCreatePayload } from "@/lib/bridge";
 
@@ -110,6 +111,19 @@ export default function TasksPanel({ taskPrefill = null }: TasksPanelProps) {
     });
   }, []);
 
+  // Live SSE events (paused poller path): apply deltas directly, keeping the
+  // same sorted list as the poll/full-load paths. Delete payloads carry the
+  // full task too, so all three kinds can key off payload.task.
+  useEffect(() => subscribeEvents((event) => {
+    if (!event.kind.startsWith("task.") || !event.payload.task) return;
+    const incoming = event.payload.task as TeamTask;
+    setTasks((prev) => {
+      if (event.kind === "task.deleted") return prev.filter((t) => t.id !== incoming.id);
+      const others = prev.filter((t) => t.id !== incoming.id);
+      return sortTasks([incoming, ...others]);
+    });
+  }), [setTasks]);
+
   const fullLoad = useCallback(
     async (f: FilterId = filterRef.current) => {
       try {
@@ -159,13 +173,14 @@ export default function TasksPanel({ taskPrefill = null }: TasksPanelProps) {
       });
   }, [fullLoad]);
 
-  // Delta polling: 7s cadence, skipped while hidden, catch-up on show.
+  // Delta polling: 7s cadence, skipped while hidden or while the shell's
+  // SSE stream is connected, catch-up on show.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!document.hidden) void pollDelta();
+      if (!document.hidden && document.querySelector("main[data-events-connected='1']") === null) void pollDelta();
     }, POLL_MS);
     const onVisible = () => {
-      if (!document.hidden) void pollDelta();
+      if (!document.hidden && document.querySelector("main[data-events-connected='1']") === null) void pollDelta();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {

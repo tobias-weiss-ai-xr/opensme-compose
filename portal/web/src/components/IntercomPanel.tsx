@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
 import { aiEnabledProbe, draftReply, summarizeThread } from "@/lib/ai";
+import { subscribeEvents } from "@/lib/events";
 import type { IntercomMessage } from "@/lib/types";
 import { useSlot, type CloudPickResult, type SharePayload } from "@/lib/bridge";
 
@@ -86,6 +87,18 @@ export default function IntercomPanel({
     });
   }, []);
 
+  // Live SSE events (paused poller path): apply deltas directly so notes
+  // appear without waiting for the next 7s poll tick.
+  useEffect(() => subscribeEvents((event) => {
+    if (event.kind === "intercom.created" && event.payload.message) {
+      mergeIncoming([event.payload.message as IntercomMessage]);
+      latestRef.current = Math.max(latestRef.current, (event.payload.message as IntercomMessage).id);
+    } else if (event.kind === "intercom.deleted" && typeof event.payload.id === "number") {
+      const id = event.payload.id;
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+    }
+  }), [mergeIncoming]);
+
   const fullLoad = useCallback(async () => {
     try {
       const data = await fetchIntercom();
@@ -125,14 +138,14 @@ export default function IntercomPanel({
     void fullLoad();
   }, [fullLoad]);
 
-  // Delta polling: 7s cadence, skipped while hidden, immediate catch-up
-  // on visibilitychange.
+  // Delta polling: 7s cadence, skipped while hidden or while the shell's
+  // SSE stream is connected, immediate catch-up on visibilitychange.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!document.hidden) void pollDelta();
+      if (!document.hidden && document.querySelector("main[data-events-connected='1']") === null) void pollDelta();
     }, POLL_MS);
     const onVisible = () => {
-      if (!document.hidden) void pollDelta();
+      if (!document.hidden && document.querySelector("main[data-events-connected='1']") === null) void pollDelta();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {

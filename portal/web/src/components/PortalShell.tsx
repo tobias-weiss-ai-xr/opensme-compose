@@ -15,6 +15,7 @@ import TasksPanel from "./TasksPanel";
 import QuickSwitchPalette from "./QuickSwitchPalette";
 import CloudPickerProvider from "./CloudPickerProvider";
 import { registerProvider } from "@/lib/bridge";
+import { useEventStream } from "@/lib/useEventStream";
 import type { SharePayload, TaskCreatePayload } from "@/lib/bridge";
 import type { Announcement, Service } from "@/lib/types";
 import type { FeedColumnSpec } from "@/lib/config";
@@ -85,6 +86,10 @@ export default function PortalShell({
     });
   }, []);
 
+  // One SSE stream for the whole shell; panels subscribe via lib/events and
+  // read the connection state from the DOM flag to pause their pollers.
+  const { connected: streamConnected } = useEventStream(authenticated);
+
   return (
     <div className="flex min-h-screen flex-col">
       {/* portal-intercom: the one shared cloud-pick provider (owner of the
@@ -93,7 +98,7 @@ export default function PortalShell({
       <CloudPickerProvider />
       <AnnouncementBar announcements={announcements} />
       <Header activeTab={tab} onTabChange={setTab} tabs={tabs} />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6" data-events-connected={streamConnected ? "1" : "0"}>
         <section className="tab-panel" hidden={tab !== "dienste"} aria-label="Dienste">
           <h2 className="mb-4 text-xl font-bold">Dienste</h2>
           {authenticated ? (
