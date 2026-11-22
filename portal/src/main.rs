@@ -55,6 +55,7 @@ struct AppConfig {
     cloud: Option<cloud::CloudFiles>,
     feed_fetcher: Arc<feeds::FeedFetcher>,
     session: session::SessionConfig,
+    event_bus: events::EventBus,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2600,6 +2601,10 @@ fn load_config() -> Arc<AppConfig> {
         // (timeout, no redirects, egress proxy + internal-host bypass).
         cloud: cloud::CloudFiles::from_env().map(|c| c.with_client(intercom_client.clone())),
         session: session::SessionConfig::from_env(),
+        event_bus: events::EventBus::from_config(events::StreamConfig::from_env(|k| {
+            let v = load_env(k, "");
+            (!v.is_empty()).then_some(v)
+        })),
         intercom_client,
         feed_fetcher: Arc::new(feeds::FeedFetcher::new(feeds::parse_columns(&load_env(
             "PORTAL_FEEDS",
@@ -2710,6 +2715,7 @@ mod tests {
                 session_secret: b"0123456789abcdef0123456789abcdef".to_vec(),
                 http: reqwest::Client::new(),
             },
+            event_bus: events::EventBus::disabled(),
         }
     }
 
