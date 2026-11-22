@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_STREAM: &str = "opensme:events";
+/// Retained for config compatibility only; SSE reads use per-connection XREAD.
 pub const DEFAULT_GROUP: &str = "portal-sse";
 pub const DEFAULT_MAXLEN: usize = 10_000;
 
@@ -92,6 +93,7 @@ pub struct StreamConfig {
     pub enabled: bool,
     pub url: String,
     pub stream: String,
+    /// Kept for config compatibility; the XREAD read path does not use it.
     pub group: String,
     pub maxlen: usize,
 }
@@ -218,7 +220,7 @@ impl EventBus {
     }
 
     /// Browser entry point: memory bus replays its recorded events, Redis bus
-    /// opens the live XREADGROUP stream. Never panics; disabled returns 204.
+    /// opens the live XREAD stream. Never panics; disabled returns 204.
     pub async fn stream(
         &self,
         viewer_sub: String,
@@ -262,8 +264,9 @@ fn visibility_from_str(raw: &str) -> Visibility {
 }
 
 /// Minimal SSE reader over the Redis Stream for one browser connection.
-/// Uses a per-connection consumer in a shared group; on reconnect with a
-/// cursor it reclaims that consumer's pending entries via XAUTOCLAIM.
+/// Each connection owns its XREAD cursor (Last-Event-ID on reconnect, `$` on
+/// first connect). No consumer group: a group would load-balance entries
+/// across viewers, dropping events for all but one connection.
 pub async fn stream_events(
     client: redis::Client,
     config: StreamConfig,
@@ -274,8 +277,7 @@ pub async fn stream_events(
     let mut reader = EventReader {
         client,
         config,
-        consumer: format!("sse:{viewer_sub}"),
-        cursor: last_id,
+        cursor: last_id.unwrap_or_else(|| "$".into()),
     };
     tokio::spawn(async move {
         loop {
@@ -310,8 +312,7 @@ pub async fn stream_events(
 pub struct EventReader {
     client: redis::Client,
     config: StreamConfig,
-    consumer: String,
-    cursor: Option<String>,
+    cursor: String, // Redis stream ID, or "$" for new entries only
 }
 
 impl EventReader {
@@ -321,45 +322,21 @@ impl EventReader {
             .get_async_connection()
             .await
             .map_err(|e| e.to_string())?;
-        // BUSYGROUP is fine — the group is created once per stream.
-        let _: redis::RedisResult<()> = redis::cmd("XGROUP")
-            .arg("CREATE")
+        let reply: redis::RedisResult<redis::Value> = redis::cmd("XREAD")
+            .arg("COUNT")
+            .arg(10)
+            .arg("BLOCK")
+            .arg(1000)
+            .arg("STREAMS")
             .arg(&self.config.stream)
-            .arg(&self.config.group)
-            .arg("0-0")
-            .arg("MKSTREAM")
+            .arg(&self.cursor)
             .query_async(&mut conn)
             .await;
-        let reply: redis::RedisResult<redis::Value> = match self.cursor.take() {
-            Some(id) => {
-                redis::cmd("XAUTOCLAIM")
-                    .arg(&self.config.stream)
-                    .arg(&self.config.group)
-                    .arg(&self.consumer)
-                    .arg(0)
-                    .arg(&id)
-                    .arg("COUNT")
-                    .arg(10)
-                    .query_async(&mut conn)
-                    .await
-            }
-            None => {
-                redis::cmd("XREADGROUP")
-                    .arg("GROUP")
-                    .arg(&self.config.group)
-                    .arg(&self.consumer)
-                    .arg("COUNT")
-                    .arg(10)
-                    .arg("BLOCK")
-                    .arg(1000)
-                    .arg("STREAMS")
-                    .arg(&self.config.stream)
-                    .arg(">")
-                    .query_async(&mut conn)
-                    .await
-            }
-        };
-        parse_entries(reply)
+        let events = parse_entries(reply)?;
+        if let Some(last) = events.last() {
+            self.cursor = last.id.clone();
+        }
+        Ok(events)
     }
 }
 
@@ -370,8 +347,12 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
         redis::Value::Nil => return Ok(Vec::new()),
         _ => return Err("unexpected stream reply".into()),
     };
-    // XREADGROUP wraps entries as [stream_name, [entry, ...]] and XAUTOCLAIM
-    // as [next_id, [entry, ...], ...]. Both carry the entries in slot 1.
+    // XREAD wraps replies as [[stream_name, [entry, ...]]] (one stream).
+    // Unwrap that outer array, then the per-stream name/entries pair.
+    let arrays = match arrays.as_slice() {
+        [redis::Value::Array(inner)] => inner.clone(),
+        _ => arrays,
+    };
     let entries = match (arrays.first(), arrays.get(1)) {
         (Some(redis::Value::BulkString(_)), Some(redis::Value::Array(a))) => a.clone(),
         _ => arrays,
@@ -382,15 +363,10 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
             redis::Value::Array(a) => a,
             _ => continue,
         };
-        if parts.len() < 2 {
-            continue;
-        }
-        let id = match &parts[0] {
-            redis::Value::BulkString(b) => String::from_utf8_lossy(b).into_owned(),
-            _ => continue,
-        };
-        let fields = match &parts[1] {
-            redis::Value::Array(a) => a.clone(),
+        let (id, fields) = match (parts.first(), parts.get(1)) {
+            (Some(redis::Value::BulkString(b)), Some(redis::Value::Array(a))) => {
+                (String::from_utf8_lossy(b).into_owned(), a.clone())
+            }
             _ => continue,
         };
         let mut map = std::collections::HashMap::new();
@@ -565,5 +541,38 @@ mod tests {
         assert!(cfg.enabled);
         assert_eq!(cfg.stream, "custom");
         assert_eq!(cfg.maxlen, 50);
+    }
+
+    fn bulk(s: &str) -> redis::Value {
+        redis::Value::BulkString(s.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn parse_entries_reads_a_synthetic_xread_reply() {
+        // XREAD returns [[stream_name, [[id, [field, value, ...]], ...]]].
+        let reply = Ok(redis::Value::Array(vec![redis::Value::Array(vec![
+            bulk(DEFAULT_STREAM),
+            redis::Value::Array(vec![redis::Value::Array(vec![
+                bulk("1-0"),
+                redis::Value::Array(vec![
+                    bulk("kind"),
+                    bulk("intercom.created"),
+                    bulk("payload"),
+                    bulk(r#"{"id":1}"#),
+                ]),
+            ])]),
+        ])]));
+        let events = parse_entries(reply).expect("XREAD reply parses");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "1-0");
+        assert_eq!(events[0].kind, "intercom.created");
+        assert_eq!(events[0].payload["id"], 1);
+    }
+
+    #[test]
+    fn parse_entries_treats_nil_as_an_empty_block_timeout() {
+        assert!(parse_entries(Ok(redis::Value::Nil))
+            .expect("Nil reply is not an error")
+            .is_empty());
     }
 }
