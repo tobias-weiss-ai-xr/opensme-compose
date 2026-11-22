@@ -15,6 +15,7 @@ use tokio::signal;
 use tracing::{info, warn};
 
 mod cloud;
+mod events;
 mod feeds;
 mod intercom;
 mod logout;
