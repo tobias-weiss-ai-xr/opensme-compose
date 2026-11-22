@@ -110,11 +110,21 @@ def open_stream(session, base):
                        timeout=(5, WINDOW + 2), verify=False)
 
 
-def collect(stream, seconds, expect=None):
+def has_kind(payloads, kind, marker=None):
+    """True when a collected payload is `kind` (and carries `marker`, if set)."""
+    return any(
+        p.get("kind") == kind
+        and (marker is None or marker in json.dumps(p))
+        for p in payloads
+    )
+
+
+def collect(stream, seconds, expect=None, marker=None):
     """Collect `data:` JSON payloads until the window ends or `expect` lands.
 
     Frames are `event:`/`id:`/`data:`/blank; the keep-alive comment is ignored.
-    A read timeout simply ends the window with whatever was collected.
+    A read timeout simply ends the window with whatever was collected. `marker`
+    makes the short-circuit wait for a SPECIFIC event, not just its kind.
     """
     payloads = []
     end = time.time() + seconds
@@ -125,7 +135,7 @@ def collect(stream, seconds, expect=None):
                     payloads.append(json.loads(line[6:]))
                 except json.JSONDecodeError:
                     pass
-                if expect and any(p.get("kind") == expect for p in payloads):
+                if expect and has_kind(payloads, expect, marker):
                     break
             if time.time() > end:
                 break
@@ -226,6 +236,9 @@ def run_journey(result, a, b, base):
     sent = {}
     try:
         with open_stream(b, base) as stream:
+            if stream.status_code != 200:
+                result.fail(f"note leg SSE stream HTTP {stream.status_code} — delivery assertion cannot run")
+                return 1
             sent["r"] = a.post(base + "/api/intercom",
                                json={"text": note, "kind": "info"}, timeout=T)
             seen = collect(stream, WINDOW, expect="intercom.created")
@@ -243,11 +256,34 @@ def run_journey(result, a, b, base):
         else f"intercom.created event missing (saw {kinds})"
     )
 
-    # TaskCreate requires `assignee`; recipients are the actor's sub, the
-    # stamped author (A's email) and this unrelated assignee — never B's sub.
+    # Prove THIS stream is live before trusting the absence of task.created:
+    # a witness Team event from A must reach B first. A dead/non-200 stream
+    # would otherwise make "no leak" pass vacuously.
+    marker = "sse-liveness-" + secrets.token_hex(6)
+    control = {}
     created = {}
     try:
         with open_stream(b, base) as stream:
+            if stream.status_code != 200:
+                result.fail(f"task leg SSE stream HTTP {stream.status_code} — privacy assertion cannot run")
+                return 1
+            control["r"] = a.post(base + "/api/intercom",
+                                  json={"text": "control " + marker, "kind": "info"},
+                                  timeout=T)
+            if control["r"].status_code != 201:
+                result.fail(f"liveness control note failed: HTTP {control['r'].status_code}")
+                return 1
+            control_seen = collect(stream, WINDOW,
+                                   expect="intercom.created", marker=marker)
+            if not has_kind(control_seen, "intercom.created", marker):
+                kinds_seen = [e.get("kind") for e in control_seen]
+                result.fail(f"SSE liveness control not received on session B (saw {kinds_seen})")
+                return 1
+            result.ok("SSE liveness control delivered before privacy assertion")
+
+            # TaskCreate requires `assignee`; recipients are the actor's sub,
+            # the stamped author (A's email) and this unrelated assignee —
+            # never B's sub.
             created["r"] = a.post(base + "/api/tasks",
                                   json={"title": "realtime-private",
                                         "assignee": "realtime-journey@example.invalid"},
