@@ -380,8 +380,7 @@ pub async fn stream_events(
         let mut cursor_checked = false;
         loop {
             if !cursor_checked {
-                reader.ensure_cursor_live().await;
-                cursor_checked = true;
+                cursor_checked = reader.ensure_cursor_live().await;
             }
             match reader.next_batch().await {
                 Ok(events) => {
@@ -391,10 +390,11 @@ pub async fn stream_events(
                             return;
                         }
                     }
-                    // The first successful XREAD means the cursor is live. Only
-                    // now may the client pause polling; `onopen` alone fires
-                    // before the reader task has issued XREAD.
-                    if !ready {
+                    // Both a conclusive cursor check and a successful XREAD
+                    // are required before the client may pause polling. If
+                    // XRANGE stays unavailable, keep polling — never announce
+                    // `ready` on a cursor that could be wedged in the future.
+                    if !ready && cursor_checked {
                         if tx
                             .send(Ok("event: ready\ndata: {}\n\n".into()))
                             .await
@@ -460,18 +460,20 @@ impl EventReader {
     /// if Redis was recreated or EVENTS_STREAM changed. XREAD from a future ID
     /// returns Nil forever while still emitting `ready`, which would silently
     /// keep the browser's poller paused. Reset to `$` in that case.
-    async fn ensure_cursor_live(&mut self) {
+    /// Returns `false` on transient failures so the caller retries: a skipped
+    /// check must never be followed by `ready` and a paused poller.
+    async fn ensure_cursor_live(&mut self) -> bool {
         if self.cursor == "$" {
-            return;
+            return true;
         }
         if self.conn.is_none() {
             self.conn = match self.client.get_multiplexed_async_connection().await {
                 Ok(conn) => Some(conn),
-                Err(_) => return,
+                Err(_) => return false,
             };
         }
         let Some(conn) = self.conn.as_mut() else {
-            return;
+            return false;
         };
         let reply: redis::RedisResult<redis::Value> = redis::cmd("XRANGE")
             .arg(&self.config.stream)
@@ -483,32 +485,36 @@ impl EventReader {
             .await;
         let entries = match reply {
             Ok(redis::Value::Array(entries)) => entries,
-            Ok(_) => return,
+            Ok(_) => return false,
             Err(_) => {
                 self.conn = None;
-                return;
+                return false;
             }
         };
         let Some(newest) = entries.first() else {
             // Empty/nonexistent stream: any stored cursor is from a previous
             // stream, so start at the current tail instead.
             self.cursor = "$".into();
-            return;
+            return true;
         };
         let redis::Value::Array(parts) = newest else {
-            return;
+            return false;
         };
         let Some(redis::Value::BulkString(id)) = parts.first() else {
-            return;
+            return false;
         };
         let newest_id = String::from_utf8_lossy(id);
-        if let (Some(cursor), Some(newest)) =
-            (stream_id_key(&self.cursor), stream_id_key(&newest_id))
-        {
-            if newest < cursor {
-                self.cursor = "$".into();
-            }
+        let (Some(cursor), Some(newest)) = (stream_id_key(&self.cursor), stream_id_key(&newest_id))
+        else {
+            // Format-valid but beyond u128: ordering cannot be proven, so
+            // treat it as stale rather than risk an endless Nil XREAD.
+            self.cursor = "$".into();
+            return true;
+        };
+        if newest < cursor {
+            self.cursor = "$".into();
         }
+        true
     }
 
     pub async fn next_batch(&mut self) -> Result<Vec<Event>, String> {

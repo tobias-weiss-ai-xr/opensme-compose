@@ -627,8 +627,8 @@ MUTATIONS = [
     {
         "name": "events-stale-cursor-check-dropped",
         "file": "portal/src/events.rs",
-        "old": "                reader.ensure_cursor_live().await;\n",
-        "new": "                // cursor check removed\n",
+        "old": "                cursor_checked = reader.ensure_cursor_live().await;\n",
+        "new": "                cursor_checked = true;\n",
         "check": "tests/00-static/check_events.py",
         "why": "portal-events — without the tail comparison a valid-but-future "
                "Last-Event-ID returns Nil forever while still emitting ready "
@@ -656,6 +656,35 @@ MUTATIONS = [
         "why": "portal-events — without authoritative reload on ready, a lost "
                "delete XADD leaves stale tasks after a replay; E7 must pin "
                "the panel reconciliation",
+    },
+    {
+        "name": "events-intercom-ready-reconcile-dropped",
+        "file": "portal/web/src/components/IntercomPanel.tsx",
+        "old": '    if (event.kind === SSE_READY_KIND) void fullLoad();',
+        "new": '    if (event.kind === "never") { /* no reconcile */ }',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — intercom notes need the same authoritative "
+               "reload on ready as tasks; E7 must pin both panels",
+    },
+    {
+        "name": "events-stale-cursor-comparison-flipped",
+        "file": "portal/src/events.rs",
+        "old": "        if newest < cursor {\n",
+        "new": "        if newest > cursor {\n",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — inverting the tail comparison keeps a future "
+               "cursor instead of resetting it, wedgeing XREAD at Nil; E7 "
+               "must pin the direction",
+    },
+    {
+        "name": "events-ready-before-cursor-check",
+        "file": "portal/src/events.rs",
+        "old": "                    if !ready && cursor_checked {\n",
+        "new": "                    if !ready {\n",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — announcing ready while the cursor check is "
+               "still inconclusive pauses the poller on a possibly wedged "
+               "cursor; E7 must pin the combined gate",
     },
 ]
 

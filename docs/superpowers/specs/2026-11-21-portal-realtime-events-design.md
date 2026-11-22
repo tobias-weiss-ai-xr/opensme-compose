@@ -82,7 +82,8 @@ will publish/consume the same stream in later slices.
   `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`,
   `X-Accel-Buffering: no`, `Connection: keep-alive`.
 - Cap concurrent SSE connections per session (3) — a 4th gets `429` and keeps
-  polling. The first successful XREAD emits an explicit `event: ready` frame;
+  polling. The first successful XREAD after a conclusive cursor check emits an
+  explicit `event: ready` frame;
   the client pauses polling only then, so an event posted in the header→XREAD
   window is not missed by both paths. The pending queue is bounded (16 frames);
   backpressure blocks that reader task rather than growing memory, and the slot

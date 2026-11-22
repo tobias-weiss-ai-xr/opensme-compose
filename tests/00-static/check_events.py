@@ -85,7 +85,7 @@ def main():
         check(all(t in text for t in [
             "setInterval", "POLL_MS", "pollDelta", "data-events-connected", "fetch",
         ]), f"E5 {panel_name}: delta poller + SSE guard retained")
-        check("SSE_READY_KIND" in text and "void fullLoad()" in text,
+        check('if (event.kind === SSE_READY_KIND) void fullLoad();' in text,
               f"E7 {panel_name}: reconciles from the store when SSE becomes live")
     check("excludedContentTypes=text/event-stream" in COMPOSE.read_text(),
           "E5 Traefik compression excludes text/event-stream")
@@ -97,7 +97,8 @@ def main():
     check(all(t in events for t in [
         "errors >= 3", "std::io::Error::other", "event: ready", "sanitize_cursor(last_id)",
         "e.tenant == viewer.tenant", "StreamSlot", "get_multiplexed_async_connection",
-        "reader.ensure_cursor_live().await", "stream_id_key", "XRANGE",
+        "reader.ensure_cursor_live().await", "stream_id_key", "XRANGE", "newest < cursor",
+        "if !ready && cursor_checked",
     ]), "E7 reader: error propagation, ready frame, cursor/cap/tenant guards")
     hook = (WEB / "lib" / "useEventStream.ts")
     hook = hook.read_text() if hook.exists() else ""
