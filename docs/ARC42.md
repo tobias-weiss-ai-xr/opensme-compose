@@ -145,7 +145,9 @@ Retention).
   CSP `connect-src 'self'`). Traefik nimmt `text/event-stream` von der
   Kompression aus, damit Frame-Grenzen erhalten bleiben; ohne
   `EVENTS_ENABLED` (oder bei Verbindungsabbruch) bleibt der bewährte
-  Polling-Fallback aktiv. Contract: `contracts/interop.yml` (`portal_events`),
+  Polling-Fallback aktiv. Bei externem Traefik (`demo.coexist.yml` /
+  `system-traefik.yml`) muss der Ausschluss in dessen Edge-Konfiguration
+  separat gesetzt werden. Contract: `contracts/interop.yml` (`portal_events`),
   statisch gepinnt von `tests/00-static/check_events.py`.
 
 ## 8. Architektur-Entscheidungen

@@ -548,6 +548,17 @@ MUTATIONS = [
                "buffering/compressing SSE hides frame boundaries from "
                "EventSource and stalls live intercom/task updates",
     },
+    {
+        "name": "events-task-delete-recipients-dropped",
+        "file": "portal/src/main.rs",
+        "old": "events::Visibility::Recipients(recipients_for_task(&task, &session.sub)),",
+        "new": "events::Visibility::Recipients(vec![]),",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — the production task.deleted publish must "
+               "compute recipients server-side from the task; dropping that "
+               "call leaves the publish with no recipient scope and the E4 "
+               "pin must catch it",
+    },
 ]
 
 
