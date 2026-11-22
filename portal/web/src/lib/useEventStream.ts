@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { dispatchEvent, type PortalEvent } from "./events";
+import { dispatchEvent, SSE_READY_KIND, type PortalEvent } from "./events";
 
 /** Test seam: override the global EventSource constructor in unit tests. */
 let EventSourceCtor: typeof EventSource | null = null;
@@ -34,7 +34,10 @@ export function useEventStream(authenticated: boolean): { connected: boolean } {
     // yet. Polling stays active until the explicit `ready` frame arrives, so a
     // post in that window cannot be missed by both paths.
     es.onerror = () => setConnected(false);
-    es.addEventListener("ready", () => setConnected(true));
+    es.addEventListener("ready", () => {
+      setConnected(true);
+      dispatchEvent({ id: "sse-ready", kind: SSE_READY_KIND, payload: {} });
+    });
     for (const kind of LISTENED_KINDS) {
       es.addEventListener(kind, (raw) => {
         try {

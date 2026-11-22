@@ -10,7 +10,7 @@ import {
   patchTask,
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
-import { subscribeEvents } from "@/lib/events";
+import { subscribeEvents, SSE_READY_KIND } from "@/lib/events";
 import type { TeamTask } from "@/lib/types";
 import type { TaskCreatePayload } from "@/lib/bridge";
 
@@ -137,6 +137,12 @@ export default function TasksPanel({ taskPrefill = null }: TasksPanelProps) {
     },
     [markAuthRequired],
   );
+
+  // SSE became live again: reload from the store so a lost delete XADD cannot
+  // leave stale tasks behind after a Last-Event-ID replay.
+  useEffect(() => subscribeEvents((event) => {
+    if (event.kind === SSE_READY_KIND) void fullLoad();
+  }), [fullLoad]);
 
   const pollDelta = useCallback(async () => {
     if (authRef.current || pollingRef.current) return;

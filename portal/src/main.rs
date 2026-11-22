@@ -1377,6 +1377,23 @@ fn recipients_for_task(t: &tasks::Task, actor_sub: &str) -> Vec<String> {
     ids
 }
 
+/// A patch can reassign a task away from someone. That previous assignee must
+/// still receive `task.updated` — otherwise, with polling paused by a healthy
+/// SSE stream, their UI keeps showing the old assignment indefinitely.
+fn recipients_for_task_update(
+    old: &tasks::Task,
+    new: &tasks::Task,
+    actor_sub: &str,
+) -> Vec<String> {
+    let mut ids = recipients_for_task(old, actor_sub);
+    for id in recipients_for_task(new, actor_sub) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
 fn bad_request(msg: String) -> axum::response::Response {
     (
         StatusCode::BAD_REQUEST,
@@ -1466,7 +1483,11 @@ async fn handle_tasks_patch(
                     "task.updated",
                     &session.sub,
                     &config.opensme_domain,
-                    events::Visibility::Recipients(recipients_for_task(&t, &session.sub)),
+                    events::Visibility::Recipients(recipients_for_task_update(
+                        &task,
+                        &t,
+                        &session.sub,
+                    )),
                     serde_json::json!({ "task": task_json(&t) }),
                 ))
                 .await;
@@ -4594,7 +4615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn posting_an_intercom_note_publishes_a_team_event() {
+    async fn team_visibility_event_reaches_every_authenticated_viewer() {
         let _cfg = cfg_with("", None, "");
         let bus = events::EventBus::memory();
         // cfg_with is immutable here; build the bus directly to assert the
@@ -4619,7 +4640,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_events_are_recipient_scoped() {
+    async fn recipient_visibility_hides_unlisted_viewers() {
         let e = events::Event::new(
             "task.created",
             "alice",

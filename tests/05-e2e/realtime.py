@@ -232,9 +232,14 @@ def run_journey(result, a, b, base):
         return 0
     status = probe.status_code
     probe.close()
-    if status != 200:
-        result.skip(f"SSE endpoint disabled (HTTP {status}) — polling fallback, journey skipped")
+    if status == 204:
+        result.skip("SSE endpoint disabled (HTTP 204) — polling fallback, journey skipped")
         return 0
+    if status != 200:
+        # CI sets EVENTS_ENABLED=1 for this job, so anything other than 204 is
+        # a proxy/auth/cap regression, not an intentionally disabled feature.
+        result.fail(f"SSE endpoint returned HTTP {status}; expected 200 with EVENTS_ENABLED=1")
+        return 1
     result.ok("SSE endpoint reachable (EVENTS_ENABLED)")
 
     # The privacy filter compares OIDC subs. Without two readable, different

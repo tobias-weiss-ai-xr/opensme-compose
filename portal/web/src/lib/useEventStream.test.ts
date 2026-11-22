@@ -1,7 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useEventStream, resetEventSourceForTests } from "./useEventStream";
-import { dispatchEvent, resetEventsForTests, subscribeEvents } from "./events";
+import { dispatchEvent, resetEventsForTests, subscribeEvents, SSE_READY_KIND } from "./events";
 
 class FakeEventSource {
   static last: FakeEventSource | null = null;
@@ -38,6 +38,15 @@ describe("useEventStream", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     renderHook(() => useEventStream(false));
     expect(FakeEventSource.last).toBeNull();
+  });
+
+  it("emits a local ready signal so panels reconcile with the authoritative store", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const kinds: string[] = [];
+    subscribeEvents((e) => kinds.push(e.kind));
+    renderHook(() => useEventStream(true));
+    act(() => FakeEventSource.last?.ready());
+    expect(kinds).toContain(SSE_READY_KIND);
   });
 
   it("keeps polling until the reader is ready, then pauses; errors resume polling", () => {

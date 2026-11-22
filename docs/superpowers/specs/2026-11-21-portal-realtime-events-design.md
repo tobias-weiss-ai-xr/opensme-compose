@@ -89,6 +89,16 @@ will publish/consume the same stream in later slices.
   is released when the client disconnects. A separate idle timeout is not used:
   the 1 s keep-alive already bounds liveness detection, and a healthy idle
   stream is the desired state.
+- On connect, a format-valid cursor is compared with the stream's newest ID
+  (`XRANGE key + - COUNT 1`). A cursor ahead of that ID (recreated stream or
+  changed `EVENTS_STREAM`) would return Nil forever yet still emit `ready`;
+  it is reset to `$` so polling can be safely paused.
+- The `ready` frame also emits a **local-only** `portal.ready` signal in the
+  browser. Both panels respond with an authoritative full load. This closes
+  the fail-soft gap where a delete succeeds in the store but its XADD is lost:
+  a replay from an older cursor would otherwise re-add the item. It also
+  resolves the mount/full-load race, at the cost of one extra list fetch per
+  (re)connect.
 
 ### Publishers (handlers in `portal/src/main.rs`)
 
@@ -99,7 +109,9 @@ Emit through `config.event_bus` (fail-soft: no bus → no event):
 - `handle_intercom_delete` → `intercom.deleted` `{id}`, `Visibility::Team`.
 - tasks create/patch/delete handlers → `task.created` / `task.updated` /
   `task.deleted` with `{id, assignee, ...}`, `Visibility::Recipients(author +
-  assignee)`.
+  assignee)`. `task.updated` unions recipients from **before and after** the
+  patch: a reassignment from B to C must still notify B, otherwise B's UI
+  keeps the stale assignment while polling is paused by SSE.
 - Polls and feed are explicitly **out of scope** for slice 1: feed is external
   RSS (no local event source); polls already reuse the intercom store and can be
   added in a later slice.

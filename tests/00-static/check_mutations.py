@@ -615,11 +615,47 @@ MUTATIONS = [
     {
         "name": "events-client-pauses-on-open",
         "file": "portal/web/src/lib/useEventStream.ts",
-        "old": 'es.addEventListener("ready", () => setConnected(true));',
-        "new": 'es.onopen = () => setConnected(true);',
+        "old": '    es.addEventListener("ready", () => {\n'
+               '      setConnected(true);\n'
+               '      dispatchEvent({ id: "sse-ready", kind: SSE_READY_KIND, payload: {} });\n'
+               '    });',
+        "new": '    es.onopen = () => setConnected(true);',
         "check": "tests/00-static/check_events.py",
         "why": "portal-events — onopen fires before the backend issues XREAD; "
                "pausing polling there loses events posted in the gap",
+    },
+    {
+        "name": "events-stale-cursor-check-dropped",
+        "file": "portal/src/events.rs",
+        "old": "                reader.ensure_cursor_live().await;\n",
+        "new": "                // cursor check removed\n",
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — without the tail comparison a valid-but-future "
+               "Last-Event-ID returns Nil forever while still emitting ready "
+               "and keeping the poller paused; E7 must pin the call site",
+    },
+    {
+        "name": "events-update-recipients-dropped",
+        "file": "portal/src/main.rs",
+        "old": '                    events::Visibility::Recipients(recipients_for_task_update(\n'
+               '                        &task,\n'
+               '                        &t,\n'
+               '                        &session.sub,\n'
+               '                    )),',
+        "new": '                    events::Visibility::Recipients(recipients_for_task(&t, &session.sub)),',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — a reassignment must still notify the previous "
+               "assignee; E4 must pin the pre/post-patch recipient union",
+    },
+    {
+        "name": "events-ready-reconcile-dropped",
+        "file": "portal/web/src/components/TasksPanel.tsx",
+        "old": '    if (event.kind === SSE_READY_KIND) void fullLoad();',
+        "new": '    if (event.kind === "never") { /* no reconcile */ }',
+        "check": "tests/00-static/check_events.py",
+        "why": "portal-events — without authoritative reload on ready, a lost "
+               "delete XADD leaves stale tasks after a replay; E7 must pin "
+               "the panel reconciliation",
     },
 ]
 

@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import LoginRequired from "@/components/LoginRequired";
 import { aiEnabledProbe, draftReply, summarizeThread } from "@/lib/ai";
-import { subscribeEvents } from "@/lib/events";
+import { subscribeEvents, SSE_READY_KIND } from "@/lib/events";
 import type { IntercomMessage } from "@/lib/types";
 import { useSlot, type CloudPickResult, type SharePayload } from "@/lib/bridge";
 
@@ -109,6 +109,13 @@ export default function IntercomPanel({
       /* keep last known list */
     }
   }, [markAuthRequired]);
+
+  // SSE just became live (first connect or reconnect): reconcile with the
+  // authoritative store. A fail-soft delete XADD can be lost while the store
+  // delete succeeds; replaying an older cursor would otherwise re-add it.
+  useEffect(() => subscribeEvents((event) => {
+    if (event.kind === SSE_READY_KIND) void fullLoad();
+  }), [fullLoad]);
 
   const pollDelta = useCallback(async () => {
     if (authRef.current || pollingRef.current) return;

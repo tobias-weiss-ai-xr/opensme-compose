@@ -1522,3 +1522,10 @@ Wait for CI (use `python3 /tmp/opencode/gh_ciruns.py` and `/tmp/opencode/gh_chec
 - If a remote host build is unavailable, push to `main` after Tasks 1–2 and read CI failures rather than running `cargo build` locally (AGENTS.md).
 - The visibility model currently compares store emails with OIDC `sub` values; the acting user's `sub` is always included so their own writes are visible. A follow-up slice should map email→sub via `/api/tasks/users` before enabling cross-user task events in production.
 - Optional extraction to a standalone gateway is deliberately a later slice; do not add it here.
+- Post-review hardening (committed with the fix batch): the reader compares a
+  format-valid cursor with the stream tail via `XRANGE` and resets a stale one
+  to `$`; `task.updated` unions pre/post-patch recipients; E2E skips only on
+  `204` and fails on other non-200 statuses; the local `portal.ready` signal
+  makes both panels reload authoritative state when SSE becomes live (covering
+  lost delete XADDs and the mount/full-load race). Static checks E4/E7 and the
+  hook unit test pin these behaviours.

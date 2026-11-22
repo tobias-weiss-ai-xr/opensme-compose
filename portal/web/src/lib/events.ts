@@ -6,6 +6,10 @@ export interface PortalEvent {
   payload: Record<string, unknown>;
 }
 
+/** Local-only signal emitted by the SSE hook once the reader is live; panels
+ *  reconcile with the authoritative store on it. Never sent by the server. */
+export const SSE_READY_KIND = "portal.ready";
+
 type Handler = (event: PortalEvent) => void;
 const handlers = new Set<Handler>();
 

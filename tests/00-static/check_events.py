@@ -66,14 +66,14 @@ def main():
     # E4 — pin each PRODUCTION task publish; main.rs has a fourth
     # Visibility::Recipients in a unit test, so a total count would let a
     # missing publish hide behind the test fixture.
-    production_visibility = "events::Visibility::Recipients(recipients_for_task("
-    for kind, task_expr in (
-        ("task.created", "&t, &session.sub"),
-        ("task.updated", "&t, &session.sub"),
-        ("task.deleted", "&task, &session.sub"),
+    for kind, helper, task_expr in (
+        ("task.created", "recipients_for_task", r"&t,\s*&session\.sub"),
+        ("task.updated", "recipients_for_task_update", r"&task,\s*&t,\s*&session\.sub"),
+        ("task.deleted", "recipients_for_task", r"&task,\s*&session\.sub"),
     ):
+        production_visibility = "events::Visibility::Recipients(" + helper + "("
         pattern = (kind + r"[\s\S]{0,200}" + re.escape(production_visibility)
-                   + re.escape(task_expr) + r"\)")
+                   + r"\s*" + task_expr + r"\s*,?\s*\)")
         check(re.search(pattern, main) is not None,
               f"E4 {kind} publish passes explicit recipient visibility")
     check(not re.search(r'task\.(created|updated|deleted)[\s\S]{0,200}Visibility::Team', main),
@@ -85,6 +85,8 @@ def main():
         check(all(t in text for t in [
             "setInterval", "POLL_MS", "pollDelta", "data-events-connected", "fetch",
         ]), f"E5 {panel_name}: delta poller + SSE guard retained")
+        check("SSE_READY_KIND" in text and "void fullLoad()" in text,
+              f"E7 {panel_name}: reconciles from the store when SSE becomes live")
     check("excludedContentTypes=text/event-stream" in COMPOSE.read_text(),
           "E5 Traefik compression excludes text/event-stream")
     # E6
@@ -95,12 +97,15 @@ def main():
     check(all(t in events for t in [
         "errors >= 3", "std::io::Error::other", "event: ready", "sanitize_cursor(last_id)",
         "e.tenant == viewer.tenant", "StreamSlot", "get_multiplexed_async_connection",
+        "reader.ensure_cursor_live().await", "stream_id_key", "XRANGE",
     ]), "E7 reader: error propagation, ready frame, cursor/cap/tenant guards")
     hook = (WEB / "lib" / "useEventStream.ts")
     hook = hook.read_text() if hook.exists() else ""
     check('addEventListener("ready"' in hook
           and 'onopen = () => setConnected(true)' not in hook,
           "E7 client pauses polling only after the ready frame")
+    check("SSE_READY_KIND" in hook and '"sse-ready"' in hook,
+          "E7 ready frame emits the local reconciliation signal")
 
     return result.summary()
 

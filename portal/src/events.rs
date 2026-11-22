@@ -349,6 +349,13 @@ fn valid_stream_id(id: &str) -> bool {
     }
 }
 
+/// Numeric ordering key for stream IDs, used to detect a cursor that is ahead
+/// of the current stream (recreated stream or changed EVENTS_STREAM).
+fn stream_id_key(id: &str) -> Option<(u128, u128)> {
+    let (ms, seq) = id.split_once('-')?;
+    Some((ms.parse().ok()?, seq.parse().ok()?))
+}
+
 /// Minimal SSE reader over the Redis Stream for one browser connection.
 /// Each connection owns its XREAD cursor (Last-Event-ID on reconnect, `$` on
 /// first connect). No consumer group: a group would load-balance entries
@@ -370,7 +377,12 @@ pub async fn stream_events(
         let _slot = slot;
         let mut errors = 0u32;
         let mut ready = false;
+        let mut cursor_checked = false;
         loop {
+            if !cursor_checked {
+                reader.ensure_cursor_live().await;
+                cursor_checked = true;
+            }
             match reader.next_batch().await {
                 Ok(events) => {
                     errors = 0;
@@ -441,6 +453,61 @@ impl EventReader {
             config,
             cursor,
             conn: None,
+        }
+    }
+
+    /// A format-valid `Last-Event-ID` can still be ahead of the current stream
+    /// if Redis was recreated or EVENTS_STREAM changed. XREAD from a future ID
+    /// returns Nil forever while still emitting `ready`, which would silently
+    /// keep the browser's poller paused. Reset to `$` in that case.
+    async fn ensure_cursor_live(&mut self) {
+        if self.cursor == "$" {
+            return;
+        }
+        if self.conn.is_none() {
+            self.conn = match self.client.get_multiplexed_async_connection().await {
+                Ok(conn) => Some(conn),
+                Err(_) => return,
+            };
+        }
+        let Some(conn) = self.conn.as_mut() else {
+            return;
+        };
+        let reply: redis::RedisResult<redis::Value> = redis::cmd("XRANGE")
+            .arg(&self.config.stream)
+            .arg("+")
+            .arg("-")
+            .arg("COUNT")
+            .arg(1)
+            .query_async(conn)
+            .await;
+        let entries = match reply {
+            Ok(redis::Value::Array(entries)) => entries,
+            Ok(_) => return,
+            Err(_) => {
+                self.conn = None;
+                return;
+            }
+        };
+        let Some(newest) = entries.first() else {
+            // Empty/nonexistent stream: any stored cursor is from a previous
+            // stream, so start at the current tail instead.
+            self.cursor = "$".into();
+            return;
+        };
+        let redis::Value::Array(parts) = newest else {
+            return;
+        };
+        let Some(redis::Value::BulkString(id)) = parts.first() else {
+            return;
+        };
+        let newest_id = String::from_utf8_lossy(id);
+        if let (Some(cursor), Some(newest)) =
+            (stream_id_key(&self.cursor), stream_id_key(&newest_id))
+        {
+            if newest < cursor {
+                self.cursor = "$".into();
+            }
         }
     }
 
@@ -662,6 +729,15 @@ mod tests {
         assert_eq!(sanitize_cursor(Some("garbage".into())), "$");
         assert_eq!(sanitize_cursor(Some("12-3".into())), "12-3");
         assert_eq!(sanitize_cursor(Some("0-0".into())), "0-0");
+    }
+
+    #[test]
+    fn stale_cursor_is_newer_than_the_current_stream_tail() {
+        assert_eq!(stream_id_key("bad"), None);
+        assert!(
+            stream_id_key("12345-0").unwrap() > stream_id_key("42-9").unwrap(),
+            "a cursor from a recreated stream must be detectable as ahead"
+        );
     }
 
     #[tokio::test]
