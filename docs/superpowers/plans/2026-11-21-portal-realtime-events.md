@@ -522,8 +522,9 @@ use axum::response::IntoResponse;
 use futures::StreamExt;
 
 /// Minimal SSE reader over the Redis Stream for one browser connection.
-/// Uses a per-connection consumer in a shared group; on reconnect with a
-/// cursor it reclaims that consumer's pending entries via XAUTOCLAIM.
+/// Each connection owns its XREAD cursor (Last-Event-ID on reconnect, `$` on
+/// first connect). No consumer group: a group would load-balance entries
+/// across viewers, dropping events for all but one connection.
 pub async fn stream_events(
     client: redis::Client,
     config: StreamConfig,
@@ -531,7 +532,11 @@ pub async fn stream_events(
     last_id: Option<String>,
 ) -> impl axum::response::IntoResponse {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(16);
-    let mut reader = EventReader { client, config, consumer: format!("sse:{viewer_sub}"), cursor: last_id };
+    let mut reader = EventReader {
+        client,
+        config,
+        cursor: last_id.unwrap_or_else(|| "$".into()),
+    };
     tokio::spawn(async move {
         loop {
             match reader.next_batch().await {
@@ -560,28 +565,23 @@ pub async fn stream_events(
 pub struct EventReader {
     client: redis::Client,
     config: StreamConfig,
-    consumer: String,
-    cursor: Option<String>,
+    cursor: String, // Redis stream ID, or "$" for new entries only
 }
 
 impl EventReader {
     pub async fn next_batch(&mut self) -> Result<Vec<Event>, String> {
         let mut conn = self.client.get_async_connection().await.map_err(|e| e.to_string())?;
-        let _: redis::RedisResult<()> = redis::cmd("XGROUP").arg("CREATE")
-            .arg(&self.config.stream).arg(&self.config.group).arg("0-0").arg("MKSTREAM")
-            .query_async(&mut conn).await; // BUSYGROUP is fine
-        let reply: redis::RedisResult<redis::Value> = match self.cursor.take() {
-            Some(id) => redis::cmd("XAUTOCLAIM")
-                .arg(&self.config.stream).arg(&self.config.group).arg(&self.consumer)
-                .arg(0).arg(&id).arg("COUNT").arg(10)
-                .query_async(&mut conn).await,
-            None => redis::cmd("XREADGROUP")
-                .arg("GROUP").arg(&self.config.group).arg(&self.consumer)
-                .arg("COUNT").arg(10).arg("BLOCK").arg(1000)
-                .arg("STREAMS").arg(&self.config.stream).arg(">")
-                .query_async(&mut conn).await,
-        };
-        parse_entries(reply)
+        let reply: redis::RedisResult<redis::Value> = redis::cmd("XREAD")
+            .arg("COUNT").arg(10)
+            .arg("BLOCK").arg(1000)
+            .arg("STREAMS").arg(&self.config.stream)
+            .arg(&self.cursor)
+            .query_async(&mut conn).await;
+        let events = parse_entries(reply)?;
+        if let Some(last) = events.last() {
+            self.cursor = last.id.clone();
+        }
+        Ok(events)
     }
 }
 
@@ -592,7 +592,14 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
         redis::Value::Nil => return Ok(Vec::new()),
         _ => return Err("unexpected stream reply".into()),
     };
-    // XAUTOCLAIM wraps entries: [next_id, [entry, ...]]. Normalize both shapes.
+    // XREAD wraps replies as [[stream_name, [entry, ...]]] (one stream).
+    // Unwrap that outer array, then the per-stream name/entries pair.
+    let arrays = if arrays.len() == 1 {
+        match &arrays[0] {
+            redis::Value::Array(inner) => inner.clone(),
+            _ => arrays,
+        }
+    } else { arrays };
     let entries = if arrays.len() == 2 && matches!(arrays[0], redis::Value::BulkString(_)) {
         match &arrays[1] { redis::Value::Array(a) => a.clone(), _ => Vec::new() }
     } else { arrays };
@@ -624,6 +631,17 @@ fn parse_entries(reply: redis::RedisResult<redis::Value>) -> Result<Vec<Event>, 
     Ok(out)
 }
 ```
+
+**Design correction (approved 2026-11-22):** the reader above uses per-connection
+`XREAD` cursors, not a shared consumer group. Consumer groups are work queues:
+with one `portal-sse` group, two viewers compete for each entry and a private
+event can be consumed (then filtered out) by the wrong viewer, so the intended
+recipient never gets it. `XREAD` from `$` (first connect) or `Last-Event-ID`
+(reconnect) broadcasts every entry to every connection, needs no XACK/PEL, and
+keeps at-least-once replay. `StreamConfig::group` is retained for config
+compatibility but is no longer used by the read path. Add two pure unit tests
+for `parse_entries`: a synthetic `XREAD` reply `[[stream, [[id, [fields]]]]]`
+and a timeout `Nil`, so the normalization is pinned without a live Redis.
 
 Add `tokio-stream = "0.1"` to `portal/Cargo.toml` (for `ReceiverStream`). Note: `futures` is already present; remove the `use futures::StreamExt;` line if unused.
 

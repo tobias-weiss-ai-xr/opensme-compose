@@ -26,7 +26,7 @@ modification of an in-flight change.
 |---|---|
 | Scope of slice 1 | Event backbone + portal real-time (foundation + visible value) |
 | Browser transport | SSE (`text/event-stream`) |
-| Backbone semantics | Redis Streams + consumer groups (durable, replayable) |
+| Backbone semantics | Redis Streams with per-connection XREAD cursors (broadcast, replayable) |
 | Event scoping | Single stream, server-side visibility filter after session auth |
 | Degradation | Fail-soft: SSE is an enhancement, 7s polling stays as fallback |
 | Implementation approach | In-process Rust event module in the portal (no new service) |
@@ -61,13 +61,16 @@ will publish/consume the same stream in later slices.
     async crate (new dependency). Connection is created lazily; the bus is
     `Option<EventSink>` in `AppConfig` so an empty/disabled config is a no-op.
   - `InMemoryEventSink` (test-only) — records events, no Redis required.
-- `subscribe(...)`: an async stream that reads from the `portal-sse` consumer
-  group with a per-connection consumer name. On connect with `Last-Event-ID`,
-  replay the connection's own pending entries (`XAUTOCLAIM`) before continuing
-  with `XREADGROUP ... >`; without it, start from the group cursor (or `$` for a
-  brand-new group). Each yielded event is serialized as
-  `event: <kind>\nid: <redis-id>\ndata: <json>\n\n` and acknowledged only after
-  successful yield.
+- `subscribe(...)`: an async stream that reads with `XREAD COUNT 10 BLOCK 1000
+  STREAMS <stream> <cursor>`. **No consumer group**: a shared group is a work
+  queue (one consumer per entry) and would silently drop events for all but one
+  viewer, and could deliver a private event to a viewer who filters it out while
+  the real recipient never sees it. Each connection owns its cursor: on connect
+  with `Last-Event-ID` the cursor is that ID (XREAD returns entries strictly
+  after it), otherwise `$` (new entries only). This broadcasts every entry to
+  every connection, needs no consumer/ack bookkeeping, and gives at-least-once
+  replay after reconnect via the browser-supplied cursor. Each yielded event is
+  serialized as `event: <kind>\nid: <redis-id>\ndata: <json>\n\n`.
 - Heartbeat `: keep-alive\n\n` every 15 s. Response headers:
   `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`,
   `X-Accel-Buffering: no`, `Connection: keep-alive`.
@@ -152,15 +155,15 @@ by this slice.
   task payload/metadata.
 - `Last-Event-ID` is a read cursor only, never an authorization input.
 - Redis password required; no secrets in event payloads; no new public port.
-- Per-session connection cap and consumer timeout bound resource usage.
+- Per-session connection cap and idle-stream timeout bound resource usage.
 
 ## Error handling and degradation
 
 - Redis unavailable at startup → bus disabled (`204` from SSE); UI keeps 7 s
   polling; writes still work through normal POST routes.
-- Stream drops → `EventSource` reconnects with `Last-Event-ID`; `XAUTOCLAIM`
-  replays pending entries; polling resumes immediately on error and is suppressed
-  only while the stream is healthy.
+- Stream drops → `EventSource` reconnects with `Last-Event-ID`; XREAD from that
+  cursor replays entries after it; polling resumes immediately on error and is
+  suppressed only while the stream is healthy.
 - Next proxy aborts upstream on client disconnect; backend `401`/`502` ends the
   stream so the client retries rather than hanging.
 - Backpressured/slow consumers are closed and rely on replay.
