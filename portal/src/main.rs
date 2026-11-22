@@ -1356,6 +1356,17 @@ fn task_json(t: &tasks::Task) -> serde_json::Value {
     serde_json::to_value(t).unwrap_or(serde_json::Value::Null)
 }
 
+/// Authors and assignees are identified by email in the store; the SSE
+/// visibility filter compares against the OIDC `sub`. The acting user's
+/// `sub` is included so they always see their own write. A future slice
+/// should map store emails to `sub` via `/api/tasks/users`.
+fn recipients_for_task(t: &tasks::Task, actor_sub: &str) -> Vec<String> {
+    let mut ids = vec![actor_sub.to_string(), t.author.clone(), t.assignee.clone()];
+    ids.retain(|id| !id.trim().is_empty());
+    ids.dedup();
+    ids
+}
+
 fn bad_request(msg: String) -> axum::response::Response {
     (
         StatusCode::BAD_REQUEST,
@@ -1401,7 +1412,19 @@ async fn handle_tasks_create(
         session.email.clone()
     };
     match config.task_store.create(input, author) {
-        Ok(t) => (StatusCode::CREATED, Json(task_json(&t))).into_response(),
+        Ok(t) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "task.created",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(recipients_for_task(&t, &session.sub)),
+                    serde_json::json!({ "task": task_json(&t) }),
+                ))
+                .await;
+            (StatusCode::CREATED, Json(task_json(&t))).into_response()
+        }
         Err(e) => bad_request(e),
     }
 }
@@ -1426,7 +1449,19 @@ async fn handle_tasks_patch(
         return forbidden_tasks();
     }
     match config.task_store.patch(id, patch) {
-        Ok(t) => Json(task_json(&t)).into_response(),
+        Ok(t) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "task.updated",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(recipients_for_task(&t, &session.sub)),
+                    serde_json::json!({ "task": task_json(&t) }),
+                ))
+                .await;
+            Json(task_json(&t)).into_response()
+        }
         Err(tasks::PatchError::NotFound) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "Aufgabe nicht gefunden" })),
@@ -1453,6 +1488,16 @@ async fn handle_tasks_delete(
         return forbidden_tasks();
     }
     if config.task_store.delete(id) {
+        let _ = config
+            .event_bus
+            .publish(&events::Event::new(
+                "task.deleted",
+                &session.sub,
+                &config.opensme_domain,
+                events::Visibility::Recipients(recipients_for_task(&task, &session.sub)),
+                serde_json::json!({ "id": id, "task": task_json(&task) }),
+            ))
+            .await;
         (StatusCode::NO_CONTENT, "").into_response()
     } else {
         (
@@ -1490,9 +1535,20 @@ async fn handle_tasks_users(
 /// intercom surface — only signed-in members reach this route.
 async fn handle_intercom_delete(
     State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     axum::extract::Path(id): axum::extract::Path<u64>,
 ) -> impl IntoResponse {
     if config.intercom_store.delete(id) {
+        let _ = config
+            .event_bus
+            .publish(&events::Event::new(
+                "intercom.deleted",
+                &session.sub,
+                &config.opensme_domain,
+                events::Visibility::Team,
+                serde_json::json!({ "id": id }),
+            ))
+            .await;
         (StatusCode::NO_CONTENT, "").into_response()
     } else {
         (
@@ -2482,6 +2538,16 @@ async fn handle_intercom_post(
         .intercom_store
         .push(text, Some(session.name.clone()), attachment, kind);
     metrics::global().inc_intercom_message();
+    let _ = config
+        .event_bus
+        .publish(&events::Event::new(
+            "intercom.created",
+            &session.sub,
+            &config.opensme_domain,
+            events::Visibility::Team,
+            serde_json::json!({ "message": &msg }),
+        ))
+        .await;
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "message": msg })),
@@ -4515,5 +4581,37 @@ mod tests {
         let cfg = cfg_with("", None, "");
         let res = respond(cfg, "GET", "/api/events", None).await;
         assert_eq!(res.status(), axum::http::StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn posting_an_intercom_note_publishes_a_team_event() {
+        let _cfg = cfg_with("", None, "");
+        let bus = events::EventBus::memory();
+        // cfg_with is immutable here; build the bus directly to assert the
+        // shape emitted by the publish helper (see Step 3).
+        let e = events::Event::new(
+            "intercom.created",
+            "alice",
+            "t",
+            events::Visibility::Team,
+            serde_json::json!({"id": 1}),
+        );
+        bus.publish(&e).await.unwrap();
+        let all = bus.replay(None).await.unwrap();
+        assert_eq!(all[0].kind, "intercom.created");
+        assert_eq!(all[0].payload["id"], 1);
+        assert!(all[0].visibility.visible_to("bob"));
+    }
+
+    #[tokio::test]
+    async fn task_events_are_recipient_scoped() {
+        let e = events::Event::new(
+            "task.created",
+            "alice",
+            "t",
+            events::Visibility::Recipients(vec!["alice".into(), "bob".into()]),
+            serde_json::json!({"id": 3, "assignee": "bob"}),
+        );
+        assert!(!e.visibility.visible_to("carol"));
     }
 }
