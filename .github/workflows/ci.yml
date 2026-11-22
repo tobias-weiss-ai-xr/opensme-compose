@@ -226,6 +226,11 @@ jobs:
     #  1. Add DOCKERHUB_USERNAME + DOCKERHUB_TOKEN repo secrets, or
     #  2. Run on a self-hosted runner with authenticated Docker.
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Job-wide (not just on the boot step): earlier journeys recreate the
+    # portal with their own `docker compose up -d portal`, which would drop a
+    # boot-step-only EVENTS_ENABLED override and silently disable the stream.
+    env:
+      EVENTS_ENABLED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -275,6 +280,8 @@ jobs:
           fi
 
       - name: Boot demo stack (generates .env with random passwords)
+        env:
+          EVENTS_ENABLED: "1"
         run: bash scripts/ci-boot-demo.sh
 
       - name: Wait for IdP and Portal
@@ -383,6 +390,8 @@ jobs:
         run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/accessibility.py opensme.local
       - name: Run rate limit journey (the edge limiter actually limits)
         run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/rate_limit.py opensme.local
+      - name: Run real-time events journey (SSE across sessions)
+        run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/realtime.py opensme.local
       - name: Run tls contract journey (legacy TLS refused, HSTS, cert window)
         run: bash scripts/ci-e2e-step.sh python3 tests/05-e2e/tls_contract.py opensme.local
       - name: Run secret surface journey (least privilege on secrets)
