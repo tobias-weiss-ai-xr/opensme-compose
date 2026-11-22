@@ -71,7 +71,10 @@ will publish/consume the same stream in later slices.
   every connection, needs no consumer/ack bookkeeping, and gives at-least-once
   replay after reconnect via the browser-supplied cursor. Each yielded event is
   serialized as `event: <kind>\nid: <redis-id>\ndata: <json>\n\n`.
-- Heartbeat `: keep-alive\n\n` every 15 s. Response headers:
+- Heartbeat `: keep-alive\n\n` after each XREAD cycle (which blocks at most
+  1 s). There is deliberately **no** sleep between cycles: a 15 s sleep after
+  a 1 s read would hold a just-published event for up to 15 s, defeating
+  real-time delivery. Response headers:
   `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`,
   `X-Accel-Buffering: no`, `Connection: keep-alive`.
 - Cap concurrent SSE connections per session (small limit, e.g. 3) and close

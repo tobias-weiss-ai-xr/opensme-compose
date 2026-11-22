@@ -548,7 +548,9 @@ pub async fn stream_events(
                 Err(e) => { tracing::warn!(error = %e, "events: stream read failed"); }
             }
             if tx.send(Ok(": keep-alive\n\n".into())).await.is_err() { return; }
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            // No sleep here: XREAD already BLOCKs up to 1 s, so the loop
+            // delivers new events within ~1 s while emitting a heartbeat
+            // every idle cycle. A 15 s sleep would stall delivery by 15 s.
         }
     });
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
