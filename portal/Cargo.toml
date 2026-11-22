@@ -25,6 +25,8 @@ base64 = "0.22"
 getrandom = "0.2"
 # Redis Streams event backbone (portal real-time intercom, slice 1).
 redis = { version = "0.27", default-features = false, features = ["tokio-comp"] }
+# SSE streaming from the Redis reader channel into axum response bodies.
+tokio-stream = "0.1"
 
 [dev-dependencies]
 # SOTA test methods:

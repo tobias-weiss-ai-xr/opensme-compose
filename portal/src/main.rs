@@ -1104,6 +1104,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
             get(handle_intercom_file),
         )
         .route("/api/services", get(handle_services))
+        .route("/api/events", get(handle_events))
         // Cloud files bridge — registered UNCONDITIONALLY so a missing
         // cloud config surfaces as a clean 503 "not configured" instead
         // of a bare 404; anonymous callers are stopped by the session
@@ -1213,6 +1214,23 @@ async fn handle_intercom_list(
         "messages": messages,
         "latest": config.intercom_store.latest_id(),
     }))
+}
+
+/// SSE stream of real-time events. Registered on the protected subrouter, so
+/// the session firewall runs first and the handler sees a verified `sub`.
+async fn handle_events(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if config.event_bus.is_disabled() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let last = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    config.event_bus.stream(session.sub.clone(), last).await
 }
 
 /// Team-notes persistence layout: INTERCOM_DATA_PATH holds the JSON store,
@@ -4482,5 +4500,20 @@ mod tests {
             after > before,
             "intercom counter should increase: {before} -> {after}"
         );
+    }
+
+    // ── SSE endpoint contract ──────────────────────────────────────────
+    #[tokio::test]
+    async fn events_endpoint_is_behind_the_session_firewall() {
+        let cfg = cfg_with("", None, "");
+        let anon = respond_anon(cfg, "GET", "/api/events").await;
+        assert_eq!(anon.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn events_endpoint_returns_204_when_bus_is_disabled() {
+        let cfg = cfg_with("", None, "");
+        let res = respond(cfg, "GET", "/api/events", None).await;
+        assert_eq!(res.status(), axum::http::StatusCode::NO_CONTENT);
     }
 }
