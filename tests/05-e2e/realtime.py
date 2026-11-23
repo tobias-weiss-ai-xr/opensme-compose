@@ -119,17 +119,17 @@ def has_kind(payloads, kind, marker=None):
     )
 
 
-def wait_for_keepalive(stream, seconds):
-    """Consume frames until the reader's first keep-alive proves XREAD is live.
+def wait_for_ready(stream, seconds):
+    """Consume frames until the backend's `ready` proves XREAD is live.
 
-    Response headers arrive before the backend spawns the XREAD loop, so a post
-    immediately after `open_stream()` can land before the cursor is set. The
-    first keep-alive is emitted only after a batch read has completed.
+    `ready` is emitted only after the cursor check is conclusive and a batch
+    read succeeded. Keep-alive comments are also sent on read-error paths, so
+    they are NOT a valid liveness proof for the delivery assertions below.
     """
     end = time.time() + seconds
     try:
         for line in stream.iter_lines(decode_unicode=True):
-            if line and line.startswith(": keep-alive"):
+            if line == "event: ready":
                 return True
             if time.time() > end:
                 break
@@ -263,7 +263,7 @@ def run_journey(result, a, b, base):
             if stream.status_code != 200:
                 result.fail(f"note leg SSE stream HTTP {stream.status_code} — delivery assertion cannot run")
                 return 1
-            if not wait_for_keepalive(stream, WINDOW):
+            if not wait_for_ready(stream, WINDOW):
                 result.fail("note leg SSE reader never became live — delivery assertion cannot run")
                 return 1
             sent["r"] = a.post(base + "/api/intercom",
@@ -296,7 +296,7 @@ def run_journey(result, a, b, base):
                 result.fail(f"task leg SSE streams not healthy (B={stream.status_code}, "
                             f"A={actor_stream.status_code}) — privacy assertion cannot run")
                 return 1
-            if not wait_for_keepalive(stream, WINDOW) or not wait_for_keepalive(actor_stream, WINDOW):
+            if not wait_for_ready(stream, WINDOW) or not wait_for_ready(actor_stream, WINDOW):
                 result.fail("task leg SSE readers never became live — privacy assertion cannot run")
                 return 1
             control["r"] = a.post(base + "/api/intercom",

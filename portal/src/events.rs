@@ -139,6 +139,9 @@ impl StreamConfig {
 #[derive(Clone)]
 enum BusInner {
     Disabled,
+    // Test/fallback backend: only unit tests construct it, but clippy checks
+    // the bin target without cfg(test) and would flag it as dead code.
+    #[allow(dead_code)]
     Memory {
         counter: Arc<AtomicU64>,
         events: Arc<tokio::sync::Mutex<Vec<Event>>>,
@@ -157,6 +160,7 @@ impl EventBus {
         Self(BusInner::Disabled)
     }
 
+    #[allow(dead_code)] // exercised by unit tests, not by the production config
     pub fn memory() -> Self {
         Self(BusInner::Memory {
             counter: Arc::new(AtomicU64::new(0)),

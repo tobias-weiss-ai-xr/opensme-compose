@@ -145,6 +145,15 @@ def main() -> int:
     except (RuntimeError, subprocess.SubprocessError) as e:
         result.fail(f"postgres restart failed: {e}")
         return 1
+    # postgres owns the shared network namespace for pgbouncer, redis and
+    # memcached (see docker-compose.yml). Restarting only postgres drops that
+    # netns; without recreating the passengers Redis-backed consumers (e.g.
+    # the portal SSE event stream) silently lose their route to redis:6379.
+    try:
+        compose("up", "-d", "pgbouncer", "redis", "memcached", timeout=180)
+    except (RuntimeError, subprocess.SubprocessError) as e:
+        result.fail(f"restarting shared-netns services after DB bounce failed: {e}")
+        return 1
     db_back = wait_pg_ready()
     idp_back = db_back and wait_healthy(session, idp_base + "/debug/ready")
     portal_back = wait_healthy(session, portal_base + "/health")
