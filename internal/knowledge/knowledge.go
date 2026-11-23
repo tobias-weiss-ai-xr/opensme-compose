@@ -22,6 +22,21 @@ type Runbook struct {
 	Flags       []string `json:"flags"`
 }
 
+// FlagRequiresConsent marks mutating remediation steps that the healer must
+// not run without DEV_AGENT_ALLOW_HEAL (dev-agent-knowledge: flags).
+const FlagRequiresConsent = "requires-consent"
+
+// RequiresConsent reports whether the runbook's remediation mutates state
+// and therefore needs explicit consent before the healer may act on it.
+func (r Runbook) RequiresConsent() bool {
+	for _, f := range r.Flags {
+		if f == FlagRequiresConsent {
+			return true
+		}
+	}
+	return false
+}
+
 // Entry is one service file.
 type Entry struct {
 	Schema    int       `json:"schema"`

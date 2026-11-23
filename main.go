@@ -21,7 +21,7 @@ import (
 	"opensme-dev-agent/internal/knowledge"
 )
 
-//go:embed opensme-knowledge
+//go:embed opensme-knowledge/*.json
 var kbFS embed.FS
 
 func main() {

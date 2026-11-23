@@ -133,3 +133,43 @@ func TestLoadRequiresKBVersion(t *testing.T) {
 		t.Error("expected error when kb_version missing (aktualität/source duty)")
 	}
 }
+
+// TestRequiresConsent — the requires-consent flag marks mutating remediation
+// (dev-agent-knowledge: flags) and is matched case-sensitively by name.
+func TestRequiresConsent(t *testing.T) {
+	cases := []struct {
+		name  string
+		flags []string
+		want  bool
+	}{
+		{"flagged", []string{"requires-consent"}, true},
+		{"flagged among others", []string{"read-only", "requires-consent"}, true},
+		{"other flag", []string{"read-only"}, false},
+		{"empty", nil, false},
+	}
+	for _, tc := range cases {
+		rb := Runbook{Flags: tc.flags}
+		if got := rb.RequiresConsent(); got != tc.want {
+			t.Errorf("%s: RequiresConsent() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestRealKBFlagsKnown — the shipped KB may only carry the documented flag;
+// a typo'ed flag name must fail the suite so it can never ship silently.
+func TestRealKBFlagsKnown(t *testing.T) {
+	fsys := os.DirFS("../..")
+	s, err := Load(fsys, "opensme-knowledge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, svc := range s.Services() {
+		for _, rb := range s.Query(svc) {
+			for _, fl := range rb.Flags {
+				if fl != FlagRequiresConsent {
+					t.Errorf("%s: unknown runbook flag %q", svc, fl)
+				}
+			}
+		}
+	}
+}

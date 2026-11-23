@@ -762,7 +762,16 @@ func (s *Server) PrintStatus() string {
 	for svc, ms := range s.matches {
 		for _, m := range ms {
 			// source duty: show where the answer came from (agent-knowledge)
-			fmt.Fprintf(&b, "  KB[%s@%s] %s → %s (source %s)\n", svc, m.KBVersion, strings.Join(m.Runbook.Symptoms, "|"), firstLine(m.Runbook.Diagnosis), m.Source)
+			consent := ""
+			if m.Runbook.RequiresConsent() {
+				consent = " [consent]"
+			}
+			fmt.Fprintf(&b, "  KB[%s@%s] %s → %s (source %s)%s\n", svc, m.KBVersion, strings.Join(m.Runbook.Symptoms, "|"), firstLine(m.Runbook.Diagnosis), m.Source, consent)
+			// Show the first remediation step so the one-shot operator output
+			// is actionable without an extra /knowledge call.
+			if len(m.Runbook.Remediation) > 0 {
+				fmt.Fprintf(&b, "     fix: %s\n", m.Runbook.Remediation[0])
+			}
 		}
 	}
 	return b.String()

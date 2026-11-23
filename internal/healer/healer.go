@@ -1,5 +1,11 @@
 // Package healer executes remediation actions with dry-run default and
 // explicit consent (dev-agent spec: heal is rejected without consent).
+//
+// Consent is global (DEV_AGENT_ALLOW_HEAL). Per-runbook consent is carried
+// by the requires-consent flag on knowledge.Runbook (Runbook.RequiresConsent)
+// and surfaced in operator output; the healer's only executable action today
+// is `restart`, which is already Allow-gated. A future mutating action (e.g.
+// per-volume prune) MUST gate on the runbook flag, not only on Allow.
 package healer
 
 import (

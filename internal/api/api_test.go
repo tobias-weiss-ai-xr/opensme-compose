@@ -325,3 +325,31 @@ func TestAnonymizeExpanded(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintStatusShowsRemediationAndConsent — the one-shot operator output
+// must show the first remediation step and a [consent] marker on runbooks
+// flagged requires-consent (dev-agent-knowledge: flags).
+func TestPrintStatusShowsRemediationAndConsent(t *testing.T) {
+	s, _ := testServer(t, false)
+	s.mu.Lock()
+	s.matches["stalwart"] = []knowledge.Match{
+		{Service: "stalwart", Source: "stalwart.json", KBVersion: "2026.10",
+			Runbook: knowledge.Runbook{
+				Symptoms:    []string{"restarting"},
+				Diagnosis:   "port collision",
+				Remediation: []string{"check bind error", "second step"},
+				Flags:       []string{"requires-consent"},
+			}},
+	}
+	s.mu.Unlock()
+	out := s.PrintStatus()
+	if !strings.Contains(out, "[consent]") {
+		t.Errorf("PrintStatus missing [consent] marker:\n%s", out)
+	}
+	if !strings.Contains(out, "fix: check bind error") {
+		t.Errorf("PrintStatus missing remediation step:\n%s", out)
+	}
+	if strings.Contains(out, "fix: second step") {
+		t.Errorf("PrintStatus should only show the FIRST remediation step:\n%s", out)
+	}
+}
