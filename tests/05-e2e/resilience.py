@@ -149,11 +149,16 @@ def main() -> int:
     # memcached (see docker-compose.yml). Restarting only postgres drops that
     # netns; without recreating the passengers Redis-backed consumers (e.g.
     # the portal SSE event stream) silently lose their route to redis:6379.
-    try:
-        compose("up", "-d", "pgbouncer", "redis", "memcached", timeout=180)
-    except (RuntimeError, subprocess.SubprocessError) as e:
-        result.fail(f"restarting shared-netns services after DB bounce failed: {e}")
-        return 1
+    # Only touch passengers that were running before the bounce: pgbouncer is
+    # `donotstart` in the demo profile, and starting it would drift runtime
+    # truth (running but not declared / mutable :latest image).
+    passengers = [s for s in ("pgbouncer", "redis", "memcached") if s in running]
+    if passengers:
+        try:
+            compose("up", "-d", "--force-recreate", *passengers, timeout=180)
+        except (RuntimeError, subprocess.SubprocessError) as e:
+            result.fail(f"restarting shared-netns services after DB bounce failed: {e}")
+            return 1
     db_back = wait_pg_ready()
     idp_back = db_back and wait_healthy(session, idp_base + "/debug/ready")
     portal_back = wait_healthy(session, portal_base + "/health")
