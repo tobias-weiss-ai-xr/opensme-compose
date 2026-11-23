@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "service": "notes",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "connection refused callback",
+        "/api/v1.0/callback/",
+        "500 on oidc callback",
+        "token exchange refused",
+        "notes sso",
+        "zitadel alias public fqdn"
+      ],
+      "diagnosis": "The zitadel service used to alias the PUBLIC ZITADEL_DOMAIN on opensme-net, so embedded DNS resolved the IdP FQDN to the zitadel container inside every compose service \u2014 where only plain :8080 listens. Every server-side OIDC backchannel (notes Django, invoiceninja Socialite, SOGo, synapse-setup, opencloud/paperless/camunda) died with connection refused at the exact step a browser login cannot recover from. Fixed by aliasing only auth.opensme.local and pinning host-gateway per dialer.",
+      "remediation": [
+        "Ensure each OIDC-backchannel service has extra_hosts: [\"${ZITADEL_DOMAIN}:host-gateway\"] (traefik on host-net :443 terminates TLS and routes by Host)",
+        "Never re-add the public FQDN as a zitadel network alias",
+        "Verify with a curl to the token endpoint from inside the service's netns or a browser code-exchange"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "jwks 404",
+        "id-token validation 500",
+        ".well-known jwks not found",
+        "oidc_op_jwks_endpoint"
+      ],
+      "diagnosis": "Zitadel serves the JWKS at /oauth/v2/keys (its discovery jwks_uri) \u2014 the conventional /.well-known/openid-configuration/jwks path is not implemented and 404s, so every callback's ID-token validation fails with a 500.",
+      "remediation": [
+        "Set OIDC_OP_JWKS_ENDPOINT: https://${ZITADEL_DOMAIN}/oauth/v2/keys in the OIDC service env",
+        "Verify the /.well-known discovery points at /oauth/v2/keys and that path answers"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "relation impress_user does not exist",
+        "relation does not exist notes",
+        "migrate before uvicorn",
+        "fresh notes db"
+      ],
+      "diagnosis": "A fresh notes database has no tables because the impress image entrypoint never runs migrations \u2014 the app starts against an empty schema and 'relation \"impress_user\" does not exist' appears.",
+      "remediation": [
+        "Run python manage.py migrate --noinput inside notes-backend BEFORE starting uvicorn",
+        "For an already-broken boot: run the migrate, then restart notes-backend"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "django_extensions importerror",
+        "django_configuration=development",
+        "notes-backend dies at import",
+        "settings package wrong"
+      ],
+      "diagnosis": "The impress image defaults to DJANGO_CONFIGURATION=Development, which appends django_extensions (absent from the image) to INSTALLED_APPS and dies at import. The image also ships a single impress/settings.py \u2014 a settings/ package module (DJANGO_SETTINGS_MODULE) breaks it.",
+      "remediation": [
+        "Set DJANGO_SETTINGS_MODULE: impress.settings and DJANGO_CONFIGURATION: Production in notes-backend env",
+        "Do NOT set a settings/ package DJANGO_SETTINGS_MODULE \u2014 the image has one settings.py"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "oom killed notes-backend",
+        "sigkill notes-backend",
+        "256m out of memory",
+        "notes-backend restarts at boot"
+      ],
+      "diagnosis": "A 256M memory limit OOM-killed the Django boot (kernel SIGKILL): the app spawns 4 multiprocessing workers, each importing Django (~185M RSS), for a ~750M baseline. The limit was raised to 1.5G.",
+      "remediation": [
+        "Keep the notes-backend memory limit at or above 1.5G",
+        "Check docker inspect opensme-notes-backend limits and dmesg for the OOM kill",
+        "Recheck after adding workers or importing heavy libraries \u2014 each import grows RSS"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "404 /oidc/callback",
+        "notes frontend sso path",
+        "router service links",
+        "notesapi pathprefix",
+        "traefik refuses auto-link"
+      ],
+      "diagnosis": "notes-frontend attaches via network_mode: service:notes-backend; without an /oidc PathPrefix router every SSO path 404s on the static SPA despite a registered Zitadel client. Traefik 2.11 refuses to auto-link when a container defines multiple services, so explicit router\u2192service links are required.",
+      "remediation": [
+        "Keep the notesapi router rule Host(notes.<domain>) && (PathPrefix(/api) || PathPrefix(/oidc)) with priority 100",
+        "Keep the traefik labels on the netns-owner container (notes-backend), not the frontend",
+        "Ensure explicit traefik.http.routers.notesapi.service=notesapi links \u2014 auto-link will not happen"
+      ],
+      "flags": []
+    }
+  ]
+}

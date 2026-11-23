@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "service": "litellm",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "401 litellm",
+        "authenticationerror litellm",
+        "litellm_master_key empty",
+        "docker run -e master key"
+      ],
+      "diagnosis": "The gateway helper container is invoked with bare 'docker run -e LITELLM_MASTER_KEY' \u2014 when the variable is not exported in the calling shell it arrives EMPTY, so the gateway answers HTTP 401 while a verbatim rerun with the key exported works. (Note: the anonymizer strips key=... patterns from evidence logs, so the empty-key cause can look like a secret leak.)",
+      "remediation": [
+        "export LITELLM_MASTER_KEY explicitly BEFORE docker run -e (keeps it off argv/process list)",
+        "Guard: if the key var is empty, warn instead of false-failing",
+        "Re-run the failing call with the key exported \u2014 same command, exported var"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "curl: not found litellm",
+        "litellm healthcheck",
+        "litellm unhealthy",
+        "crontab litellm"
+      ],
+      "diagnosis": "The litellm image ships no curl, so a curl -fs http://localhost:4000/health/liveliness healthcheck can never return clean and the container is permanently unhealthy. The ollama image has the same limitation.",
+      "remediation": [
+        "Healthcheck via python3: python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=5)\"",
+        "For ollama use `ollama ls` instead of a curl probe",
+        "Verify the gateway answers before blaming the model backend"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "litellm.apiconnectionerror",
+        "timeout on reading data from socket",
+        "econnrefused llm",
+        "unable to connect llm",
+        "gateway recreated mid-session"
+      ],
+      "diagnosis": "LiteLLM is unreachable during boot or while being recreated (another operator/fleet task or a host reboot): requests fail with 'OpenAIException - Timeout on reading data from socket' then ECONNREFUSED. This is transient \u2014 the gateway is restarting, not broken \u2014 and clients that treat it as a hard error misdiagnose the stack.",
+      "remediation": [
+        "Treat gateway unreachability as transient: retry on 429/5xx/timeouts",
+        "Fall back to a single ollamaChat call, then surface a graceful LLM error to the user",
+        "Check the litellm container health before suspecting the API key"
+      ],
+      "flags": []
+    }
+  ]
+}

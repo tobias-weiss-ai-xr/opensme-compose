@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "service": "zitadel",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
       "symptoms": ["migration failed", "setup container exited non-zero", "database does not match expected state"],
@@ -53,6 +53,26 @@
         "Verify: GET /management/v1/users/{userId} with Authorization: Bearer <pat> → 200 (users/me does NOT work for machine users)"
       ],
       "flags": []
+    },
+    {
+      "symptoms": ["invalid number of segments", "access denied opencloud", "opaque token instead of jwt", "oidc_config put self-clobber", "opencloud login failed"],
+      "diagnosis": "PUT /management/v1/projects/{pid}/apps/{id}/oidc_config treats ABSENT fields as reset-to-default. Sending the token type / redirect URIs / auth method as separate single-field PUTs means the redirect-URIs PUT reset accessTokenType back to 0/OPAQUE right after it was set to JWT — openCloud logins then fail with 'token contains an invalid number of segments' and 'Access denied'.",
+      "remediation": [
+        "Consolidate into ONE atomic PUT carrying accessTokenType + redirectUris + postLogoutRedirectUris + authMethodType together",
+        "Never split OIDC client config into per-field PUTs (absent fields reset)",
+        "Verify the stored config via the Management API after applying"
+      ],
+      "flags": ["requires-consent"]
+    },
+    {
+      "symptoms": ["end_session 400", "post_logout_redirect_uri 400", "logout error page", "post logout override", "spa logout zitadel"],
+      "diagnosis": "The SPA signs out via end_session with post_logout_redirect_uri = the app root; the opencloud registrar branch lacked the POST_LOGOUT_OVERRIDE setting, so Zitadel answered the sign-out with 400 and users landed on Zitadel's error page (live 2026-11-18).",
+      "remediation": [
+        "Register the app root + callback paths in POST_LOGOUT_OVERRIDE for the opencloud app (as is done for operaton)",
+        "Re-run the registrar with --app opencloud",
+        "Verify end_session returns to the app root without a 400"
+      ],
+      "flags": ["requires-consent"]
     }
   ]
 }

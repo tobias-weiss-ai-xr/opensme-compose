@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "service": "limesurvey",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "empty body remotecontrol",
+        "/admin/remotecontrol empty",
+        "rpcinterface",
+        "json-rpc disabled",
+        "limesurvey remotecontrol 200"
+      ],
+      "diagnosis": "LimeSurvey 6 only serves JSON-RPC when $config['RPCInterface'] = 'json' \u2014 the deployed default is 'off', yielding empty 200 responses. The patch must live INSIDE the returned 'config'=>array(...) block: top-level $config[...] assignments are discarded by the loader. config.php survives restarts but is lost on container recreate, and OPcache may serve stale bytecode after an edit.",
+      "remediation": [
+        "Patch config.php: set 'RPCInterface' => 'json' inside the returned 'config'=>array(...) block",
+        "Restart the web process (clear OPcache) or restart the limesurvey container",
+        "Re-run a remotecontrol probe to confirm a non-empty response",
+        "Add the patch to the image build (Dockerfile) so recreates keep it"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "empty body login limesurvey",
+        "200 text/html empty",
+        "get_session_key empty",
+        "false ok limesurvey",
+        "auth die empty body"
+      ],
+      "diagnosis": "On bad credentials LimeSurvey's controller die()s before emitting JSON \u2014 returning HTTP 200 text/html with an EMPTY body, indistinguishable from success to a naive client. A successful get_session_key returns a non-empty result with a 32-char session key.",
+      "remediation": [
+        "Never report OK on an empty or non-JSON body",
+        "Treat an empty body after login as auth failure, not success",
+        "Verify the session key is non-empty (32 chars on success) before using it"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "id: 0 empty body",
+        "envelope notification",
+        "get_session_key positional",
+        "legacy xml-rpc form rejected"
+      ],
+      "diagnosis": "LimeSurvey's RPC handler returns an EMPTY body whenever the envelope id is falsy (0) \u2014 it treats id:0 as a notification. The positional-array login form (legacy XML-RPC) is also rejected by this build; login must use the object form {username, password} with a non-zero, monotonically increasing id.",
+      "remediation": [
+        "Always send object-form params {username, password} (never positional arrays)",
+        "Send monotonically increasing envelope id values starting at 1 (++rpcId)",
+        "Apply to both the TS client and scripts/limesurvey-rpc.sh"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "wait 10 minutes",
+        "too many login attempts",
+        "login-attempt lockout",
+        "limesurvey locked ip"
+      ],
+      "diagnosis": "LimeSurvey rate-limits login attempts per client IP: wrong-password probes lock the client IP for ~10 minutes while the app itself is healthy \u2014 and since the lock is per IP, the internal container may be unaffected while an external script is locked, producing confusingly asymmetric behavior.",
+      "remediation": [
+        "Wait out the lockout window (~10 min) before retrying",
+        "Avoid hammering wrong passwords; single-flight session-key caching (one auth per process)",
+        "If probing from behind NAT, account for the shared egress IP"
+      ],
+      "flags": []
+    }
+  ]
+}

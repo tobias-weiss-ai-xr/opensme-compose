@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "service": "memcached",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": ["connection refused memcached", "memcached:11211 refused", "postgres bounce", "netns passenger", "orphaned netns"],
+      "diagnosis": "Memcached is the third netns passenger of postgres (network_mode: \"service:postgres\", alongside pgbouncer and redis; runs `memcached -m 2048 -c 4096 -t 4` in the shared netns). A postgres recreate without a passenger recreate orphans memcached in the dead loopback-only netns, so every cache consumer on memcached:11211 gets connection refused.",
+      "remediation": [
+        "docker compose up -d memcached after any postgres recreate / DB bounce",
+        "Verify the container is listening on 11211 inside the (current) postgres netns",
+        "Confirm a cache consumer performs a successful lookup"
+      ],
+      "flags": ["requires-consent"]
+    }
+  ]
+}

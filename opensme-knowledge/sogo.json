@@ -1,11 +1,15 @@
 {
   "schema": 1,
   "service": "sogo",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
-      "symptoms": ["no auth sources", "register a contact/user source without id", "sogo cannot authenticate"],
-      "diagnosis": "SOGo user-source registration silently skipped. In SOGo 5.x sogo.conf the user source id key must be LOWERCASE `id = x;` — the documented `ID =` is silently ignored, leaving SOGo with zero auth sources (source-verified in LDAPSource.m).",
+      "symptoms": [
+        "no auth sources",
+        "register a contact/user source without id",
+        "sogo cannot authenticate"
+      ],
+      "diagnosis": "SOGo user-source registration silently skipped. In SOGo 5.x sogo.conf the user source id key must be LOWERCASE `id = x;` \u2014 the documented `ID =` is silently ignored, leaving SOGo with zero auth sources (source-verified in LDAPSource.m).",
       "remediation": [
         "Check sogo.conf user source block for lowercase `id` key",
         "Also verify the `hostname` key spelling (not canonicalHostname)",
@@ -14,7 +18,11 @@
       "flags": []
     },
     {
-      "symptoms": ["sogo session expired", "redirect loop login", "fetching folders failed"],
+      "symptoms": [
+        "sogo session expired",
+        "redirect loop login",
+        "fetching folders failed"
+      ],
       "diagnosis": "Session/cookie domain mismatch: SOGo's SOGoTrustProxyAuthentication and the public URL must agree, or the session cookie domain doesn't match the Traefik router host, causing infinite login redirects.",
       "remediation": [
         "Compare SOGo's external URL env with the Traefik router rule host",
@@ -24,11 +32,65 @@
       "flags": []
     },
     {
-      "symptoms": ["imap connection refused sogo", "cannot connect to mail server"],
+      "symptoms": [
+        "imap connection refused sogo",
+        "cannot connect to mail server"
+      ],
       "diagnosis": "SOGo cannot reach Stalwart's IMAP port: wrong mail host in sogo.conf or the stalwart container was recreated with a new name/network alias.",
       "remediation": [
         "Verify the IMAP host/port in sogo.conf resolves inside the compose network",
         "Test reachability, then restart sogod workers"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "400 invalid_request sogo",
+        "authorize 400 callback sogo",
+        "sso login dead-end",
+        "opensme.auth.home.opensme",
+        "allow-redirect tenant"
+      ],
+      "diagnosis": "SOGo 6 derives its OIDC callback {tenant} from the USER's login domain (opensme.auth.home.opensme.graphwiz.ai = 'opensme.' + ZITADEL_DOMAIN), not the webmail host's parent. That tenant was absent from both the Zitadel client allowlist and the SOGo_D_OPENID_ALLOW_REDIRECT list, so the IdP answers authorize with 400 while a mode probe still reports kind:sso \u2014 a dead-end SSO login.",
+      "remediation": [
+        "Register the callback /api/user/v1/auth/callback/{opensme.auth.home.opensme.graphwiz.ai} (+ the .local face) in zitadel-client.sh, derived from ZITADEL_LOGIN_DOMAIN",
+        "Compute the allow-redirect list in fix-sogo-sso.sh from BOTH tenants (webmail parent AND the IdP login domain)",
+        "Re-test SSO login end-to-end, not just the mode probe"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "502 webmail",
+        "http_port 8080",
+        "salvoxia image drift",
+        "sogo healthy but 502",
+        "ports.conf rebuild"
+      ],
+      "diagnosis": "Upstream rebuilt salvoxia/sogo:latest and baked HTTP_PORT=8080 into ports.conf; the edge backend label still targeted port 80, so webmail 502s while the container stays 'healthy' \u2014 the healthcheck probes sogod on 127.0.0.1:20000, not the apache front.",
+      "remediation": [
+        "Pin HTTP_PORT: 80 in the sogo service env (or align the edge port target with the image's Listen ${HTTP_PORT})",
+        "Verify: curl :8080 \u2192 302 vs :80 \u2192 refused to see which side drifted",
+        "Recreate sogo after the env fix; re-check the edge backend label"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "relation sogo_users does not exist",
+        "sogo6_users missing",
+        "sogo users table",
+        "psql probes sogo"
+      ],
+      "diagnosis": "SOGo v6 keeps its directory in a table named 'users' (plus a separate OIDC-imported users mirror with uid/cn/mail/domain/password/enabled); legacy table names (sogo_users, sogo6_users) do not exist. The postgres service serving it runs as POSTGRES_USER with POSTGRES_DB=sogo and a role 'sogo'.",
+      "remediation": [
+        "Probe with SELECT uid, cn, mail, enabled FROM users WHERE uid LIKE '%test%'; on opensme-sogo6-postgres (db sogo)",
+        "Use the sogo6_* prefixed tables for calendar/contacts data",
+        "Do not trust legacy SOGo 5 table names in new scripts"
       ],
       "flags": []
     }

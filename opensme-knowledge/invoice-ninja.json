@@ -1,10 +1,14 @@
 {
   "schema": 1,
   "service": "invoice-ninja",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
-      "symptoms": ["502 whoops invoice ninja", "invoice ninja blank page", "php-fpm segfault"],
+      "symptoms": [
+        "502 whoops invoice ninja",
+        "invoice ninja blank page",
+        "php-fpm segfault"
+      ],
       "diagnosis": "Invoice Ninja's PHP app crashes at boot when the app key changed under an existing database (APP_KEY mismatch makes encrypted columns undecryptable) or when migrations run concurrently from scaled containers.",
       "remediation": [
         "Never change APP_KEY on an existing install without re-encrypting",
@@ -14,7 +18,10 @@
       "flags": []
     },
     {
-      "symptoms": ["mail not sending invoice ninja", "smtp timeout invoice"],
+      "symptoms": [
+        "mail not sending invoice ninja",
+        "smtp timeout invoice"
+      ],
       "diagnosis": "Invoice Ninja uses its own SMTP settings stored in the database, not the stack-wide env. Stale SMTP rows point at dead hosts after a mail server change.",
       "remediation": [
         "Update the SMTP settings in the Invoice Ninja UI/database settings",
@@ -23,23 +30,76 @@
       "flags": []
     },
     {
-      "symptoms": ["invoiceninja exit 1 mysql server has gone away", "invoiceninja pdo driver could not find driver", "invoiceninja crash loops on boot"],
-      "diagnosis": "Three independent traps when deploying invoiceninja against postgres: (1) Laravel reads DB_CONNECTION, not the DB_TYPE documented by invoiceninja — without DB_CONNECTION the mysql driver is used and fails with 'MySQL server has gone away' against postgres. (2) The upstream image only ships pdo_mysql/pdo_sqlite — 'could not find driver (Connection: pgsql)' means the pgsql PHP extension is missing entirely; it must be baked via the local build (services/invoice-ninja/Dockerfile, apk + docker-php-ext-install pdo_pgsql; build as USER root — base runs as uid 1500, image is Alpine not Debian). (3) Even with the driver, v5 migrations contain MySQL-dialect SQL (ALTER TABLE ... MODIFY COLUMN) and fail on postgres with syntax error at 'modify' — postgres is unsupported upstream; deploy the dedicated MariaDB (invoiceninja-db) instead.",
+      "symptoms": [
+        "invoiceninja exit 1 mysql server has gone away",
+        "invoiceninja pdo driver could not find driver",
+        "invoiceninja crash loops on boot"
+      ],
+      "diagnosis": "Three independent traps when deploying invoiceninja against postgres: (1) Laravel reads DB_CONNECTION, not the DB_TYPE documented by invoiceninja \u2014 without DB_CONNECTION the mysql driver is used and fails with 'MySQL server has gone away' against postgres. (2) The upstream image only ships pdo_mysql/pdo_sqlite \u2014 'could not find driver (Connection: pgsql)' means the pgsql PHP extension is missing entirely; it must be baked via the local build (services/invoice-ninja/Dockerfile, apk + docker-php-ext-install pdo_pgsql; build as USER root \u2014 base runs as uid 1500, image is Alpine not Debian). (3) Even with the driver, v5 migrations contain MySQL-dialect SQL (ALTER TABLE ... MODIFY COLUMN) and fail on postgres with syntax error at 'modify' \u2014 postgres is unsupported upstream; deploy the dedicated MariaDB (invoiceninja-db) instead.",
       "remediation": [
         "Set DB_CONNECTION (DB_TYPE is dead)",
         "Use the local build image invoiceninja-pg:5 (build: ./services/invoice-ninja) if pgsql is ever needed",
-        "Use the invoiceninja-db MariaDB service (DB_HOST=invoiceninja-db:3306) — the supported path",
+        "Use the invoiceninja-db MariaDB service (DB_HOST=invoiceninja-db:3306) \u2014 the supported path",
         "Sync the role password: ALTER USER invoiceninja_user with the .env INVOICENINJA_DB_PASSWORD if it drifted"
       ],
       "flags": []
     },
     {
-      "symptoms": ["invoiceninja 404 via traefik", "invoices router missing", "invoiceninja healthcheck fails curl connection refused"],
-      "diagnosis": "invoiceninja:5 is an FPM image — port 9000 speaks FastCGI, not HTTP. A healthcheck or traefik service pointing at localhost:9000/health fails ('connection refused' or '000'). Traefik must route to the invoiceninja-web nginx front (port 80), which serves the shared invoiceninja-public volume and fastcgi_passes to invoiceninja:9000. Note: localhost in alpine busybox resolves ::1 — nginx listens v4 only, use 127.0.0.1 in healthchecks.",
+      "symptoms": [
+        "invoiceninja 404 via traefik",
+        "invoices router missing",
+        "invoiceninja healthcheck fails curl connection refused"
+      ],
+      "diagnosis": "invoiceninja:5 is an FPM image \u2014 port 9000 speaks FastCGI, not HTTP. A healthcheck or traefik service pointing at localhost:9000/health fails ('connection refused' or '000'). Traefik must route to the invoiceninja-web nginx front (port 80), which serves the shared invoiceninja-public volume and fastcgi_passes to invoiceninja:9000. Note: localhost in alpine busybox resolves ::1 \u2014 nginx listens v4 only, use 127.0.0.1 in healthchecks.",
       "remediation": [
         "Route the traefik invoices router to invoiceninja-web:80 (host-only compose.internal.yml overrides the labels)",
         "Healthcheck fpm via pgrep php-fpm; healthcheck web via wget http://127.0.0.1:80/health",
-        "First boot takes 2-3 min (composer + migrations + seeding) — RestartCount 3-4 with exit 0 during init is normal"
+        "First boot takes 2-3 min (composer + migrations + seeding) \u2014 RestartCount 3-4 with exit 0 during init is normal"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "artisan db:update",
+        "unknown column name in set",
+        "company_settings does not exist",
+        "on duplicate key update returning",
+        "invoice ninja v5 schema"
+      ],
+      "diagnosis": "Provisioning scripts call Laravel artisan db:* commands that do NOT exist in Invoice Ninja, with PostgreSQL-only SQL. Real v5 schema: companies has no 'name' column (profile fields live in the JSON 'settings' column), tax_rates has no is_compound/type_id, there is no company_settings table, php -r cannot load Laravel models, and RETURNING id is unsupported with ON DUPLICATE KEY UPDATE on MariaDB.",
+      "remediation": [
+        "Provision via SQL through the MariaDB container (docker exec -i opensme-invoiceninja-db ...)",
+        "Match the real v5 schema: settings JSON, tax_rates, clients with matching INSERT column/value counts",
+        "Never use RETURNING ... ON DUPLICATE KEY UPDATE against MariaDB"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "extra http to https hop",
+        "302 http location invoice",
+        "auth/oidc double redirect",
+        "login slow invoice ninja"
+      ],
+      "diagnosis": "nginx absolutised the relative redirect Location: /auth/oidc against the upstream http scheme (Traefik terminates TLS), producing an extra http:// \u2192 https:// hop on every logged-out visit.",
+      "remediation": [
+        "return 302 https://$host/auth/oidc; in the nginx site config",
+        "Re-test a logged-out visit \u2014 it should reach https in one hop"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "invoiceninja healthcheck unhealthy",
+        "bootstrap/cache/config.php",
+        "php-fpm runs but unhealthy"
+      ],
+      "diagnosis": "The old invoiceninja healthcheck required bootstrap/cache/config.php, which the entrypoint may not generate \u2014 the container stays permanently 'unhealthy' although php-fpm runs and the app serves (fpm shares the netns with the -web nginx front).",
+      "remediation": [
+        "Probe http://127.0.0.1:80/health via busybox wget (verified rc=0) instead of the file check",
+        "Note: localhost in alpine busybox resolves ::1 \u2014 use 127.0.0.1 in healthchecks (nginx listens v4 only)"
       ],
       "flags": []
     }

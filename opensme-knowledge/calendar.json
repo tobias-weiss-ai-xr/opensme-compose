@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "service": "calendar",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "discovery call location_value",
+        "junk location_value",
+        "event_types slug call",
+        "vc room link missing",
+        "calrs 1.6.0 dashboard editor"
+      ],
+      "diagnosis": "calrs 1.6.0's dashboard event-type editor stores the literal title as location_value \u2014 so a seeded 'call' row got 'Discovery Call' instead of the VC room template, breaking booking links. calrs v1.6.0's CLI has no location flags, so fixing it requires a direct sqlite helper. DB: volume compose_calrs-data, /var/lib/calrs/calrs.db, owner calrs:calrs (999:999), WAL mode.",
+      "remediation": [
+        "Stop opensme-calendar (never touch the DB writable while the app is up \u2014 WAL)",
+        "One-shot helper: sudo docker run --rm -i -v compose_calrs-data:/data alpine:3.19 sh -c 'apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /data/calrs.db' ",
+        "UPDATE event_types SET location_value='https://vc.<domain>/room/{uid}' WHERE slug='call'; plus a guarded INSERT (where not exists) for a new 'chat' type",
+        "Start calendar, then docker restart opensme-calendar-radicale (passenger re-attach)",
+        "Verify the rows and /u/demo/vc returning 200"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "event type not found",
+        "/u/testuser/vc",
+        "booking url not found",
+        "event type ownership"
+      ],
+      "diagnosis": "Only the admin 'demo' account owns event types; 'testuser' (the OIDC operator account) has none \u2014 so /u/testuser/vc returns 'Event type not found' while /u/demo/vc works. Event types are per-account.",
+      "remediation": [
+        "Book and verify against the account that owns the event-type slug",
+        "When a user reports 'Event type not found', check which account owns the slug and their event type exists",
+        "Copy or recreate the event type on the target account if needed"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "zero calendars calrs",
+        "propfind zero results",
+        "calrs sync no calendars",
+        "resourcetype probe"
+      ],
+      "diagnosis": "calrs sync reports ZERO calendars when its PROPFIND/resourcetype probe doesn't match Radicale's serialization (see radicale runbook: <C:calendar /> with uppercase prefix and space). The sync then thinks no collection exists.",
+      "remediation": [
+        "Probe for the collection with PROPFIND 207 and check the resourcetype tag presence",
+        "Match the spaced/uppercase <C:calendar /> form rather than an exact lowercase string",
+        "Cross-reference the radicale resourcetype-probe runbook for the exact quirk"
+      ],
+      "flags": []
+    }
+  ]
+}

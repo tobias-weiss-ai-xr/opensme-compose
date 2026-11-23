@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "service": "postgres",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
       "symptoms": ["out of memory", "oom killed", "out of shared memory"],
@@ -32,6 +32,16 @@
         "Never bump the postgres major without a pg_dump/pg_upgrade migration"
       ],
       "flags": []
+    },
+    {
+      "symptoms": ["role create failed silently", "sogo_user does not exist", "psql do block no-op", "mail_users relation missing", "02-mail-users.sql not applied"],
+      "diagnosis": "psql does NOT interpolate :'pw' variables inside dollar-quoted DO ... $$ ... $$ bodies — role creation in such a block silently does nothing. Stalwart's sogo.mail_users init depends on a 'sogo_user' role created this way; 'relation mail_users does not exist' means postgres-init/02-mail-users.sql was never applied.",
+      "remediation": [
+        "Create roles with plain statements and shell-side SQL-literal escaping for the password (pipe it), not :'pw' inside DO blocks",
+        "Verify afterwards: role \"sogo_user\" exists and SELECT COUNT(*) FROM mail_users; returns a count",
+        "If mail_users is missing, apply postgres-init/02-mail-users.sql and re-run the role creation"
+      ],
+      "flags": ["requires-consent"]
     }
   ]
 }

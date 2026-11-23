@@ -1,11 +1,15 @@
 {
   "schema": 1,
   "service": "traefik",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
-      "symptoms": ["acme rate limit", "too many certificates", "letsencrypt error"],
-      "diagnosis": "Let's Encrypt rate limits hit — usually after repeated re-creation of the traefik container with a lost acme.json or a wildcard/san burst. The LE staging/duplicate limit is 5 failures per hour, 50 certs per week per domain.",
+      "symptoms": [
+        "acme rate limit",
+        "too many certificates",
+        "letsencrypt error"
+      ],
+      "diagnosis": "Let's Encrypt rate limits hit \u2014 usually after repeated re-creation of the traefik container with a lost acme.json or a wildcard/san burst. The LE staging/duplicate limit is 5 failures per hour, 50 certs per week per domain.",
       "remediation": [
         "Stop recreating the traefik container; preserve the acme.json volume across restarts",
         "Verify the requested domains (duplicate certificate limit is 5/week)",
@@ -15,7 +19,11 @@
       "flags": []
     },
     {
-      "symptoms": ["router missing", "404 for service", "no certificate issued"],
+      "symptoms": [
+        "router missing",
+        "404 for service",
+        "no certificate issued"
+      ],
       "diagnosis": "Traefik did not pick up the dynamic config or the target container has no matching router labels/network attachment. Most common in this stack: service is on a different compose network than traefik, or the router rule host mismatches the requested domain.",
       "remediation": [
         "Confirm the service shares the traefik network (opensme-net)",
@@ -26,13 +34,70 @@
       "flags": []
     },
     {
-      "symptoms": ["permission denied acme.json", "acme load error"],
+      "symptoms": [
+        "permission denied acme.json",
+        "acme load error"
+      ],
       "diagnosis": "acme.json must be 0600; Docker volume copies can reset permissions and traefik refuses to start with a world-readable acme file.",
       "remediation": [
         "chmod 600 the acme.json inside the traefik-data volume",
         "Restart traefik"
       ],
-      "flags": ["requires-consent"]
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "portal-https 502",
+        "portal-web router shadows",
+        "router priority portal",
+        "443 502 demo",
+        "dead :3000 backend"
+      ],
+      "diagnosis": "The base compose's portal-web router (priority 100, backend :3000 \u2014 the Next app NOT running under the demo profile) shadowed the demo profile's portal-https router (default rule-length priority ~32): every portal request, including the https bounce, answered 502 against the dead :3000 backend.",
+      "remediation": [
+        "Raise traefik.http.routers.portal-https.priority=200 in the demo profile",
+        "Verify the https router wins over portal-web on :443",
+        "Re-test portal load over https"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "standin routers.yml hardcoded ip",
+        "daemon restart shuffled ip",
+        "portal-standin .21",
+        "webmail-standin .7",
+        "mail-home-standin .22"
+      ],
+      "diagnosis": "The fleet Traefik's docker-provider event stream dies after docker-daemon restarts on this OpenVZ host; the file-provider standin routers pin hardcoded backend IPs (portal-standin\u2192.21:8080, webmail-standin\u2192.7:3000, mail-home-standin\u2192.22:8080) that a restart reshuffled (portal moved to .5, stalwart to .18) \u2014 stale pins 502.",
+      "remediation": [
+        "Refresh the standin IP=port pins after any docker-daemon restart (roles refresh after deploy)",
+        "Prefer service-name DNS over hardcoded IPs where possible",
+        "Verify each standin router against the current container IP before relying on it"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "uses a nonexistent resolver letsencrypt",
+        "certresolver letsencrypt 404",
+        "calendar router 404",
+        "vc-room 404",
+        "system-traefik profile"
+      ],
+      "diagnosis": "The calendar/calendar-dav/vc-room routers kept certresolver=letsencrypt from the built-in traefik; under profiles/system-traefik.yml that resolver does not exist, so the routes 404. The fix attaches them to traefik-web and re-points the three routers at the mytlschallenge resolver (calendar-radicale keeps its pinned static address).",
+      "remediation": [
+        "Apply the router overrides: attach calendar/calendar-dav/vc-room to traefik-web with certresolver=mytlschallenge",
+        "docker compose --profile system-traefik up -d",
+        "Verify the calendar and vc-room routes answer on https"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
     }
   ]
 }

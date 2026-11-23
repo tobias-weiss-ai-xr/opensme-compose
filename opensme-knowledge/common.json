@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "service": "common",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
       "symptoms": ["image pull backoff", "imagepullbackoff", "errimagepull", "manifest unknown"],
@@ -66,6 +66,16 @@
         "If exit code 137: increase memory limit or check for memory leaks",
         "For other exit codes: check logs for the application error",
         "Consider setting restart_policy condition: on-failure with max_attempts"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": ["network_mode passenger", "orphaned in dead netns", "up --wait passenger", "netns owner recreated", "loopback only netns"],
+      "diagnosis": "Several services share another container's network namespace (network_mode: \"service:<owner>\"): pgbouncer/redis/memcached→postgres, calendar-radicale→calendar, portal-web→portal, invoiceninja fpm/web→invoiceninja-web, notes-frontend→notes-backend. Recreating or restarting ONLY the owner (docker compose up --wait <owner>) leaves the passengers running in the orphaned OLD netns, which has loopback only — every consumer gets connection refused while the owner looks healthy. Observed live across four independent incidents.",
+      "remediation": [
+        "Always bring owner and passengers up together: docker compose up -d --wait <owner> <passenger>...",
+        "When only the owner changed, explicitly recreate the passengers so they re-attach",
+        "Verify with a connection test FROM a passenger consumer, not just docker compose ps"
       ],
       "flags": []
     }

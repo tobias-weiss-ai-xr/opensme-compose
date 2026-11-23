@@ -1,21 +1,31 @@
 {
   "schema": 1,
   "service": "stalwart",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
-      "symptoms": ["listener flapping", "accept loop restarts", "bind address already in use"],
+      "symptoms": [
+        "listener flapping",
+        "accept loop restarts",
+        "bind address already in use"
+      ],
       "diagnosis": "Stalwart listener flapping in this stack is typically a port collision (another container or the host claims 25/465/587/993) or a config reload loop where the listener references a certificate that fails to load, making the listener bounce.",
       "remediation": [
         "Check stalwart logs for the specific listener bind error",
         "Verify certificate files exist and are readable for the listener's TLS config",
         "Confirm no port conflict with the host or other containers",
-        "Restart stalwart only after the cause is fixed — blind restarts churn the flap"
+        "Restart stalwart only after the cause is fixed \u2014 blind restarts churn the flap"
       ],
-      "flags": ["requires-consent"]
+      "flags": [
+        "requires-consent"
+      ]
     },
     {
-      "symptoms": ["authentication failed imap", "smtp auth error", "535 authentication credentials invalid"],
+      "symptoms": [
+        "authentication failed imap",
+        "smtp auth error",
+        "535 authentication credentials invalid"
+      ],
       "diagnosis": "Credential source mismatch: Stalwart's auth directory must point at the same user store the client expects (Zitadel OIDC or internal). After an IdM change, cached IMAP sessions keep old tokens while new ones fail.",
       "remediation": [
         "Check which auth mechanism the failing client uses",
@@ -25,12 +35,81 @@
       "flags": []
     },
     {
-      "symptoms": ["mail loop", "relay access denied", "554 permanent error"],
+      "symptoms": [
+        "mail loop",
+        "relay access denied",
+        "554 permanent error"
+      ],
       "diagnosis": "Outbound relay refused: the smarthost/relay config or SPF-related rejection. In this stack outbound mail goes through the configured relay; a wrong relay host yields 554 on submission.",
       "remediation": [
         "Inspect the queue for the failing recipient domain",
         "Verify relay host credentials and network reachability",
         "Check the rejection reason before changing DNS/SPF"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "xoauth2 timeout",
+        "access token invalid",
+        "userinfo timeout",
+        "app-password 401",
+        "ufw blocks 8081",
+        "idpplain backchannel"
+      ],
+      "diagnosis": "Stalwart (directory=oidc) validates every token via http://$ZITADEL_DOMAIN:8081/..., resolved by the fleet pin to host-gateway :8081 (host traefik). ufw INPUT DROP blocks container\u2192host :8081, so userinfo calls hang: IMAP AUTHENTICATE XOAUTH2 times out, POST /api/account/auth (app passwords) 401s, and stale sessions report 'access token invalid'.",
+      "remediation": [
+        "Allow the container subnet to reach host port 8081/tcp in ufw (comment 'opensme idpplain backchannel (stalwart userinfo)')",
+        "Persist the rule in the ansible web_hosts firewall role (mirrors the tinyproxy 8888 precedent)",
+        "Re-test XOAUTH2 login and app-password minting (scripts/stalwart-app-password.sh)"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "550 mailbox does not exist",
+        "rcpt 550 broadcast",
+        "no mailbox stalwart",
+        "multi-recipient smtp fails"
+      ],
+      "diagnosis": "Stalwart principals auto-provision on first SSO login \u2014 on fresh stacks only a few users (e.g. testuser) have real mailboxes, so multi-recipient SMTP to others fails with 550. Also only app passwords work on IMAP (OIDC directory; demo passwords refused).",
+      "remediation": [
+        "Send per-recipient best-effort: deliver to existing mailboxes, report the missing ones",
+        "Never rely on a single multi-recipient message; a 550 kills the whole submission",
+        "Delivering evidence: server log from=..., to=[...], code=250 + 'Delivery completed'"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "connection unexpectedly closed",
+        "rcpt session drop",
+        "many recipients",
+        "65s fresh connect"
+      ],
+      "diagnosis": "A single message with ~14 RCPTs makes Stalwart drop the SMTP session ('Connection unexpectedly closed'); a fresh TCP connect per recipient adds ~4.5s each (14 serial \u2248 65s).",
+      "remediation": [
+        "Per-recipient sends with ~5 parallel workers (~5s total)",
+        "Give the client a generous timeout (SCRIPT_TIMEOUT_MS 60s)",
+        "Log per-recipient delivery, not one big transaction"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "filed to junk",
+        "dmarc fail",
+        "delivery completed but in junk",
+        "invoice not in invoices",
+        "sieve fileinto"
+      ],
+      "diagnosis": "A sending domain without DMARC alignment gets the test invoice filed to Junk by Stalwart's spam filter. Intake relies on a sieve 'fileinto' rule to a local INvoices folder (server-managed sieve; Stalwart 0.15 has no automount).",
+      "remediation": [
+        "Install the sieve rule via the Stalwart admin API (--print-sieve from scripts/paperless-intake.sh)",
+        "Whitelist / fix SPF\u00b7DKIM\u00b7DMARC for the sending domain, or verify messages landed out of Junk before relying on intake",
+        "Check the Junk folder first when 'delivery completed' but no document appears"
       ],
       "flags": []
     }

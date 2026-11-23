@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "service": "redis",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "connection refused redis",
+        "redis:6379 refused",
+        "netns passenger",
+        "sse stream went silent",
+        "postgres recreate",
+        "orphaned netns"
+      ],
+      "diagnosis": "Redis is a netns passenger of postgres (network_mode: \"service:postgres\") \u2014 the infra quartet (pgbouncer/redis/memcached) shares postgres's network namespace. Recreating only the owner (postgres recreate/DB bounce) leaves redis orphaned in the dead loopback-only netns, so every consumer of redis:6379 gets connection refused \u2014 seen live as an SSE event stream silently losing its route to redis.",
+      "remediation": [
+        "docker compose up -d pgbouncer redis memcached (recreate the passengers so they re-attach to the current postgres netns)",
+        "Verify: docker exec opensme-redis redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping \u2192 PONG",
+        "Re-test the affected consumer (event stream / cache / queue)"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "127.0.0.1:6379 refused",
+        "redis connection refused laravel",
+        "redis_host lost",
+        "invoiceninja crash loop redis"
+      ],
+      "diagnosis": "Redis answers on opensme-net as `redis` with requirepass (it is a netns passenger of postgres \u2014 nothing publishes it on host loopback). Invoice Ninja's REDIS_HOST used to live only in the .env baked into the image layer on first boot; every recreate loses it, Laravel falls back to 127.0.0.1:6379 and every session/cache/migration call is refused.",
+      "remediation": [
+        "Declare REDIS_HOST: redis and REDIS_PASSWORD: ${REDIS_PASSWORD} explicitly in BOTH the invoiceninja-fpm and invoiceninja-worker environment blocks (services/invoice-ninja.yml)",
+        "docker compose --profile invoice up -d --force-recreate invoiceninja-fpm invoiceninja-worker",
+        "Confirm the containers now resolve redis on opensme-net, not 127.0.0.1"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "kombu authenticationerror",
+        "celery broker auth redis",
+        "celery worker offline redis",
+        "500 on /api/v1.0/documents/",
+        "docs/new never loads"
+      ],
+      "diagnosis": "The lasuite/impress-backend image defaults CELERY_BROKER_URL to a passwordless broker URL on redis:6379/0 while this stack's redis requires AUTH. Worse, django-configurations reads env with prefix 'DJANGO', so a plain CELERY_BROKER_URL (no DJANGO_ prefix) is silently ignored and the celery task queue stays broken.",
+      "remediation": [
+        "Set DJANGO_CELERY_BROKER_URL in the notes-backend environment (services/notes.yml): scheme 'redis', host redis, db /0, with the AUTH password interpolated from ${REDIS_PASSWORD} (never a literal secret)",
+        "Recreate notes-backend",
+        "Verify: POST /api/v1.0/documents/ returns 201 (was 500 with broker AuthenticationError)"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    }
+  ]
+}

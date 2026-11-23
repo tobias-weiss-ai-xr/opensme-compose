@@ -1,21 +1,31 @@
 {
   "schema": 1,
   "service": "opencloud",
-  "kb_version": "2026.10",
+  "kb_version": "2026.11",
   "runbooks": [
     {
-      "symptoms": ["startup race", "data race warning", "opencloud exits at boot"],
+      "symptoms": [
+        "startup race",
+        "data race warning",
+        "opencloud exits at boot"
+      ],
       "diagnosis": "OpenCloud 6.0.0 had a startup data race with default GOMAXPROCS on multi-core hosts; the fix in this stack is GOMAXPROCS=1 for the startup phase. If the env var was dropped in an image bump, the race returns.",
       "remediation": [
         "Verify GOMAXPROCS=1 is set in the opencloud service environment",
         "Check the oc_notifications/oc_* SMTP env names have the OC_ prefix where required",
         "Restart opencloud after the env fix"
       ],
-      "flags": ["requires-consent"]
+      "flags": [
+        "requires-consent"
+      ]
     },
     {
-      "symptoms": ["s3 backend error", "storage not available", "bucket not found"],
-      "diagnosis": "The S3/Garage backend env (endpoint, bucket, credentials) is misconfigured. In this stack opencloud may use the built-in ocis (local FS) backend instead — a mixed config (some services on S3, some local) surfaces as missing files after a restart.",
+      "symptoms": [
+        "s3 backend error",
+        "storage not available",
+        "bucket not found"
+      ],
+      "diagnosis": "The S3/Garage backend env (endpoint, bucket, credentials) is misconfigured. In this stack opencloud may use the built-in ocis (local FS) backend instead \u2014 a mixed config (some services on S3, some local) surfaces as missing files after a restart.",
       "remediation": [
         "Confirm which storage backend the current config selects (OC_* storage env)",
         "If S3: verify bucket exists and credentials work from inside the container",
@@ -24,13 +34,101 @@
       "flags": []
     },
     {
-      "symptoms": ["oidc issuer error opencloud", "token exchange failed"],
-      "diagnosis": "OpenCloud's OIDC issuer URL must be the externally reachable IdM URL, not the internal service name — token validation happens against the issuer metadata.",
+      "symptoms": [
+        "oidc issuer error opencloud",
+        "token exchange failed"
+      ],
+      "diagnosis": "OpenCloud's OIDC issuer URL must be the externally reachable IdM URL, not the internal service name \u2014 token validation happens against the issuer metadata.",
       "remediation": [
         "Set the OIDC issuer to the public IdM URL",
         "Ensure opencloud can reach that URL from inside the compose network (hairpin NAT or split DNS)"
       ],
       "flags": []
+    },
+    {
+      "symptoms": [
+        "path escapes from parent",
+        "openat2",
+        "docker exec fails rc=126",
+        "opencloud unhealthy but serving",
+        "nix image symlink passwd"
+      ],
+      "diagnosis": "The nix-built opencloud image symlinks /etc/passwd and /etc/group into /nix/store; docker >= 29 exec walks them with openat2 RESOLVE_BENEATH and rejects the symlinks \u2014 every docker exec and in-container healthcheck fails (rc=126) while the app itself serves fine.",
+      "remediation": [
+        "Use the execfix image build (opencloud/execfix/): COPY real passwd/group files into /etc/ from a plain FROM base \u2014 no RUN step, since RUN itself needs exec",
+        "Rebuild opensme-opencloud:9.1.0-nix-execfix and redeploy",
+        "Or set the opencloud healthcheck to none and rely on external monitoring (edge static IP)"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "401 basic-auth opencloud",
+        "bind rejected idm",
+        "umfragen-bot 401",
+        "8.0 to 9.0 migration",
+        "oc_admin_password"
+      ],
+      "diagnosis": "OpenCloud 8.x aligned the proxy/auth-basic/graph/idm bind passwords implicitly; 9.x generates per-service values when left unset \u2014 so the bind is rejected and every basic-auth login 401s. Stack-side automated binders (e.g. umfragen-bot) did not survive the 8\u21929 idm migration.",
+      "remediation": [
+        "Pin all binders explicitly (OC_ADMIN_PASSWORD and the idm/proxy/auth-basic bind envs) in the opencloud service environment",
+        "Recreate the affected bot account via the Graph API (stack-specific)",
+        "Verify a basic-auth login returns 200, not 401"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "metadata prefix is already set",
+        "panic at opencloud boot",
+        "notifications_smtp_sender empty",
+        "fresh demo boot crashes"
+      ],
+      "diagnosis": "A fresh demo boot can crash two ways: (1) storage-users (ocis driver) uses metadata prefix user.ocis. while storage-system defaults to user.oc. \u2192 'metadata prefix is already set' panic; (2) the notifications service fatally validates an empty NOTIFICATIONS_SMTP_SENDER at startup (the live stack sets it via .env, the demo profile doesn't).",
+      "remediation": [
+        "Set OC_METADATA_PREFIX: user.ocis. for the demo/fresh profile",
+        "Provide NOTIFICATIONS_SMTP_SENDER (+ HOST/PORT/AUTHENTICATION/TLS_INSECURE) defaults for fresh boots",
+        "Recreate the service for fresh (non-persisted config volume) boots after the env fix"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "ocis proxy 404 on /",
+        "oc_url scheme mismatch",
+        "opencloud web ui broken",
+        "catalog tile 404"
+      ],
+      "diagnosis": "The demo profile pinned OC_URL to http://... while the edge serves :443 \u2014 the ocis proxy answers / with 404 because the configured proxy URL scheme doesn't match the request. The OIDC issuer must stay https (OpenCloud refuses plain-http issuers).",
+      "remediation": [
+        "Set OC_URL: https://${OPENCLOUD_DOMAIN} when the edge terminates :443",
+        "Keep OC_OIDC_ISSUER on https",
+        "Recreate opencloud after the env change"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "no configured subnet contains ip address",
+        "static ip stolen",
+        "opencloud static ip lost",
+        "postgres holds opencloud ip",
+        "restart order conflict"
+      ],
+      "diagnosis": "opensme-opencloud claims a static IP on opensme-net (traefik depends on it); postgres is dynamic and grabbed the address while opencloud was down after a host/docker restart \u2014 opencloud then cannot bind its static IP. The disconnect/reconnect of postgres also DROPS its netns name alias, which caused zitadel database errors afterwards.",
+      "remediation": [
+        "docker network disconnect opensme-net opensme-postgres",
+        "docker compose up -d --no-deps opencloud to reclaim the static address",
+        "Re-attach postgres and RESTORE the name alias: docker network connect --alias postgres opensme-net opensme-postgres",
+        "Verify zitadel can reach postgres again (alias restored) before declaring done"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
     }
   ]
 }

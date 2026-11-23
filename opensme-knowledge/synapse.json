@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "service": "synapse",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": ["unrecognized request", "legacy prefixes", "r0 is unrecognized", "r3 is unrecognized", "matrix 404 client api"],
+      "diagnosis": "Synapse (1.162.0) removed the legacy API prefixes — /r0/... requests are rejected and /r3/... does not exist at all; only /_matrix/client/v3/ answers. Scripts and bots written against older Matrix client APIs (booking-notify, ai-room-bot, broadcast logic) silently fail with 404.",
+      "remediation": [
+        "Point all client calls at /_matrix/client/v3/... endpoints",
+        "Keep the v3 alias resolution and txnId-idempotent sends (retry-safe)",
+        "Update any hardcoded /r0/ or /r3/ URLs in scripts that message rooms"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": ["u_398171505348837396", "duplicate mxid", "two accounts same user", "ss zero-click sso", "confirm redirect", "sso interstitial"],
+      "diagnosis": "Synapse SSO used the default localpart_template 'u_<sub>', binding the Zitadel SSO identity to a second u_* account instead of the provisioned @user — and allow_existing_users was unset so the mapping could not bind to the existing account. Missing sso.client_whitelist also forced users through a security 'confirm redirect' interstitial.",
+      "remediation": [
+        "In synapse-setup.sh: map Zitadel preferred_username via localpart_template with u_<sub> fallback",
+        "Set allow_existing_users: true so SSO binds the provisioned account",
+        "Set sso.client_whitelist to the Element host",
+        "Migrate: pre-bind all demo users to their provisioned mxids and deactivate the orphan u_* accounts"
+      ],
+      "flags": ["requires-consent"]
+    },
+    {
+      "symptoms": ["429 retry_after_ms", "m.room.message rate limited", "synapse register mac mismatch", "synapse register empty response"],
+      "diagnosis": "Three recurring Matrix client pitfalls: (1) the register endpoint needs a MAC computed over the exact (hashed) password bytes sent; (2) docker exec needs -i to deliver a python heredoc on stdin for the MAC script; (3) building curl args via $(...) word-splits an 'Authorization: Bearer <PAT>' header into separate argv words, corrupting the request. 429 responses carry retry_after_ms but naive clients ignore it.",
+      "remediation": [
+        "Compute the register MAC over the exact byte string you send",
+        "Use docker exec -i when piping a heredoc into the container",
+        "Build curl args in a bash array, never $(...)-word-split auth headers",
+        "Honor retry_after_ms from 429s with backoff before retrying"
+      ],
+      "flags": []
+    }
+  ]
+}

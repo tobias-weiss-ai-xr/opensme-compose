@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "service": "radicale",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": [
+        "connection refused calendar-radicale",
+        "calendar-radicale:5232 refused",
+        "502 /dav",
+        "netns passenger",
+        "orphaned netns",
+        "calrs sync connection refused"
+      ],
+      "diagnosis": "calendar-radicale deliberately shares the calendar container's netns (network_mode: \"service:calendar\", pinned static IP on opensme-net; traefik labels moved to calendar). 'docker compose up --wait calendar' recreates the netns owner but NOT the passenger \u2014 radicale keeps running in the orphaned old netns (loopback only) \u2014 so calrs sync to http://calendar-radicale:5232/ fails with 'tcp connect error: Connection refused (os error 111)' and the edge /dav route 502s, while the compose command itself exits 0.",
+      "remediation": [
+        "docker compose up -d --wait calendar calendar-radicale (bring owner AND passenger up together)",
+        "Verify a calendar sync lands (Last Synced updates) and /u/demo/vc returns 200",
+        "Keep the calendar-setup step that brings up the pair as one step"
+      ],
+      "flags": [
+        "requires-consent"
+      ]
+    },
+    {
+      "symptoms": [
+        "mkcalendar",
+        "409 on existing collection",
+        "<c:calendar/>",
+        "zero calendars",
+        "resourcetype probe"
+      ],
+      "diagnosis": "Radicale serializes a collection's resourcetype with an uppercase prefix and a space (<C:calendar />), so scripts that grep for '<c:calendar/>' never match \u2014 they fall through and issue MKCALENDAR on an existing collection, getting a benign 409. A calrs sync that relies on the probe can report 'zero calendars'.",
+      "remediation": [
+        "Probe for the spaced/uppercase form <C:calendar /> or use PROPFIND 207 and check the tag presence",
+        "Treat MKCALENDAR 409 on an existing collection as a warn, not an error"
+      ],
+      "flags": []
+    },
+    {
+      "symptoms": [
+        "caldav subscription https-only",
+        "sogo rejects private ip",
+        "calendar.<host>/dav edge route",
+        "radicale htpasswd"
+      ],
+      "diagnosis": "SOGo's ICS/CalDAV fetcher is https-only and rejects private IPs, so the booking store is exposed read-only at the edge on calendar.<host>/dav/ with Radicale htpasswd on top of the edge route (RADICALE_USER/RADICALE_PASSWORD) \u2014 the internal http address must never be handed to SOGo's subscription.",
+      "remediation": [
+        "Keep the edge /dav route with basic-auth (radicale htpasswd) for SOGo subscriptions and calrs",
+        "Never point a SOGo subscription at an internal http:// IP",
+        "When adding/removing edge auth, update calrs and SOGo together \u2014 they share the route"
+      ],
+      "flags": []
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "service": "pgbouncer",
+  "kb_version": "2026.11",
+  "runbooks": [
+    {
+      "symptoms": ["connection refused pgbouncer", "pgbouncer:6432 refused", "postgres bounce", "netns passenger", "orphaned netns"],
+      "diagnosis": "PgBouncer is a netns passenger of postgres (network_mode: \"service:postgres\"). A postgres recreate or DB bounce without a passenger recreate orphans pgbouncer in the dead loopback-only netns — every app that dials pgbouncer:6432 (notes, operaton, paperless, ...) gets connection refused while docker compose itself may look fine.",
+      "remediation": [
+        "docker compose up -d pgbouncer after any postgres recreate / DB bounce",
+        "Check docker compose ps shows pgbouncer up",
+        "Confirm a consumer (e.g. paperless or operaton) reconnects to pgbouncer:6432"
+      ],
+      "flags": ["requires-consent"]
+    },
+    {
+      "symptoms": ["too many clients pgbouncer", "pgbouncer pool exhausted", "pausing pgbouncer"],
+      "diagnosis": "Connection exhaustion at the pool: a service is leaking connections, or pool_mode does not match the workload (transaction pooling breaks session-level features like prepared statements / advisory locks).",
+      "remediation": [
+        "Identify the leaking client via pg_stat_activity (client_addr counts) on postgres",
+        "Verify PgBouncer pool_mode matches the service's expectations (session vs transaction)",
+        "Restart the leaking service before touching pgbouncer"
+      ],
+      "flags": []
+    }
+  ]
+}
