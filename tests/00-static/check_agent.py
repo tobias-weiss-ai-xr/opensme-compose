@@ -26,8 +26,12 @@ KB = ROOT / "opensme-knowledge"
 KNOWLEDGE_CONTRACT = ROOT / "contracts" / "knowledge.yml"
 AGENTS_CONTRACT = ROOT / "contracts" / "agents.yml"
 CORE_SERVICES = {
+    # Core set per openspec dev-agent-knowledge: the 8 pillar services plus
+    # operaton and common (cross-cutting) — matches internal/knowledge's
+    # TestRealKB. Keep in sync with openspec/specs/dev-agent-knowledge.
     "traefik", "postgres", "zitadel", "stalwart",
     "sogo", "opencloud", "invoice-ninja", "paperless",
+    "operaton", "common",
 }
 SERVICE = "dev-maintenance-bot"
 WRITE_MODES = {"none", "draft", "consent", "approved"}
@@ -60,6 +64,7 @@ def check_knowledge() -> list[str]:
     if not KB.is_dir():
         return [f"{KB}: knowledge base directory missing"]
     seen = set()
+    versions = set()
     for f in sorted(KB.glob("*.json")):
         try:
             doc = json.loads(f.read_text())
@@ -72,6 +77,8 @@ def check_knowledge() -> list[str]:
             # agent-knowledge: aktualität — every runbook file must carry a
             # version the answer evidence can point at (source duty)
             errors.append(f"{f.name}: missing kb_version (aktualität / source duty)")
+        else:
+            versions.add(doc["kb_version"])
         svc = doc.get("service", "")
         if svc != f.stem:
             errors.append(f"{f.name}: service {svc!r} does not match file name")
@@ -82,6 +89,9 @@ def check_knowledge() -> list[str]:
         for hit in KBLeak(doc):
             errors.append(f"{f.name}: PII leak {hit}")
         seen.add(svc)
+    # aktualität is per-release: a mixed-version KB ships stale files.
+    if len(versions) > 1:
+        errors.append(f"kb_version must be uniform across the KB, got {sorted(versions)}")
     missing = CORE_SERVICES - seen
     if missing:
         errors.append(f"core services without runbook: {sorted(missing)}")
