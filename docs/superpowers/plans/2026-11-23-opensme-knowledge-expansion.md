@@ -138,10 +138,10 @@ the compose network, never a literal private range in the repo); persist in ansi
 
 ### A11. Schema/version bump + validation
 
-- [ ] Bump `"kb_version": "2026.10"` → `"2026.11"` in ALL 19 KB files (existing + new).
-- [ ] Validate every file: `python3 -c` JSON parse loop; then `python3 tests/00-static/check_agent.py` (expect PASS).
-- [ ] Add `opensme-knowledge` files stay PII-free: symptom strings contain no hosts/IPs/paths (verify by eyeball; check_agent.py KBLeak enforces the rest).
-- [ ] Commit Part A.
+- [x] Bump `"kb_version": "2026.10"` → `"2026.11"` in ALL 19 KB files (existing + new).
+- [x] Validate every file: `python3 -c` JSON parse loop; then `python3 tests/00-static/check_agent.py` (expect PASS).
+- [x] Add `opensme-knowledge` files stay PII-free: symptom strings contain no hosts/IPs/paths (verify by eyeball; check_agent.py KBLeak enforces the rest).
+- [x] Commit Part A.
 
 ---
 
@@ -153,9 +153,9 @@ the compose network, never a literal private range in the repo); persist in ansi
 ### B2. kb_version consistency check
 In `check_knowledge()` (after line 79), collect `doc.get("kb_version")` for every file; if the set has >1 distinct value → error `kb_version must be uniform, got {set}`. Rationale: aktualität is per-release; mixed versions mean a stale file shipped.
 
-- [ ] Edit `tests/00-static/check_agent.py`.
-- [ ] Run `python3 tests/00-static/check_agent.py` — PASS.
-- [ ] Commit Part B.
+- [x] Edit `tests/00-static/check_agent.py`.
+- [x] Run `python3 tests/00-static/check_agent.py` — PASS.
+- [x] Commit Part B.
 
 ---
 
@@ -205,9 +205,9 @@ Test in `internal/api/api_test.go` (or a new focused test): build a Store from a
 
 Per-runbook healer *enforcement* beyond the global `DEV_AGENT_ALLOW_HEAL` gate is deliberately NOT added: the healer only executes `restart`, which is already Allow-gated, and remediation steps are advisory text — there is no action executor consuming them yet. `RequiresConsent()` (C1) + PrintStatus markers (C2) give the flag live consumers now; a future mutating action (e.g., `prune` of a specific volume) will gate on the flag. Add one sentence to `internal/healer/healer.go` package comment noting this.
 
-- [ ] Apply C1–C4 edits (careful review; no local go toolchain).
-- [ ] Sanity: `python3 -c "import json;[json.load(open(f)) for f in __import__('glob').glob('opensme-knowledge/*.json')]"` (JSON intact).
-- [ ] Commit Part C with message noting CI verifies `go test`/`go build`.
+- [x] Apply C1–C4 edits (careful review; no local go toolchain).
+- [x] Sanity: `python3 -c "import json;[json.load(open(f)) for f in __import__('glob').glob('opensme-knowledge/*.json')]"` (JSON intact).
+- [x] Commit Part C with message noting CI verifies `go test`/`go build`.
 
 ---
 

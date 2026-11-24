@@ -40,7 +40,7 @@
 - Create: `portal/src/events.rs`
 - Modify: `portal/src/main.rs` (add `mod events;` at the module list near line 20)
 
-- [ ] **Step 1: Write the failing tests** — append a `#[cfg(test)] mod tests` to `portal/src/events.rs` with the exact content below (the module itself initially only contains `use serde::Serialize;` so the tests fail to compile).
+- [x] **Step 1: Write the failing tests** — append a `#[cfg(test)] mod tests` to `portal/src/events.rs` with the exact content below (the module itself initially only contains `use serde::Serialize;` so the tests fail to compile).
 
 ```rust
 #[cfg(test)]
@@ -111,12 +111,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test -p opensme-portal events::tests 2>&1 | tail -30'`
 Expected: compile error — `Visibility`, `Event`, `sse_frame`, `filter_visible` undefined.
 
-- [ ] **Step 3: Implement the module core**
+- [x] **Step 3: Implement the module core**
 
 Replace the placeholder content of `portal/src/events.rs` with:
 
@@ -243,12 +243,12 @@ mod tests {
 
 Add `mod events;` to `portal/src/main.rs` next to `mod logout;` (line ~20).
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test -p opensme-portal events::tests 2>&1 | tail -30'`
 Expected: `test result: ok. 4 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add portal/src/events.rs portal/src/main.rs
@@ -264,7 +264,7 @@ git commit -m "feat(events): event types, visibility filter and SSE framing (uni
 - Modify: `portal/Cargo.toml`
 - Modify: `portal/src/main.rs`
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 Add to `portal/Cargo.toml` under `[dependencies]`:
 
@@ -273,7 +273,7 @@ Add to `portal/Cargo.toml` under `[dependencies]`:
 redis = { version = "0.27", default-features = false, features = ["tokio-comp"] }
 ```
 
-- [ ] **Step 2: Write failing tests for EventBus**
+- [x] **Step 2: Write failing tests for EventBus**
 
 Append to the test module in `events.rs`:
 
@@ -324,12 +324,12 @@ Append to the test module in `events.rs`:
     }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test -p opensme-portal events::tests 2>&1 | tail -30'`
 Expected: compile error — `EventBus`, `StreamConfig` undefined.
 
-- [ ] **Step 4: Implement bus and config**
+- [x] **Step 4: Implement bus and config**
 
 Add to `events.rs` (before the test module):
 
@@ -459,7 +459,7 @@ fn visibility_from_str(raw: &str) -> Visibility {
 }
 ```
 
-- [ ] **Step 5: Wire into `AppConfig`**
+- [x] **Step 5: Wire into `AppConfig`**
 
 In `portal/src/main.rs`:
 - add `event_bus: events::EventBus,` field to `AppConfig` (after `session`).
@@ -469,12 +469,12 @@ In `portal/src/main.rs`:
 - in the test helper `cfg_with(...)` (line ~2672), add `event_bus: events::EventBus::disabled(),`.
 - every other literal `AppConfig { ... }` in tests uses `..cfg_with(...)` and needs no change.
 
-- [ ] **Step 6: Run all portal tests**
+- [x] **Step 6: Run all portal tests**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test 2>&1 | tail -25'`
 Expected: all tests pass (previous 200 + new 6).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add portal/Cargo.toml portal/src/events.rs portal/src/main.rs
@@ -488,7 +488,7 @@ git commit -m "feat(events): Redis Streams bus with fail-soft disabled/memory ba
 **Files:**
 - Modify: `portal/src/events.rs`, `portal/src/main.rs`
 
-- [ ] **Step 1: Write failing HTTP contract tests** — append to `portal/src/main.rs` test module (uses the existing `respond`/`respond_anon` helpers at ~3200):
+- [x] **Step 1: Write failing HTTP contract tests** — append to `portal/src/main.rs` test module (uses the existing `respond`/`respond_anon` helpers at ~3200):
 
 ```rust
     #[tokio::test]
@@ -506,12 +506,12 @@ git commit -m "feat(events): Redis Streams bus with fail-soft disabled/memory ba
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test -p opensme-portal events_endpoint 2>&1 | tail -30'`
 Expected: first test FAILS with `404` (route absent) instead of `401`; second FAILS with `404` instead of `204`.
 
-- [ ] **Step 3: Implement the handler**
+- [x] **Step 3: Implement the handler**
 
 Add to `events.rs`:
 
@@ -706,12 +706,12 @@ Register the route in the protected router (before `.route_layer(...require_sess
         .route("/api/events", get(handle_events))
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test 2>&1 | tail -30'`
 Expected: all pass; the two new tests return 401 and 204.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add portal/Cargo.toml portal/src/events.rs portal/src/main.rs
@@ -724,7 +724,7 @@ git commit -m "feat(events): session-gated SSE endpoint with Last-Event-ID repla
 
 **Files:** Modify `portal/src/main.rs`
 
-- [ ] **Step 1: Write failing contract tests** — add to the `main.rs` test module:
+- [x] **Step 1: Write failing contract tests** — add to the `main.rs` test module:
 
 ```rust
     #[tokio::test]
@@ -751,9 +751,9 @@ git commit -m "feat(events): session-gated SSE endpoint with Last-Event-ID repla
     }
 ```
 
-- [ ] **Step 2: Run to verify these tests pass trivially** (they exercise the primitives; the wiring assertion comes from the static check in Task 7). Run the same command as Task 3 Step 4. Expected: pass.
+- [x] **Step 2: Run to verify these tests pass trivially** (they exercise the primitives; the wiring assertion comes from the static check in Task 7). Run the same command as Task 3 Step 4. Expected: pass.
 
-- [ ] **Step 3: Add publish calls in the real handlers**
+- [x] **Step 3: Add publish calls in the real handlers**
 
 In `handle_intercom_post` (line ~2430), after `let msg = ...push(...)` and `metrics::...`:
 
@@ -812,7 +812,7 @@ fn recipients_for_task(t: &tasks::Task, author: &str) -> Vec<String> {
 
 Apply the same `Visibility::Recipients(...)` to `handle_tasks_patch` (`task.updated`) and `handle_tasks_delete` (`task.deleted`), using the task's author + assignee. **Note:** the store uses email as `author`; the filter compares against OIDC `sub`. For slice 1, add both the acting user's `sub` and the email values, and document in the spec-follow-up that a future slice should map email→sub via `/api/tasks/users`.
 
-- [ ] **Step 4: Run tests + fmt**
+- [x] **Step 4: Run tests + fmt**
 
 ```bash
 cargo fmt -- --check || cargo fmt
@@ -820,7 +820,7 @@ ssh vhrz2392 'cd ~/git/openSME-compose/portal && cargo test 2>&1 | tail -30'
 ```
 Expected: all pass; `cargo fmt --check` clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add portal/src/main.rs
@@ -836,7 +836,7 @@ git commit -m "feat(events): publish intercom and task events with scoped visibi
 - Create `portal/web/src/lib/events.ts`
 - Create `portal/web/src/app/api/events/route.test.ts`
 
-- [ ] **Step 1: Write failing test** — `portal/web/src/app/api/events/route.test.ts`:
+- [x] **Step 1: Write failing test** — `portal/web/src/app/api/events/route.test.ts`:
 
 ```ts
 import { describe, it, expect, vi } from "vitest";
@@ -877,12 +877,12 @@ describe("SSE proxy", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd portal/web && npx vitest run src/app/api/events/route.test.ts`
 Expected: FAIL — module `./route` not found.
 
-- [ ] **Step 3: Implement the proxy** — create `portal/web/src/app/api/events/route.ts`:
+- [x] **Step 3: Implement the proxy** — create `portal/web/src/app/api/events/route.ts`:
 
 ```ts
 import { NextRequest } from "next/server";
@@ -943,7 +943,7 @@ expect((call.headers as Headers).get("cookie")).toBe("OPENSMEPORTALSESSION=abc")
 expect(vi.mocked(fetch).mock.calls[0][0]).toBe("http://backend.test/api/events");
 ```
 
-- [ ] **Step 4: Create the local dispatcher** — `portal/web/src/lib/events.ts`:
+- [x] **Step 4: Create the local dispatcher** — `portal/web/src/lib/events.ts`:
 
 ```ts
 /** Client-side event bus fed by the SSE hook; panels subscribe without
@@ -996,12 +996,12 @@ describe("local event dispatcher", () => {
 });
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd portal/web && npx vitest run src/app/api/events/route.test.ts src/lib/events.test.ts`
 Expected: both PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add portal/web/src/app/api/events/route.ts portal/web/src/app/api/events/route.test.ts portal/web/src/lib/events.ts portal/web/src/lib/events.test.ts
@@ -1016,7 +1016,7 @@ git commit -m "feat(events): streaming SSE proxy + local event dispatcher"
 - Create `portal/web/src/lib/useEventStream.ts`, `.../useEventStream.test.ts`
 - Modify `portal/web/src/components/PortalShell.tsx`, `IntercomPanel.tsx`, `TasksPanel.tsx`
 
-- [ ] **Step 1: Write failing hook test** — `portal/web/src/lib/useEventStream.test.ts`:
+- [x] **Step 1: Write failing hook test** — `portal/web/src/lib/useEventStream.test.ts`:
 
 ```ts
 import { renderHook, act } from "@testing-library/react";
@@ -1070,9 +1070,9 @@ describe("useEventStream", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure** — `cd portal/web && npx vitest run src/lib/useEventStream.test.ts`. Expected: FAIL, module missing.
+- [x] **Step 2: Run to verify failure** — `cd portal/web && npx vitest run src/lib/useEventStream.test.ts`. Expected: FAIL, module missing.
 
-- [ ] **Step 3: Implement the hook** — `portal/web/src/lib/useEventStream.ts`:
+- [x] **Step 3: Implement the hook** — `portal/web/src/lib/useEventStream.ts`:
 
 ```ts
 "use client";
@@ -1125,7 +1125,7 @@ export function useEventStream(authenticated: boolean): { connected: boolean } {
 }
 ```
 
-- [ ] **Step 4: Mount once in `PortalShell`**
+- [x] **Step 4: Mount once in `PortalShell`**
 
 Add imports and, inside the component after the `taskPrefill` effect:
 
@@ -1141,7 +1141,7 @@ Pass it down by wrapping the panels in a context is **not** needed: the panels s
 <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-6" data-events-connected={streamConnected ? "1" : "0"}>
 ```
 
-- [ ] **Step 5: Subscribe in `IntercomPanel`**
+- [x] **Step 5: Subscribe in `IntercomPanel`**
 
 Add imports:
 
@@ -1173,7 +1173,7 @@ Change the poller effect to consult the DOM flag (no extra prop drilling):
 
 Apply the same guard to the `visibilitychange` handler and the initial `fullLoad()` stays unconditional (seed).
 
-- [ ] **Step 6: Subscribe in `TasksPanel`**
+- [x] **Step 6: Subscribe in `TasksPanel`**
 
 Read `portal/web/src/components/TasksPanel.tsx` for the exact setter name (likely `setTasks`). Add:
 
@@ -1193,14 +1193,14 @@ import { subscribeEvents } from "@/lib/events";
 
 If `TasksPanel` has its own polling, apply the same `data-events-connected` guard.
 
-- [ ] **Step 7: Run frontend tests + lint**
+- [x] **Step 7: Run frontend tests + lint**
 
 ```bash
 cd portal/web && npx vitest run && npm run lint && npx tsc --noEmit
 ```
 Expected: all pass, no type errors.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add portal/web/src/lib/useEventStream.ts portal/web/src/lib/useEventStream.test.ts portal/web/src/lib/events.ts portal/web/src/components/PortalShell.tsx portal/web/src/components/IntercomPanel.tsx portal/web/src/components/TasksPanel.tsx
@@ -1217,7 +1217,7 @@ git commit -m "feat(events): live notes/tasks via SSE with polling fallback"
 - Modify `docker-compose.yml`, `.env.example`, `contracts/interop.yml`
 - Modify `docs/ARC42.md`, `docs/VALIDATION.md`, `docs/E2E-JOURNEYS.md`
 
-- [ ] **Step 1: Write the static check** — `tests/00-static/check_events.py`:
+- [x] **Step 1: Write the static check** — `tests/00-static/check_events.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -1300,17 +1300,17 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Register the check**
+- [x] **Step 2: Register the check**
 
 In `tests/00-static/run.sh`, add `check_events` to the `for t in ...` loop after `check_bridge`.
 In `tests/run.py`, add `("Portal real-time events (contract)", "tests/00-static/check_events.py"),` after the bridge entry.
 
-- [ ] **Step 3: Run the check to verify it fails before the config work**
+- [x] **Step 3: Run the check to verify it fails before the config work**
 
 Run: `python3 tests/00-static/check_events.py`
 Expected: FAIL on E5 (`excludedContentTypes` absent). (E1–E4 should already pass from Tasks 1–6.)
 
-- [ ] **Step 4: Compose env and Traefik label**
+- [x] **Step 4: Compose env and Traefik label**
 
 In `docker-compose.yml` portal `environment:` block add:
 
@@ -1330,7 +1330,7 @@ On the Traefik `compress` middleware label line, append the exclusion (demo/CI a
 
 Verify with `docker compose -f docker-compose.yml config >/dev/null` and confirm the exact label key against the running Traefik version (`docker exec opensme-traefik traefik version`). If v3 expects a different key, adjust the label and the static check together.
 
-- [ ] **Step 5: Document env and contract**
+- [x] **Step 5: Document env and contract**
 
 In `.env.example`, add near the intercom settings:
 
@@ -1354,12 +1354,12 @@ In `contracts/interop.yml`, add under the interop surfaces:
 
 In `docs/ARC42.md` §7 add a paragraph describing the event bus; in `docs/VALIDATION.md` add the `check_events.py` guard; in `docs/E2E-JOURNEYS.md` describe the realtime journey (Task 8).
 
-- [ ] **Step 6: Verify static suite**
+- [x] **Step 6: Verify static suite**
 
 Run: `bash tests/00-static/run.sh`
 Expected: `✅ Layer 0 static: ALL PASS`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/00-static/check_events.py tests/00-static/run.sh tests/run.py docker-compose.yml .env.example contracts/interop.yml docs/ARC42.md docs/VALIDATION.md docs/E2E-JOURNEYS.md
@@ -1374,7 +1374,7 @@ git commit -m "feat(events): static guards, compose env, Traefik SSE exclusion a
 - Create `tests/05-e2e/realtime.py`
 - Modify `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Write the journey** — `tests/05-e2e/realtime.py`:
+- [x] **Step 1: Write the journey** — `tests/05-e2e/realtime.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -1488,12 +1488,12 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Run locally against the demo stack** (if running) to sanity-check:
+- [x] **Step 2: Run locally against the demo stack** (if running) to sanity-check:
 
 Run: `python3 tests/05-e2e/realtime.py opensme.local`
 Expected: either all ✓ or a clean "journey skipped" when `EVENTS_ENABLED` is unset.
 
-- [ ] **Step 3: Register in CI**
+- [x] **Step 3: Register in CI**
 
 In `.github/workflows/ci.yml`, after the `Run rate limit journey` step (search `rate_limit.py`), add:
 
@@ -1504,7 +1504,7 @@ In `.github/workflows/ci.yml`, after the `Run rate limit journey` step (search `
 
 Also set `EVENTS_ENABLED: "1"` in the demo boot step's `env:` block so the journey actually exercises the stream in CI (search for the `Boot demo stack` step and add the env var there).
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```bash
 git add tests/05-e2e/realtime.py .github/workflows/ci.yml
