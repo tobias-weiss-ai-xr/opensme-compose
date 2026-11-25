@@ -1116,6 +1116,8 @@ fn build_router(config: Arc<AppConfig>) -> Router {
                 .put(handle_cloud_upload),
         )
         .route("/api/cloud/files/metadata", get(handle_cloud_list_files))
+        .route("/api/cloud/files/mkdir", post(handle_cloud_mkdir_post))
+        .route("/api/cloud/files/*path", delete(handle_cloud_delete_file))
         .route(
             "/api/cloud/file",
             get(handle_cloud_download).delete(handle_cloud_delete),
@@ -1915,6 +1917,12 @@ struct CloudCreateQuery {
     name: String,
 }
 
+/// JSON body for POST /api/cloud/files/mkdir.
+#[derive(Deserialize)]
+struct CloudMkdirBody {
+    path: String,
+}
+
 /// Validate a bridge path where blank = the dav root (`CloudFiles`
 /// explicitly supports an empty dir for the base collection; only the
 /// page and the JS bridge surface it — deeper invalid paths still 400
@@ -2160,6 +2168,48 @@ async fn handle_cloud_delete(
         return cloud_not_configured();
     };
     match cloud.delete(&path).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => cloud_error(&e),
+    }
+}
+
+/// POST /api/cloud/files/mkdir — create a directory via MKCOL. Requires a
+/// session; the DAV client is scoped to the signed-in user. 201 on success.
+async fn handle_cloud_mkdir_post(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    Json(body): Json<CloudMkdirBody>,
+) -> impl IntoResponse {
+    let path = match cloud::validate_path(&body.path) {
+        Ok(p) => p,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    let user_cloud = cloud.for_user(session.sub.clone());
+    match user_cloud.create_directory(&path).await {
+        Ok(()) => StatusCode::CREATED.into_response(),
+        Err(e) => cloud_mkdir_error(&e),
+    }
+}
+
+/// DELETE /api/cloud/files/*path — delete a file via DELETE. Requires a
+/// session; the DAV client is scoped to the signed-in user. 204 on success.
+async fn handle_cloud_delete_file(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let path = match cloud::validate_path(&path) {
+        Ok(p) => p,
+        Err(e) => return cloud_bad(&e),
+    };
+    let Some(cloud) = &config.cloud else {
+        return cloud_not_configured();
+    };
+    let user_cloud = cloud.for_user(session.sub.clone());
+    match user_cloud.delete_file(&path).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => cloud_error(&e),
     }
@@ -4654,5 +4704,52 @@ mod tests {
             name: "".into(),
             tenant: "t".into(),
         }));
+    }
+
+    #[tokio::test]
+    async fn cloud_mkdir_and_delete_require_a_session() {
+        let cfg = cfg_with("", None, "");
+        assert_eq!(
+            respond_anon(cfg, "POST", "/api/cloud/files/mkdir")
+                .await
+                .status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+        let cfg = cfg_with("", None, "");
+        assert_eq!(
+            respond_anon(cfg, "DELETE", "/api/cloud/files/note.txt")
+                .await
+                .status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_mkdir_rejects_traversal_before_touching_the_backend() {
+        let cfg = cfg_with("", None, "");
+        let res = respond(
+            cfg,
+            "POST",
+            "/api/cloud/files/mkdir",
+            Some(serde_json::json!({"path": "../escape"})),
+        )
+        .await;
+        assert_eq!(res.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn cloud_routes_report_503_without_webdav_config() {
+        let cfg = cfg_with("", None, "");
+        let res = respond(
+            cfg,
+            "POST",
+            "/api/cloud/files/mkdir",
+            Some(serde_json::json!({"path": "notes"})),
+        )
+        .await;
+        assert_eq!(res.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        let cfg = cfg_with("", None, "");
+        let res = respond(cfg, "DELETE", "/api/cloud/files/note.txt", None).await;
+        assert_eq!(res.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
     }
 }
