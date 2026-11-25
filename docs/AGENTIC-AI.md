@@ -196,4 +196,4 @@ Contract-Zeile.*
 | AH1 | ✅ **Done** | 2026-03-?? | `internal/api/server.go` `/status` exposes `evidence_counts`, `llm_tokens`; `agent_saga.py` A6 gate |
 | AH2 | ✅ **Done** | 2026-03-?? | `tests/00-static/check_agent.py` `check_agent_state_durability()`, mutation teeth in `check_mutations.py` |
 | Layer-7 | ✅ **Done** | 2026-03-?? | `tests/07-bench/run_bench.py --agentic` (LLM journey latency + token budgets, offline mock) |
-| AF2 | ⏳ **Open** | — | BPMN boundary compensation for Agent-Service-Task failures |
+| AF2 | ✅ **Done** | 2026-11-25 | `bootstrap/bpmn/invoice-approval.bpmn` (AI ServiceTask → boundary error event → "Fallback: Mark for human review"), `tests/00-static/check_bpmn_compensation.py` (Layer-0 guard, registered in `tests/run.py`), mutations `bpmn-ai-boundary-event` + `bpmn-ai-compensation` |
