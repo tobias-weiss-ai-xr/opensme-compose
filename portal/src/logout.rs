@@ -60,6 +60,27 @@ pub async fn handle_logged_out() -> impl IntoResponse {
 /// POST /api/logout — end the portal session and the shared IdP session.
 pub async fn handle_logout(State(config): State<Arc<AppConfig>>, headers: HeaderMap) -> Response {
     let id_token = cookie_value(&headers, SESSION_COOKIE).filter(|v| !v.is_empty());
+    // The actor is only known from the signed portal cookie. Verify it before
+    // publishing; a missing/tampered cookie produces no event but the usual
+    // redirect + cookie clears still happen.
+    if let Some(token) =
+        cookie_value(&headers, crate::session::PORTAL_SESSION_COOKIE).filter(|v| !v.is_empty())
+    {
+        if let Some(sub) = crate::session::verify_session(&config.session, &token)
+            .map(|session| session.sub.clone())
+        {
+            let _ = config
+                .event_bus
+                .publish(&crate::events::Event::new(
+                    "session.logout",
+                    &sub,
+                    &config.opensme_domain,
+                    crate::events::Visibility::Recipients(vec![sub.clone()]),
+                    serde_json::json!({}),
+                ))
+                .await;
+        }
+    }
     let target = if config.idp_url.trim().is_empty() {
         // No IdP wired (local-only portal): still end the local session.
         "/logged-out".to_string()

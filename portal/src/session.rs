@@ -425,6 +425,18 @@ pub async fn handle_callback(
     match exchange_and_userinfo(&config.session, &params.code).await {
         Ok((user, id_token)) => {
             let cookie = mint_session(&config.session, &user.sub, &user.name, &user.email);
+            // Publish the login event before the redirect. Fail-soft: a Redis
+            // outage must not break a successful OIDC login.
+            let _ = config
+                .event_bus
+                .publish(&crate::events::Event::new(
+                    "session.login",
+                    &user.sub,
+                    &config.opensme_domain,
+                    crate::events::Visibility::Recipients(vec![user.sub.clone()]),
+                    serde_json::json!({}),
+                ))
+                .await;
             let mut builder = Response::builder()
                 .status(StatusCode::FOUND)
                 .header(LOCATION, "/")

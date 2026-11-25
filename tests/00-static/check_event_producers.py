@@ -38,7 +38,7 @@ def main() -> int:
     }
     for fn, (kind, payload) in cloud.items():
         block = handler_block(MAIN, fn)
-        check(kind in block and ".event_bus" in block
+        check(f'"{kind}",' in block and ".event_bus" in block
               and ".publish(&events::Event::new(" in block,
               f"P1 {fn} publishes {kind} via EventBus")
         check(re.search(payload, block) is not None,
@@ -48,7 +48,7 @@ def main() -> int:
         check("Visibility::Team" not in block,
               f"P3 {fn} never uses Team visibility")
 
-    callback = handler_block(SESSION, "pub async fn handle_callback")
+    callback = handler_block(SESSION, "handle_callback")
     check('"session.login"' in callback and ".event_bus" in callback
           and "events::Visibility::Recipients(vec![user.sub.clone()])" in callback,
           "P4 OIDC callback publishes actor-scoped session.login")
@@ -56,7 +56,7 @@ def main() -> int:
           "P4 session events are never team-wide")
 
     check('"session.logout"' in LOGOUT
-          and "session::verify_session(&config.session, token)" in LOGOUT
+          and "session::verify_session(&config.session, &token)" in LOGOUT
           and "events::Visibility::Recipients(vec![sub.clone()])" in LOGOUT,
           "P5 logout verifies the portal session before publishing session.logout")
     check(re.search(r'cloud\.(uploaded|mkdir|deleted|shared)[\s\S]{0,300}Visibility::Team', MAIN) is None,
