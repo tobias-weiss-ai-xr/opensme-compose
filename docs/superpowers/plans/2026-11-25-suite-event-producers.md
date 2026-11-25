@@ -16,7 +16,7 @@
 - Create: `tests/00-static/check_event_producers.py`
 - Modify: `tests/run.py`, `tests/00-static/check_mutations.py`, `docs/VALIDATION.md`
 
-- [ ] **Step 1: create the failing check**
+- [x] **Step 1: create the failing check**
 
 ```python
 #!/usr/bin/env python3
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: register the check**
+- [x] **Step 2: register the check**
 
 In `tests/run.py`, after the `("Portal real-time events (contract)", "tests/00-static/check_events.py"),` line add:
 
@@ -93,7 +93,7 @@ In `tests/run.py`, after the `("Portal real-time events (contract)", "tests/00-s
     ("Portal event producers (cloud + session)", "tests/00-static/check_event_producers.py"),
 ```
 
-- [ ] **Step 3: add mutation teeth**
+- [x] **Step 3: add mutation teeth**
 
 In `tests/00-static/check_mutations.py`, inside the `MUTATIONS` list, add:
 
@@ -109,7 +109,7 @@ In `tests/00-static/check_mutations.py`, inside the `MUTATIONS` list, add:
     },
 ```
 
-- [ ] **Step 4: add the inventory line**
+- [x] **Step 4: add the inventory line**
 
 In `docs/VALIDATION.md`, after the `check_events.py` line add:
 
@@ -119,7 +119,7 @@ In `docs/VALIDATION.md`, after the `check_events.py` line add:
       with verified cookie, no team-wide or byte-carrying payloads
 ```
 
-- [ ] **Step 5: prove RED and commit**
+- [x] **Step 5: prove RED and commit**
 
 Run: `python3 tests/run.py --static`
 Expected: FAIL with `P1…P5` violations from `event-producers`.
@@ -129,7 +129,7 @@ Run: `git add tests/00-static/check_event_producers.py tests/run.py tests/00-sta
 
 **Files:** `portal/src/main.rs`
 
-- [ ] **Step 1: add session extractors to upload and share**
+- [x] **Step 1: add session extractors to upload and share**
 
 In `handle_cloud_upload`, insert after `headers: axum::http::HeaderMap,`:
 
@@ -139,7 +139,7 @@ In `handle_cloud_upload`, insert after `headers: axum::http::HeaderMap,`:
 
 In `handle_cloud_share`, insert after `axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,` the same line. Both routes are behind `session::require_session`, which already inserts the extension.
 
-- [ ] **Step 2: publish after each successful mutation**
+- [x] **Step 2: publish after each successful mutation**
 
 In `handle_cloud_upload`, change the success arm to:
 
@@ -217,7 +217,7 @@ In `handle_cloud_share`:
         }
 ```
 
-- [ ] **Step 3: add a Rust unit test**
+- [x] **Step 3: add a Rust unit test**
 
 In the existing `#[cfg(test)]` module in `portal/src/main.rs`, append:
 
@@ -245,7 +245,7 @@ In the existing `#[cfg(test)]` module in `portal/src/main.rs`, append:
     }
 ```
 
-- [ ] **Step 4: verify and commit**
+- [x] **Step 4: verify and commit**
 
 Run: `python3 tests/run.py --static`
 Expected: cloud P1–P3 now pass; session P4/P5 still fail.
@@ -256,7 +256,7 @@ Run: `git add portal/src/main.rs && git commit -m "feat(events): publish actor-s
 
 **Files:** `portal/src/session.rs`, `portal/src/logout.rs`
 
-- [ ] **Step 1: publish session.login in the callback**
+- [x] **Step 1: publish session.login in the callback**
 
 In `portal/src/session.rs`, in `handle_callback`'s `Ok((user, id_token)) =>` arm, after `let cookie = mint_session(&config.session, &user.sub, &user.name, &user.email);` insert:
 
@@ -273,7 +273,7 @@ In `portal/src/session.rs`, in `handle_callback`'s `Ok((user, id_token)) =>` arm
                 .await;
 ```
 
-- [ ] **Step 2: publish session.logout after session verification**
+- [x] **Step 2: publish session.logout after session verification**
 
 In `portal/src/logout.rs`, insert after `let id_token = cookie_value(&headers, SESSION_COOKIE).filter(|v| !v.is_empty());`:
 
@@ -300,7 +300,7 @@ In `portal/src/logout.rs`, insert after `let id_token = cookie_value(&headers, S
 
 The local variable `sub` is the verified OIDC subject; a missing/tampered cookie publishes nothing and leaves the 303/cookie-clear response unchanged.
 
-- [ ] **Step 3: verify and commit**
+- [x] **Step 3: verify and commit**
 
 Run: `python3 tests/run.py --static`
 Expected: full suite green (35 suites / 0 failed), mutation coverage green.
@@ -310,11 +310,11 @@ Run: `cargo fmt --all -- --check`; `git add portal/src/session.rs portal/src/log
 
 **Files:** `docs/superpowers/plans/2026-11-25-suite-event-producers.md`, `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`
 
-- [ ] **Step 1: close the plan and mark the follow-up slice**
+- [x] **Step 1: close the plan and mark the follow-up slice**
 
 Check every `- [ ]` step in `docs/superpowers/plans/2026-11-25-suite-event-producers.md` as `- [x]` (keep the literal `- [ ]` syntax example unchanged if present). In `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`, annotate the cloud/session producer follow-up with the new commit/artifacts.
 
-- [ ] **Step 2: full verification**
+- [x] **Step 2: full verification**
 
 Run: `python3 tests/run.py --static` → expect all suites PASS, 0 failed (only the intentional seaweedfs `:latest` warning).
 Run: `python3 tests/00-static/check_mutations.py` → expect all mutations caught, including `cloud-mkdir-publish-removed`.
@@ -322,7 +322,7 @@ Run: `cargo fmt --all -- --check` → clean.
 Run: `git status --short` → clean.
 If `vhrz2392` resolves, run `ssh vhrz2392 'cd <src> && cargo test --release'` for the Rust unit tests; otherwise note that CI is the compile/test gate (AGENTS.md forbids local portal builds).
 
-- [ ] **Step 3: commit**
+- [x] **Step 3: commit**
 
 ```bash
 git add docs/superpowers/plans/2026-11-25-suite-event-producers.md docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md

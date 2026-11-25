@@ -226,6 +226,13 @@ OpenCloud/SOGo producers; Matrix/mail event consumers; WebSocket; removing the
 ## Follow-up slices (each its own spec → plan → implementation)
 
 1. OpenCloud/SOGo producers publish file/share/SSO events to the stream.
+   **Portal-mediated half landed 2026-11-25** (design `20bd10b`, plan `91e7b8d`,
+   commits `d26bbb7`, `78b3da5`, `053a789`): the portal bridge publishes
+   `cloud.uploaded/mkdir/deleted/shared` and the OIDC callback/logout publish
+   `session.login/logout`, all actor-scoped with fail-soft delivery and pinned
+   by `tests/00-static/check_event_producers.py`. Direct SOGo/OpenCloud/IdP
+   producers (changes in those upstream repos) remain open; slice 2 is
+   untouched.
 2. Matrix/mail broadcast becomes event-driven consumers (replacing today's
    direct `fanoutBroadcast` calls).
 3. Optional: add polls events, richer client state sync, extract the bus into a
