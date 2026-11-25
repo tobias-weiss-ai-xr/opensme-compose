@@ -2069,6 +2069,7 @@ async fn handle_cloud_mkdir(
 async fn handle_cloud_upload(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Query(q): axum::extract::Query<CloudCreateQuery>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     headers: axum::http::HeaderMap,
     bytes: axum::body::Bytes,
 ) -> impl IntoResponse {
@@ -2100,11 +2101,23 @@ async fn handle_cloud_upload(
         .trim()
         .to_string();
     match cloud.put(&full, &bytes, &content_type).await {
-        Ok(()) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "path": full })),
-        )
-            .into_response(),
+        Ok(()) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "cloud.uploaded",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(vec![session.sub.clone()]),
+                    serde_json::json!({ "path": full, "name": name }),
+                ))
+                .await;
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "path": full })),
+            )
+                .into_response()
+        }
         Err(e) => cloud_error(&e),
     }
 }
@@ -2189,7 +2202,19 @@ async fn handle_cloud_mkdir_post(
     };
     let user_cloud = cloud.for_user(session.sub.clone());
     match user_cloud.create_directory(&path).await {
-        Ok(()) => StatusCode::CREATED.into_response(),
+        Ok(()) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "cloud.mkdir",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(vec![session.sub.clone()]),
+                    serde_json::json!({ "path": path }),
+                ))
+                .await;
+            StatusCode::CREATED.into_response()
+        }
         Err(e) => cloud_mkdir_error(&e),
     }
 }
@@ -2210,7 +2235,19 @@ async fn handle_cloud_delete_file(
     };
     let user_cloud = cloud.for_user(session.sub.clone());
     match user_cloud.delete_file(&path).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "cloud.deleted",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(vec![session.sub.clone()]),
+                    serde_json::json!({ "path": path }),
+                ))
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => cloud_error(&e),
     }
 }
@@ -2223,6 +2260,7 @@ async fn handle_cloud_delete_file(
 async fn handle_cloud_share(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Query(q): axum::extract::Query<CloudPathQuery>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
 ) -> impl IntoResponse {
     let path = match cloud::validate_path(&q.path) {
         Ok(p) => p,
@@ -2232,7 +2270,19 @@ async fn handle_cloud_share(
         return cloud_not_configured();
     };
     match cloud.create_share(&path).await {
-        Ok(url) => (StatusCode::CREATED, Json(serde_json::json!({ "url": url }))).into_response(),
+        Ok(url) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "cloud.shared",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Recipients(vec![session.sub.clone()]),
+                    serde_json::json!({ "path": path, "url": url }),
+                ))
+                .await;
+            (StatusCode::CREATED, Json(serde_json::json!({ "url": url }))).into_response()
+        }
         Err(e) => cloud_error(&e),
     }
 }
@@ -4751,5 +4801,27 @@ mod tests {
         let cfg = cfg_with("", None, "");
         let res = respond(cfg, "DELETE", "/api/cloud/files/note.txt", None).await;
         assert_eq!(res.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn cloud_event_payload_stays_actor_scoped() {
+        let bus = events::EventBus::memory();
+        let e = events::Event::new(
+            "cloud.uploaded",
+            "alice",
+            "example.org",
+            events::Visibility::Recipients(vec!["alice".into()]),
+            serde_json::json!({ "path": "notes/a.txt", "name": "a.txt" }),
+        );
+        bus.publish(&e).await.unwrap();
+        let all = bus.replay(None).await.unwrap();
+        assert_eq!(all[0].kind, "cloud.uploaded");
+        assert_eq!(all[0].payload["path"], "notes/a.txt");
+        assert!(!all[0].visibility.visible_to(&events::Viewer {
+            sub: "bob".into(),
+            email: "".into(),
+            name: "".into(),
+            tenant: "example.org".into(),
+        }));
     }
 }

@@ -14,9 +14,13 @@ LOGOUT = (PORTAL / "logout.rs").read_text()
 
 
 def handler_block(src: str, fn: str) -> str:
-    start = src.index(fn)
-    nxt = src.find("\nasync fn ", start + 1)
-    return src[start: nxt if nxt > 0 else len(src)]
+    """Slice from the handler *definition*, not from a route registration."""
+    match = re.search(r"(?:pub )?async fn " + re.escape(fn) + r"\b", src)
+    if match is None:
+        return ""
+    start = match.start()
+    nxt = re.search(r"\n(?:pub )?async fn ", src[start + 1 :])
+    return src[start : start + 1 + nxt.start()] if nxt else src[start:]
 
 
 def main() -> int:
