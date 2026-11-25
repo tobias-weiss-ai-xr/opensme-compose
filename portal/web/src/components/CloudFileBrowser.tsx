@@ -60,6 +60,33 @@ async function list_files(path: string): Promise<ListFilesResponse> {
   return res.json() as Promise<ListFilesResponse>;
 }
 
+/** Built-in folder creation (used when no parent supplies onCreateDir). */
+async function create_dir(path: string): Promise<void> {
+  const res = await fetch("/api/cloud/files/mkdir", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error ?? `HTTP ${res.status}`);
+  }
+}
+
+/** Built-in file delete (used when no parent supplies onDelete). */
+async function delete_files(items: CloudFile[]): Promise<void> {
+  for (const item of items) {
+    const segments = item.path.split("/").filter(Boolean).map(encodeURIComponent);
+    const res = await fetch(`/api/cloud/files/${segments.join("/")}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error ?? `HTTP ${res.status}`);
+    }
+  }
+}
+
 /**
  * React component for browsing OpenCloud files via portal API.
  * Features:
@@ -205,9 +232,13 @@ export default function CloudFileBrowser({
 
   // Handle new folder creation
   const handleCreateFolder = useCallback(async () => {
-    if (!newFolderName.trim() || !onCreateDir) return;
+    const name = newFolderName.trim();
+    if (!name) return;
+    const base = currentPath.replace(/^\/+|\/+$/g, "");
+    const fullPath = base ? `${base}/${name}` : name;
     try {
-      await onCreateDir(newFolderName);
+      if (onCreateDir) await onCreateDir(name);
+      else await create_dir(fullPath);
       setNewFolderName("");
       setShowNewFolder(false);
       await loadFiles(currentPath);
@@ -219,9 +250,10 @@ export default function CloudFileBrowser({
   // Handle delete selected items
   const handleDelete = useCallback(async () => {
     const selectedItems = selectedFiles();
-    if (selectedItems.length === 0 || !onDelete) return;
+    if (selectedItems.length === 0) return;
     try {
-      await onDelete(selectedItems);
+      if (onDelete) await onDelete(selectedItems);
+      else await delete_files(selectedItems);
       setSelected(new Set());
       await loadFiles(currentPath);
     } catch (err) {
@@ -312,14 +344,13 @@ export default function CloudFileBrowser({
         <button
           className="btn btn-secondary text-sm px-3 py-1"
           onClick={() => setShowNewFolder(true)}
-          disabled={!onCreateDir}
         >
           New Folder
         </button>
         <button
           className="btn btn-danger text-sm px-3 py-1"
           onClick={handleDelete}
-          disabled={selected.size === 0 || !onDelete}
+          disabled={selected.size === 0}
         >
           Delete ({selected.size})
         </button>
