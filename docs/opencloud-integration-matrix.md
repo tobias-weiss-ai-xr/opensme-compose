@@ -270,9 +270,13 @@ All services communicate via the `opensme-net` Docker network:
    - Add `Access-Control-Allow-Origin` for portal domain
    - **Impact**: Direct browser uploads to OpenCloud possible
 
-2. **E2**: Create CORS proxy service in portal
-   - Proxy WebDAV requests through portal backend
-   - **Impact**: Secure CORS handling, single entry point
+2. **E2**: Create CORS proxy service in portal — **superseded by the
+   same-origin proxy** (`portal/web/src/app/api/[[...path]]/route.ts`)
+   - The Next.js catch-all already forwards WebDAV requests through the
+     portal backend with cookies, bodies and `OPTIONS`
+   - **Impact**: Secure CORS handling, single entry point — achieved without
+     a permissive CORS layer (removed in `4e5c491`); pinned by
+     `tests/00-static/check_portal_cors.py`
 
 3. **E3**: Add pre-flight (OPTIONS) support to OpenCloud
    - Current: May not handle OPTIONS requests properly

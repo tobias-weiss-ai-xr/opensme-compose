@@ -71,6 +71,15 @@ MUTATIONS = [
               "browser's built-in New Folder action with a 404",
     },
     {
+        "name": "portal-cors-permissive-layer-restored",
+        "file": "portal/src/main.rs",
+        "old": "// NO permissive CORS layer",
+        "new": "// MUT permissive CORS layer",
+        "check": "tests/00-static/check_portal_cors.py",
+        "why": "E2 — restoring permissive CORS would let any origin read /api/* "
+              "again; the same-origin proxy is the only browser entry point",
+    },
+    {
         "name": "demo-env-vc-public-ip",
         "file": "docker-compose.yml",
         "old": "${VC_PUBLIC_IP:?set VC_PUBLIC_IP}",

@@ -255,7 +255,12 @@ All tasks include testable acceptance gates using:
 - [ ] **A1**: Shared S3 configuration library (T-OCC2-006 library is a good start)
 - [ ] **B1**: Invoice Ninja → OpenCloud WebDAV for invoice archival
 - [x] **D1-D5**: Complete portal file picker enhancements (metadata listing, OCS share management, mkdir + path-delete via `POST /api/cloud/files/mkdir` and `DELETE /api/cloud/files/*path`)
-- [ ] **E2**: Create CORS proxy service in portal backend
+- [x] **E2**: Superseded by the same-origin `portal/web/src/app/api/[[...path]]/route.ts`
+  catch-all proxy (forwards cookies, bodies and every method including `OPTIONS`).
+  E1's `opencloud-cors` edge middleware covers direct DAV/OCS clients; a
+  permissive CORS layer in the Rust portal was deliberately removed in
+  `4e5c491` because it let any origin read `/api/*` from a mis-exposed port.
+  Pinned by `tests/00-static/check_portal_cors.py`
 
 ---
 
