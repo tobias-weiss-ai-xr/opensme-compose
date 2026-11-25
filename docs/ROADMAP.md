@@ -65,8 +65,8 @@ Status and direction of the openSME Compose distribution.
 - **Cluster mode** (out of scope by design — SME single-node focus).
 - **Permanent live benchmark evidence** on a reference host per tier
   (`make bench`, recorded in `docs/perf/benchmark-run.md`).
-- **Docs-as-contract**: keep `docs/README.md` and the README documentation
-  table in sync with every new doc (review checklist item).
+- **Docs-as-contract** — enforced by `tests/00-static/check_docs_index.py`
+  (Layer 0): every top-level doc is indexed and every index link resolves.
 
 ## Perf budgets (target, enforced in CI)
 

@@ -90,6 +90,7 @@ CI step or on its documented allowlist.
 - [x] `check_bridge.py` — portal-web component bridge: typed registry contract (slots share.open/cloud.pick/task.create), every slot consumed outside the registry, shell wires share.open → notes tab + task.create → Aufgaben tab, composer posts via existing note API, feed/notes/cloud „Als Aufgabe anlegen“ forward title+link through task.create
 - [x] `check_events.py` — portal real-time events: Event/Visibility/EventBus + XADD/XREAD, /api/events behind the session firewall, SSE proxy forwards cookie/last-event-id as a ReadableStream with same-origin EventSource, explicit recipient-scoped task events, polling fallback + Traefik compression exclusion
 - [x] `check_cloud_bridge.py` — portal cloud-file bridge: mkdir + path-delete routes, both behind the session firewall, caller path validated, DAV client scoped to the session user, all four cloud error helpers used, catch-all proxy forwards cookie/body, browser calls both endpoints
+- [x] `check_docs_index.py` — docs-as-contract: every top-level docs/*.md is linked from docs/README.md or the README documentation table, and every link in both places resolves
 - [x] `check_tasks.py` — portal team-tasks backend contract: stores-Pfad `TASKS_DATA_PATH`/Cap `TASKS_MAX_TASKS`, Cap-Eviction nur erledigter Aufgaben, `may_complete`-Guard (nur Zuständiger/Autor bei Status/Löschen), 5 `/api/tasks`-Routen hinter `require_session`, Author aus Session, 403-Helper
 - [x] `check_tiles.py` — portal function catalog
 - [x] `compose_config.py` — overlay matrix

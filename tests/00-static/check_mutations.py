@@ -54,6 +54,14 @@ ROOT = Path(__file__).resolve().parents[2]
 # ─────────────────────────────────────────────────────────────────────────────
 MUTATIONS = [
     {
+        "name": "docs-index-sso-row-removed",
+        "file": "docs/README.md",
+        "old": "[SSO.md](SSO.md)",
+        "new": "[SSO.md](SSO_MUT.md)",
+        "check": "tests/00-static/check_docs_index.py",
+        "why": "docs-as-contract — dropping an index row silently orphans an operator doc",
+    },
+    {
         "name": "cloud-bridge-mkdir-route-removed",
         "file": "portal/src/main.rs",
         "old": '.route("/api/cloud/files/mkdir", post(handle_cloud_mkdir_post))',

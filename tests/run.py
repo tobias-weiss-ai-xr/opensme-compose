@@ -62,6 +62,7 @@ LAYERS = {
             ("Portal function catalog (tiles)", "tests/00-static/check_tiles.py"),
             ("Portal component bridge (intercom)", "tests/00-static/check_bridge.py"),
             ("Portal cloud-file bridge (contract)", "tests/00-static/check_cloud_bridge.py"),
+            ("Docs index contract (docs-as-contract)", "tests/00-static/check_docs_index.py"),
             ("Portal real-time events (contract)", "tests/00-static/check_events.py"),
             ("Portal team tasks (backend contract)", "tests/00-static/check_tasks.py"),
             ("Interoperability surfaces", "tests/00-static/check_interop.py"),

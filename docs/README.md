@@ -41,6 +41,8 @@ the deep dives.
 | [AGENTIC-AI.md](AGENTIC-AI.md) | How agentic capabilities are governed: saga → epic → user story → OpenSpec capability → contract → test |
 | [audits/](audits/) | Audits of the agentic components (e.g. `dev-agent-watch.md`) |
 | [superpowers/](superpowers/) | Design notes produced while working with the pi workflows |
+| [OPENCLOUD-CAMPAIGNS-SUMMARY.md](OPENCLOUD-CAMPAIGNS-SUMMARY.md) | OpenCloud integration campaigns: results, lessons learned and remaining future work |
+| [portal-migration.md](portal-migration.md) | Portal migration notes: Next.js frontend ahead of the Rust catalog |
 
 The normative architecture is in the compose files and the contract/spec
 directories:
@@ -65,6 +67,13 @@ directories:
 | [mail.md](mail.md) | Mail scope: closed system by design — why no MX/SPF/DKIM/DMARC are published, what still works, and the checklist for opening it later |
 | [COMPLIANCE.md](COMPLIANCE.md) | Compliance reporting (`make compliance`), report formats, scheduling |
 | [ROADMAP.md](ROADMAP.md) | Current scope, in-flight work, backlog, perf-budget targets |
+| [opencloud.md](opencloud.md) | OpenCloud deployment: OIDC, DAV, Office integration and the production S3 overlay |
+| [opencloud-integration-matrix.md](opencloud-integration-matrix.md) | OpenCloud integration campaign matrix (tasks, results, skipped items) |
+| [opencloud-testing.md](opencloud-testing.md) | OpenCloud integration test protocol and observed results |
+| [operaton-sso.md](operaton-sso.md) | Operaton BPMN login via Zitadel OIDC |
+| [registry-mirror.md](registry-mirror.md) | Local registry mirror / pull-through cache setup |
+| [nix.md](nix.md) | Nix-built replacement images, local tags and CI publication to ghcr.io |
+| [vc.md](vc.md) | LiveKit video-meeting service, room creation and edge routing |
 
 ### Quality & verification
 
