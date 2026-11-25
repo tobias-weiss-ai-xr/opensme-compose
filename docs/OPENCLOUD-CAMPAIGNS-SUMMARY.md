@@ -246,14 +246,22 @@ All tasks include testable acceptance gates using:
 
 ### High Priority (from integration matrix)
 - [x] **A2**: Add S3 storage support to Paperless-ngx (already wired via `PAPERLESS_AWS_*` in `services/paperless.yml`)
-- [ ] **B2**: Add WebDAV client to Paperless-ngx for OpenCloud document storage
+- [x] **B2**: Paperless-ngx → OpenCloud WebDAV via the opt-in
+  `paperless-cloud-sync` rclone sidecar (read-only `paperless-export` →
+  `cloud:Dokumente/Paperless`, idles without `CLOUD_WEBDAV_*`), pinned by
+  `tests/00-static/check_webdav_archive.py`
 - [x] **B3**: Multi-user file picker in portal (`cloud.for_user` + session-scoped bridge routes)
 - [ ] **C2**: SOGo → OpenCloud CalDAV proxy configuration
 - [ ] **C3**: Portal calendar/contacts integration
 
 ### Medium Priority
-- [ ] **A1**: Shared S3 configuration library (T-OCC2-006 library is a good start)
-- [ ] **B1**: Invoice Ninja → OpenCloud WebDAV for invoice archival
+- [x] **A1**: Shared configuration building blocks — `docker-compose.s3-includes.yml`
+  (`x-s3-defaults`), `services/rust-webdav-client/` and the rclone WebDAV mirror
+  pattern from `limesurvey-cloud-sync`
+- [x] **B1**: Invoice Ninja → OpenCloud WebDAV via the opt-in
+  `invoiceninja-cloud-sync` rclone sidecar (read-only `invoiceninja-public` →
+  `cloud:Rechnungen/InvoiceNinja`, idles without `CLOUD_WEBDAV_*`), pinned by
+  `tests/00-static/check_webdav_archive.py`
 - [x] **D1-D5**: Complete portal file picker enhancements (metadata listing, OCS share management, mkdir + path-delete via `POST /api/cloud/files/mkdir` and `DELETE /api/cloud/files/*path`)
 - [x] **E2**: Superseded by the same-origin `portal/web/src/app/api/[[...path]]/route.ts`
   catch-all proxy (forwards cookies, bodies and every method including `OPTIONS`).

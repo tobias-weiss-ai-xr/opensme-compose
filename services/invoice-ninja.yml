@@ -309,6 +309,60 @@ services:
           cpus: "0.05"
           memory: 16M
 
+  # ── OpenCloud invoice archive (opt-in) ──────────────────────────
+  # Mirrors the local public invoices volume into the `Rechnungen/InvoiceNinja`
+  # WebDAV folder. Invoice Ninja itself writes to S3 (FILESYSTEM_DISK=s3);
+  # this sidecar only archives the cold local copy. It idles when the WebDAV
+  # credentials are absent, so enabling the `invoice` profile alone never
+  # starts data movement. Uses the same rclone pattern as limesurvey-cloud-sync.
+  invoiceninja-cloud-sync:
+    <<: *service-defaults
+    image: rclone/rclone:${RCLONE_TAG:-latest}
+    container_name: opensme-invoiceninja-cloud-sync
+    restart: unless-stopped
+    profiles: ["invoice"]
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ -z "$$CLOUD_WEBDAV_URL" ] || [ -z "$$CLOUD_WEBDAV_PASS" ]; then
+          echo "invoice archive disabled: CLOUD_WEBDAV_URL/CLOUD_WEBDAV_PASS not set"
+          exec sleep infinity
+        fi
+        export RCLONE_CONFIG_CLOUD_TYPE=webdav
+        export RCLONE_CONFIG_CLOUD_URL="$$CLOUD_WEBDAV_URL"
+        export RCLONE_CONFIG_CLOUD_VENDOR=owncloud
+        export RCLONE_CONFIG_CLOUD_USER="$$CLOUD_WEBDAV_USER"
+        export RCLONE_CONFIG_CLOUD_PASS="$$(rclone obscure "$$CLOUD_WEBDAV_PASS")"
+        echo "archiving invoices to OpenCloud (Rechnungen/InvoiceNinja)"
+        while true; do
+          rclone copy /data cloud:Rechnungen/InvoiceNinja --min-age 15s --quiet || echo "rclone archive failed, retrying"
+          sleep 60
+        done
+    environment:
+      CLOUD_WEBDAV_URL: ${CLOUD_WEBDAV_URL:-}
+      CLOUD_WEBDAV_USER: ${CLOUD_WEBDAV_USER:-}
+      CLOUD_WEBDAV_PASS: ${CLOUD_WEBDAV_PASS:-}
+    volumes:
+      - invoiceninja-public:/data:ro
+    network_mode: service:invoiceninja-web
+    healthcheck:
+      # Either the sync loop (rclone) or the credential-less idle loop
+      # (sleep) must be alive; both run under the same shell entrypoint.
+      test: ["CMD-SHELL", "pidof rclone >/dev/null || pidof sleep >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 96M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
 volumes:
   invoiceninja-public:
   invoiceninja-storage:

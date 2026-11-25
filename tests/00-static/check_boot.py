@@ -155,6 +155,8 @@ HEALTHCHECK_BINS = {
     "tika": ["bash"],   # apache/tika:latest is java-only (curl/wget dropped)
                         # — healthcheck probes via bash /dev/tcp
     "invoiceninja": ["curl", "pgrep"],  # php-fpm image ships procps
+    "invoiceninja-cloud-sync": ["pidof"],  # rclone/rclone (alpine busybox)
+    "paperless-cloud-sync": ["pidof"],  # rclone/rclone (alpine busybox)
     "dev-agent": ["curl"],
 }
 

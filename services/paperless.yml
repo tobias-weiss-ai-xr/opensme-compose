@@ -219,6 +219,61 @@ services:
           cpus: "0.25"
           memory: 128M
 
+  # ── OpenCloud document archive (opt-in) ─────────────────────────
+  # Mirrors Paperless' export directory into the `Dokumente/Paperless`
+  # WebDAV folder. The export volume is mounted read-only: the archive is
+  # one-way and can never overwrite the DMS. The sidecar idles without
+  # WebDAV credentials, so enabling the `paperless` profile alone never
+  # starts data movement. Same rclone pattern as limesurvey-cloud-sync.
+  paperless-cloud-sync:
+    <<: *service-defaults
+    image: rclone/rclone:${RCLONE_TAG:-latest}
+    container_name: opensme-paperless-cloud-sync
+    restart: unless-stopped
+    profiles: ["paperless"]
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        if [ -z "$$CLOUD_WEBDAV_URL" ] || [ -z "$$CLOUD_WEBDAV_PASS" ]; then
+          echo "document archive disabled: CLOUD_WEBDAV_URL/CLOUD_WEBDAV_PASS not set"
+          exec sleep infinity
+        fi
+        export RCLONE_CONFIG_CLOUD_TYPE=webdav
+        export RCLONE_CONFIG_CLOUD_URL="$$CLOUD_WEBDAV_URL"
+        export RCLONE_CONFIG_CLOUD_VENDOR=owncloud
+        export RCLONE_CONFIG_CLOUD_USER="$$CLOUD_WEBDAV_USER"
+        export RCLONE_CONFIG_CLOUD_PASS="$$(rclone obscure "$$CLOUD_WEBDAV_PASS")"
+        echo "archiving documents to OpenCloud (Dokumente/Paperless)"
+        while true; do
+          rclone copy /data cloud:Dokumente/Paperless --min-age 15s --quiet || echo "rclone archive failed, retrying"
+          sleep 60
+        done
+    environment:
+      CLOUD_WEBDAV_URL: ${CLOUD_WEBDAV_URL:-}
+      CLOUD_WEBDAV_USER: ${CLOUD_WEBDAV_USER:-}
+      CLOUD_WEBDAV_PASS: ${CLOUD_WEBDAV_PASS:-}
+    volumes:
+      - paperless-export:/data:ro
+    networks:
+      - opensme-net
+    healthcheck:
+      # Either the sync loop (rclone) or the credential-less idle loop
+      # (sleep) must be alive; both run under the same shell entrypoint.
+      test: ["CMD-SHELL", "pidof rclone >/dev/null || pidof sleep >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 96M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
 volumes:
   paperless-data:
   paperless-media:

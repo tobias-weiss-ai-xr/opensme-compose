@@ -71,6 +71,15 @@ MUTATIONS = [
               "browser's built-in New Folder action with a 404",
     },
     {
+        "name": "webdav-archive-paperless-mount-writable",
+        "file": "services/paperless.yml",
+        "old": "paperless-export:/data:ro",
+        "new": "paperless-export:/data",
+        "check": "tests/00-static/check_webdav_archive.py",
+        "why": "B2 — a writable source mount would let the one-way archive "
+              "overwrite Paperless' own export directory",
+    },
+    {
         "name": "portal-cors-permissive-layer-restored",
         "file": "portal/src/main.rs",
         "old": "// NO permissive CORS layer",
