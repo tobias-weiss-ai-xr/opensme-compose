@@ -64,6 +64,7 @@ LAYERS = {
             ("Portal cloud-file bridge (contract)", "tests/00-static/check_cloud_bridge.py"),
             ("Portal same-origin CORS contract", "tests/00-static/check_portal_cors.py"),
             ("WebDAV archival (opt-in sidecars)", "tests/00-static/check_webdav_archive.py"),
+            ("CalDAV/CardDAV portal integration", "tests/00-static/check_caldav_portal.py"),
             ("Docs index contract (docs-as-contract)", "tests/00-static/check_docs_index.py"),
             ("Portal real-time events (contract)", "tests/00-static/check_events.py"),
             ("Portal team tasks (backend contract)", "tests/00-static/check_tasks.py"),

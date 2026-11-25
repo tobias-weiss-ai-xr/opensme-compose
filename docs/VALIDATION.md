@@ -93,6 +93,7 @@ CI step or on its documented allowlist.
 - [x] `check_docs_index.py` — docs-as-contract: every top-level docs/*.md is linked from docs/README.md or the README documentation table, and every link in both places resolves
 - [x] `check_portal_cors.py` — same-origin CORS contract: scoped edge middleware for direct DAV/OCS, no permissive CORS in the Rust portal, Next.js catch-all proxy as the single browser entry point
 - [x] `check_webdav_archive.py` — opt-in WebDAV archival: invoice/Paperless sidecars are profile-gated, mount their source read-only, idle without credentials and use distinct remote folders
+- [x] `check_caldav_portal.py` — CalDAV/CardDAV integration: SOGo secondary DAV sources, edge routers, env endpoint helpers and tile-based portal calendar/contacts contract
 - [x] `check_tasks.py` — portal team-tasks backend contract: stores-Pfad `TASKS_DATA_PATH`/Cap `TASKS_MAX_TASKS`, Cap-Eviction nur erledigter Aufgaben, `may_complete`-Guard (nur Zuständiger/Autor bei Status/Löschen), 5 `/api/tasks`-Routen hinter `require_session`, Author aus Session, 403-Helper
 - [x] `check_tiles.py` — portal function catalog
 - [x] `compose_config.py` — overlay matrix

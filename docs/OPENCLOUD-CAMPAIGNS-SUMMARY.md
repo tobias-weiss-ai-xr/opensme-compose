@@ -251,8 +251,13 @@ All tasks include testable acceptance gates using:
   `cloud:Dokumente/Paperless`, idles without `CLOUD_WEBDAV_*`), pinned by
   `tests/00-static/check_webdav_archive.py`
 - [x] **B3**: Multi-user file picker in portal (`cloud.for_user` + session-scoped bridge routes)
-- [ ] **C2**: SOGo → OpenCloud CalDAV proxy configuration
-- [ ] **C3**: Portal calendar/contacts integration
+- [x] **C2**: SOGo → OpenCloud CalDAV/CardDAV proxy — `mail/sogo.yml` sets
+  `SOGO_CALDAV_*`/`SOGO_CARDDAV_*` (secondary sources, primary stays in SOGo SQL);
+  edge routers `opencloud-caldav`/`opencloud-carddav` are live
+- [x] **C3**: Portal calendar/contacts integration — served by the WebMail
+  (calendar/contacts) and Calendar (booking) tiles; `portal/web/src/lib/config.ts`
+  exposes `computeCaldavUrl`/`computeCarddavUrl` for direct DAV clients. No
+  separate embedded portal calendar UI is planned (superseded by tiles).
 
 ### Medium Priority
 - [x] **A1**: Shared configuration building blocks — `docker-compose.s3-includes.yml`

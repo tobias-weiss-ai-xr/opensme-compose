@@ -80,6 +80,15 @@ MUTATIONS = [
               "overwrite Paperless' own export directory",
     },
     {
+        "name": "caldav-portal-sogo-dav-disabled",
+        "file": "mail/sogo.yml",
+        "old": "SOGO_CALDAV_ENABLED: ${SOGO_CALDAV_ENABLED:-true}",
+        "new": "SOGO_CALDAV_ENABLED: ${SOGO_CALDAV_ENABLED:-false}",
+        "check": "tests/00-static/check_caldav_portal.py",
+        "why": "C2 — disabling SOGo's OpenCloud CalDAV source silently breaks "
+              "the documented calendar proxy",
+    },
+    {
         "name": "portal-cors-permissive-layer-restored",
         "file": "portal/src/main.rs",
         "old": "// NO permissive CORS layer",
