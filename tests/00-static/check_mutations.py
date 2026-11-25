@@ -583,6 +583,15 @@ MUTATIONS = [
               "`Source` ('Source: command not found' aborted calendar-setup)",
     },
     {
+        "name": "cloud-mkdir-publish-removed",
+        "file": "portal/src/main.rs",
+        "old": '                    "cloud.mkdir",',
+        "new": '                    "cloud.mkdir-removed",',
+        "check": "tests/00-static/check_event_producers.py",
+        "why": "event-producers — removing the cloud.mkdir publish must fail "
+               "the Layer-0 producer pin",
+    },
+    {
         "name": "events-sse-compression-exclusion",
         "file": "docker-compose.yml",
         "old": "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream",
