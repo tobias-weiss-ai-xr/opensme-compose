@@ -245,16 +245,16 @@ All tasks include testable acceptance gates using:
 ## Future Work
 
 ### High Priority (from integration matrix)
-- [ ] **A2**: Add S3 storage support to Paperless-ngx
+- [x] **A2**: Add S3 storage support to Paperless-ngx (already wired via `PAPERLESS_AWS_*` in `services/paperless.yml`)
 - [ ] **B2**: Add WebDAV client to Paperless-ngx for OpenCloud document storage
-- [ ] **B3**: Multi-user file picker in portal (partially done via T-OCC3-002)
+- [x] **B3**: Multi-user file picker in portal (`cloud.for_user` + session-scoped bridge routes)
 - [ ] **C2**: SOGo → OpenCloud CalDAV proxy configuration
 - [ ] **C3**: Portal calendar/contacts integration
 
 ### Medium Priority
 - [ ] **A1**: Shared S3 configuration library (T-OCC2-006 library is a good start)
 - [ ] **B1**: Invoice Ninja → OpenCloud WebDAV for invoice archival
-- [ ] **D1-D5**: Complete portal file picker enhancements (list_files, share management)
+- [x] **D1-D5**: Complete portal file picker enhancements (metadata listing, OCS share management, mkdir + path-delete via `POST /api/cloud/files/mkdir` and `DELETE /api/cloud/files/*path`)
 - [ ] **E2**: Create CORS proxy service in portal backend
 
 ---

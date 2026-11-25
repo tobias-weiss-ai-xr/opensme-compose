@@ -54,6 +54,15 @@ ROOT = Path(__file__).resolve().parents[2]
 # ─────────────────────────────────────────────────────────────────────────────
 MUTATIONS = [
     {
+        "name": "cloud-bridge-mkdir-route-removed",
+        "file": "portal/src/main.rs",
+        "old": '.route("/api/cloud/files/mkdir", post(handle_cloud_mkdir_post))',
+        "new": '.route("/api/cloud/files/mkdir_MUT", post(handle_cloud_mkdir_post))',
+        "check": "tests/00-static/check_cloud_bridge.py",
+        "why": "D1-D5 — dropping the session-scoped mkdir route would leave the "
+              "browser's built-in New Folder action with a 404",
+    },
+    {
         "name": "demo-env-vc-public-ip",
         "file": "docker-compose.yml",
         "old": "${VC_PUBLIC_IP:?set VC_PUBLIC_IP}",
