@@ -1,4 +1,4 @@
 # Python dependencies for the test harness
 # Install: pip install -r tests/requirements.txt
-pyyaml>=6.0.3
+pyyaml>=6.0.4
 requests>=2.34.2
