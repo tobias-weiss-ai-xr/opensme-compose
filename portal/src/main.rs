@@ -1105,6 +1105,7 @@ fn build_router(config: Arc<AppConfig>) -> Router {
         )
         .route("/api/services", get(handle_services))
         .route("/api/events", get(handle_events))
+        .route("/api/events/publish", post(handle_event_publish))
         // Cloud files bridge — registered UNCONDITIONALLY so a missing
         // cloud config surfaces as a clean 503 "not configured" instead
         // of a bare 404; anonymous callers are stopped by the session
@@ -1243,6 +1244,41 @@ async fn handle_events(
         tenant: config.opensme_domain.clone(),
     };
     config.event_bus.stream(viewer, last).await
+}
+
+/// Queue an internal event from the same-origin portal-web route. The
+/// allowlist keeps this authenticated endpoint from becoming a generic
+/// cross-user event injector; every publish carries the verified session
+/// subject and this deployment's tenant.
+#[derive(Deserialize)]
+struct EventPublishBody {
+    kind: String,
+    text: String,
+}
+
+async fn handle_event_publish(
+    State(config): State<Arc<AppConfig>>,
+    axum::extract::Extension(session): axum::extract::Extension<session::Session>,
+    Json(body): Json<EventPublishBody>,
+) -> impl IntoResponse {
+    if body.kind != "broadcast.requested" {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let text = body.text.trim();
+    if text.is_empty() || text.len() > 2000 {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let _ = config
+        .event_bus
+        .publish(&events::Event::new(
+            &body.kind,
+            &session.sub,
+            &config.opensme_domain,
+            events::Visibility::Team,
+            serde_json::json!({ "text": text }),
+        ))
+        .await;
+    StatusCode::ACCEPTED.into_response()
 }
 
 /// Team-notes persistence layout: INTERCOM_DATA_PATH holds the JSON store,
@@ -4712,6 +4748,20 @@ mod tests {
         let cfg = cfg_with("", None, "");
         let res = respond(cfg, "GET", "/api/events", None).await;
         assert_eq!(res.status(), axum::http::StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn event_publish_accepts_only_allowlisted_broadcast_events() {
+        let mut cfg = cfg_with("", None, "");
+        cfg.event_bus = events::EventBus::memory();
+        let bad = respond(
+            cfg,
+            "POST",
+            "/api/events/publish",
+            Some(serde_json::json!({"kind": "task.created", "text": "hi"})),
+        )
+        .await;
+        assert_eq!(bad.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

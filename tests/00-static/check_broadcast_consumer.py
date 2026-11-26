@@ -23,8 +23,10 @@ def main():
           "B1 backend exposes the cookie-gated event publish route")
     check('"broadcast.requested"' in MAIN and '"broadcast.requested"' in ROUTE,
           "B2 producer and web route agree on the event kind")
-    check("events::Visibility::Team" in MAIN,
-          "B3 broadcast event is visible to all authenticated viewers")
+    start = MAIN.find("async fn handle_event_publish(")
+    block = MAIN[start: MAIN.find("\n/// ", start)] if start >= 0 else ""
+    check("events::Visibility::Team" in block,
+          "B3 broadcast publish handler is visible to all authenticated viewers")
     check("fanoutBroadcast" not in ROUTE and "queued" in ROUTE,
           "B4 broadcast route queues instead of fanning out inline")
     check("xreadgroup" in INSTR and "portal-web-broadcast" in INSTR
