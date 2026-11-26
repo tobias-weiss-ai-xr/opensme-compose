@@ -37,7 +37,7 @@ def main():
           "B6 UI reports queued delivery instead of channel outcomes")
     check("event-driven consumers" in SPEC and "2026-11-26" in SPEC,
           "B7 design follow-up slice 2 is annotated as landed")
-    return result.summary()
+    return 0 if result.summary() else 1
 
 
 if __name__ == "__main__":

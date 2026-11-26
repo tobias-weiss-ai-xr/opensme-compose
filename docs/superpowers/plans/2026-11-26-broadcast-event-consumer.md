@@ -14,7 +14,7 @@
 
 **Files:** `tests/00-static/check_broadcast_consumer.py`, `tests/run.py`, `tests/00-static/check_mutations.py`, `docs/VALIDATION.md`
 
-- [ ] **Step 1: create the check**
+- [x] **Step 1: create the check**
 
 ```python
 #!/usr/bin/env python3
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: register check, mutation, inventory**
+- [x] **Step 2: register check, mutation, inventory**
 
 In `tests/run.py` after the event-producers line add:
 
@@ -91,7 +91,7 @@ In `docs/VALIDATION.md` add the inventory line:
       XACK/XAUTOCLAIM, queued UI status
 ```
 
-- [ ] **Step 3: prove RED and commit**
+- [x] **Step 3: prove RED and commit**
 
 Run: `python3 tests/run.py --static` → expect B1–B7 failures.
 Run: `git add tests/00-static/check_broadcast_consumer.py tests/run.py tests/00-static/check_mutations.py docs/VALIDATION.md && git commit -m "test(layer0): pin queued broadcast consumer (RED)"`
@@ -100,7 +100,7 @@ Run: `git add tests/00-static/check_broadcast_consumer.py tests/run.py tests/00-
 
 **Files:** `portal/src/main.rs`
 
-- [ ] **Step 1: add the route and handler**
+- [x] **Step 1: add the route and handler**
 
 Register immediately after `.route("/api/events", get(handle_events))`:
 
@@ -145,7 +145,7 @@ struct EventPublishBody {
 }
 ```
 
-- [ ] **Step 2: add a unit test**
+- [x] **Step 2: add a unit test**
 
 In the `#[cfg(test)]` module append:
 
@@ -172,7 +172,7 @@ In the `#[cfg(test)]` module append:
     }
 ```
 
-- [ ] **Step 3: verify and commit**
+- [x] **Step 3: verify and commit**
 
 Run: `python3 tests/run.py --static` → B1–B3 pass, B4–B7 still fail.
 Run: `cargo fmt --all -- --check` with workdir `portal/`.
@@ -182,7 +182,7 @@ Run: `git add portal/src/main.rs && git commit -m "feat(events): accept queued b
 
 **Files:** `portal/web/src/app/api/broadcast/route.ts`, `portal/web/src/lib/api.ts`, `portal/web/src/components/IntercomPanel.tsx`, their test files
 
-- [ ] **Step 1: replace inline fanout with queueing**
+- [x] **Step 1: replace inline fanout with queueing**
 
 In `portal/web/src/app/api/broadcast/route.ts`, drop `import { fanoutBroadcast } from "@/lib/broadcast";`. Replace the final two lines with:
 
@@ -217,7 +217,7 @@ In `portal/web/src/app/api/broadcast/route.ts`, drop `import { fanoutBroadcast }
   return NextResponse.json({ message, queued: true });
 ```
 
-- [ ] **Step 2: update the API type**
+- [x] **Step 2: update the API type**
 
 In `portal/web/src/lib/api.ts`, change `postBroadcast`'s return type to:
 
@@ -228,7 +228,7 @@ export async function postBroadcast(text: string): Promise<{
 }> {
 ```
 
-- [ ] **Step 3: update the UI message**
+- [x] **Step 3: update the UI message**
 
 In `portal/web/src/components/IntercomPanel.tsx` replace the destructuring/status block:
 
@@ -238,11 +238,11 @@ In `portal/web/src/components/IntercomPanel.tsx` replace the destructuring/statu
       setBroadcastOut("Broadcast vorgemerkt — Zustellung läuft im Hintergrund.");
 ```
 
-- [ ] **Step 4: update vitest tests**
+- [x] **Step 4: update vitest tests**
 
 In `portal/web/src/app/api/broadcast/route.test.ts`, add a mock fetch case for `/api/events/publish` returning 202 and assert the response is `{message, queued:true}`; in `portal/web/src/components/IntercomPanel.test.tsx`, change the broadcast-success test to return `{message, queued:true}` and expect the "vorgemerkt" status. Keep the existing 401/unauthorized tests.
 
-- [ ] **Step 5: verify and commit**
+- [x] **Step 5: verify and commit**
 
 Run: `cd portal/web && bun run test && bun run typecheck`.
 Run: `python3 tests/run.py --static` → B4/B6 pass, B5/B7 still fail.
@@ -252,11 +252,11 @@ Run: `git add portal/web/src && git commit -m "feat(portal-web): queue broadcast
 
 **Files:** `portal/web/instrumentation.ts`, `portal/web/package.json`, `portal/web/bun.lock`
 
-- [ ] **Step 1: add the ioredis dependency**
+- [x] **Step 1: add the ioredis dependency**
 
 Run: `cd portal/web && bun add ioredis`. This updates `package.json` and `bun.lockb`/`bun.lock` (whatever bun uses in this repo).
 
-- [ ] **Step 2: create the instrumentation worker**
+- [x] **Step 2: create the instrumentation worker**
 
 Create `portal/web/instrumentation.ts`:
 
@@ -336,7 +336,7 @@ export async function register() {
 }
 ```
 
-- [ ] **Step 3: verify and commit**
+- [x] **Step 3: verify and commit**
 
 Run: `cd portal/web && bun run typecheck && bun run test`.
 Run: `python3 tests/run.py --static` → full gate green.
@@ -346,11 +346,11 @@ Run: `git add portal/web/instrumentation.ts portal/web/package.json portal/web/b
 
 **Files:** `docs/superpowers/plans/2026-11-26-broadcast-event-consumer.md`, `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`
 
-- [ ] **Step 1: annotate and close**
+- [x] **Step 1: annotate and close**
 
 In `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`, annotate follow-up 2 with the landed artifacts (spec `8f2db12`, guard/endpoint/worker commits) and note that direct SOGo/OpenCloud/IdP producers remain follow-up 1. Check all real plan steps `[x]` (preserve the line-3 syntax example).
 
-- [ ] **Step 2: final verification**
+- [x] **Step 2: final verification**
 
 Run: `python3 tests/run.py --static` → expect all suites PASS, 0 failed.
 Run: `python3 tests/00-static/check_mutations.py` → expect `broadcast-inline-fanout-restored` caught.
@@ -358,7 +358,7 @@ Run: `cd portal/web && bun run test && bun run typecheck`.
 Run: `cargo fmt --all -- --check` from `portal/`.
 Run: `git status --short` → clean. Remote `cargo test` only if `vhrz2392` resolves; otherwise CI is the compile gate.
 
-- [ ] **Step 3: commit**
+- [x] **Step 3: commit**
 
 ```bash
 git add docs/superpowers/plans/2026-11-26-broadcast-event-consumer.md docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md

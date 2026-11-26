@@ -594,8 +594,9 @@ MUTATIONS = [
     {
         "name": "broadcast-inline-fanout-restored",
         "file": "portal/web/src/app/api/broadcast/route.ts",
-        "old": "const fanout = await fanoutBroadcast(text);",
-        "new": "const queuedx = await fanoutBroadcast(text);",
+        "old": "  const queued = await forwardToBackend({",
+        "new": "  const queuedx = await fanoutBroadcast(text);\n"
+               "  const queued = await forwardToBackend({",
         "check": "tests/00-static/check_broadcast_consumer.py",
         "why": "broadcast-consumer — calling fanout inline instead of queuing "
                "broadcast.requested must fail the Layer-0 guard",

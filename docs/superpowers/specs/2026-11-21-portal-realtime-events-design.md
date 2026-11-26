@@ -231,9 +231,14 @@ OpenCloud/SOGo producers; Matrix/mail event consumers; WebSocket; removing the
    `cloud.uploaded/mkdir/deleted/shared` and the OIDC callback/logout publish
    `session.login/logout`, all actor-scoped with fail-soft delivery and pinned
    by `tests/00-static/check_event_producers.py`. Direct SOGo/OpenCloud/IdP
-   producers (changes in those upstream repos) remain open; slice 2 is
-   untouched.
+   producers (changes in those upstream repos) remain open.
 2. Matrix/mail broadcast becomes event-driven consumers (replacing today's
-   direct `fanoutBroadcast` calls).
+   direct `fanoutBroadcast` calls) — DONE 2026-11-26 (event-driven consumers):
+   `POST /api/broadcast` stores the note and queues `broadcast.requested` via
+   the cookie-gated `POST /api/events/publish`; a portal-web `instrumentation.ts`
+   worker consumes it with group `portal-web-broadcast` (XACK on success,
+   XAUTOCLAIM > 5 min) and calls the unchanged `fanoutBroadcast`. Pinned by
+   `tests/00-static/check_broadcast_consumer.py` (design `8f2db12`, plan
+   `dc9bd15`, commits `4b91fd6`, `a80e58c`, `1fd5385`, `6e3e8a3`).
 3. Optional: add polls events, richer client state sync, extract the bus into a
    standalone gateway if suite-wide load demands it.
