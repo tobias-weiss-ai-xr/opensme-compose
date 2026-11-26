@@ -305,16 +305,10 @@ export default function IntercomPanel({
       latestRef.current = Math.max(latestRef.current, res.message.id);
       mergeIncoming([res.message]);
       setBroadcastText("");
-      const { element, mail } = res.fanout;
-      const channels = [
-        element.ok ? "Element ✓" : `Element ✗ (${element.detail})`,
-        mail.ok ? "Mail ✓" : `Mail ✗ (${mail.detail})`,
-      ];
-      const allOk = element.ok && mail.ok;
       setBroadcastOut(
-        allOk
-          ? `Broadcast gesendet — ${channels.join(" · ")}`
-          : `Broadcast gesendet, aber: ${channels.join(" · ")}`,
+        res.queued
+          ? "Broadcast gespeichert und zur Zustellung vorgemerkt."
+          : "Broadcast gespeichert, Zustellung nicht vorgemerkt.",
       );
     } catch (err) {
       setBroadcastOut(`Nicht gesendet: ${err instanceof Error ? err.message : String(err)}`);

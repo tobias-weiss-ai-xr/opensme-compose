@@ -499,17 +499,14 @@ describe("IntercomPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("broadcasts: stores the note, prepends it, reports both fanout channels", async () => {
+  it("broadcasts: stores the note, prepends it, reports the queued delivery", async () => {
     mockedFetch.mockResolvedValue(listResponse([msg({ id: 1, text: "Alt" })], 1));
     render(<IntercomPanel broadcastEnabled />);
     await screen.findByText("Alt");
 
     mockedBroadcast.mockResolvedValue({
       message: msg({ id: 9, text: "Alle an Bord", author: "op" }),
-      fanout: {
-        element: { ok: true, detail: "event $abc → !room:hs" },
-        mail: { ok: true, detail: "broadcast delivered to 14 recipient(s)" },
-      },
+      queued: true,
     });
     fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
       target: { value: "  Alle an Bord  " },
@@ -521,24 +518,21 @@ describe("IntercomPanel", () => {
     );
     expect(await screen.findByText("Alle an Bord")).toBeInTheDocument(); // prepended note
     expect(
-      await screen.findByText("Broadcast gesendet — Element ✓ · Mail ✓"),
+      await screen.findByText("Broadcast gespeichert und zur Zustellung vorgemerkt."),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Broadcast an alle")).toHaveValue("");
     // notes list untouched apart from the prepended broadcast
     expect(screen.getByText("Alt")).toBeInTheDocument();
   });
 
-  it("names a failed fanout channel with its detail, note still stored", async () => {
+  it("reports an unqueued broadcast while keeping the stored note", async () => {
     mockedFetch.mockResolvedValue(listResponse());
     render(<IntercomPanel broadcastEnabled />);
     await screen.findByText(/No notes yet/);
 
     mockedBroadcast.mockResolvedValue({
       message: msg({ id: 2, text: "Teil-Ok" }),
-      fanout: {
-        element: { ok: false, detail: "send failed (HTTP 403)" },
-        mail: { ok: true, detail: "delivered to 14 recipient(s)" },
-      },
+      queued: false,
     });
     fireEvent.change(screen.getByLabelText("Broadcast an alle"), {
       target: { value: "Teil-Ok" },
@@ -546,9 +540,7 @@ describe("IntercomPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Broadcast an alle" }));
 
     expect(
-      await screen.findByText(
-        "Broadcast gesendet, aber: Element ✗ (send failed (HTTP 403)) · Mail ✓",
-      ),
+      await screen.findByText("Broadcast gespeichert, Zustellung nicht vorgemerkt."),
     ).toBeInTheDocument();
     expect(screen.getByText("Teil-Ok")).toBeInTheDocument();
   });

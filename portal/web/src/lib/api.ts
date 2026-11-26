@@ -173,13 +173,13 @@ export interface FanoutResult {
 }
 
 /**
- * Operator broadcast: stores the note via /api/broadcast and fans it out
- * server-side (Element + Stalwart mail). Only available when the operator
- * set INTERCOM_BROADCAST=1 — otherwise the route answers 404 ("HTTP 404").
+ * Operator broadcast: stores the note via /api/broadcast and queues a
+ * broadcast.requested event for the portal-web fanout worker. Only available
+ * when INTERCOM_BROADCAST=1 — otherwise the route answers 404 ("HTTP 404").
  */
 export async function postBroadcast(text: string): Promise<{
   message: IntercomMessage;
-  fanout: FanoutResult;
+  queued: boolean;
 }> {
   const res = await fetch("/api/broadcast", {
     method: "POST",
@@ -197,7 +197,7 @@ export async function postBroadcast(text: string): Promise<{
     }
     throw new Error(error);
   }
-  return res.json() as Promise<{ message: IntercomMessage; fanout: FanoutResult }>;
+  return res.json() as Promise<{ message: IntercomMessage; queued: boolean }>;
 }
 
 export async function postIntercomUpload(

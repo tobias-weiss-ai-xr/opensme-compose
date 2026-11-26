@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { serverEnv } from "@/lib/config";
 import { backendUrl, forwardToBackend } from "@/lib/backend";
-import { fanoutBroadcast } from "@/lib/broadcast";
 import type { IntercomMessage } from "@/lib/types";
 
 /**
@@ -11,9 +10,9 @@ import type { IntercomMessage } from "@/lib/types";
  * Server-side fanout for the IntercomPanel broadcast box:
  *   1. store the note in the intercom backend (same POST /api/intercom
  *      hop the client would take, with the caller's session cookie),
- *   2. fan the text out to Element (Matrix client-v3 send) and Stalwart
- *      mail (child_process → scripts/broadcast-fanout.sh) — best-effort,
- *      per-channel outcome in the response.
+ *   2. publish a `broadcast.requested` event to the protected backend stream;
+ *      the portal-web instrumentation worker consumes it and performs the
+ *      Element/Mail fanout asynchronously (worker lifecycle is separate).
  *
  * The feature is invisible unless the operator enables it: any request
  * with INTERCOM_BROADCAST unset (or falsy) is answered 404 — "404 hides
@@ -94,7 +93,25 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // Legs 2+3: Element + mail, best-effort — the note is stored either way.
-  const fanout = await fanoutBroadcast(text);
-  return NextResponse.json({ message, fanout });
+  // Leg 2: queue the fanout on the event stream. The note is already stored;
+  // the consumer worker performs Element + mail delivery asynchronously.
+  const queuedHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const sessionCookie = req.headers.get("cookie");
+  if (sessionCookie) queuedHeaders.Cookie = sessionCookie;
+  const queued = await forwardToBackend({
+    url: `${backendUrl()}/api/events/publish`,
+    method: "POST",
+    headers: queuedHeaders,
+    body: JSON.stringify({ kind: "broadcast.requested", text }),
+    timeoutMs: 10_000,
+  });
+  if (queued.status < 200 || queued.status >= 300) {
+    return NextResponse.json(
+      { message, queued: false, error: `queue failed (HTTP ${queued.status})` },
+      { status: 502 },
+    );
+  }
+  return NextResponse.json({ message, queued: true });
 }
