@@ -602,6 +602,15 @@ MUTATIONS = [
                "broadcast.requested must fail the Layer-0 guard",
     },
     {
+        "name": "polls-vote-publish-removed",
+        "file": "portal/src/main.rs",
+        "old": '                    "poll.voted",',
+        "new": '                    "poll.voted-removed",',
+        "check": "tests/00-static/check_polls_events.py",
+        "why": "polls-events — removing the poll.voted publish must fail "
+               "the Layer-0 guard",
+    },
+    {
         "name": "events-sse-compression-exclusion",
         "file": "docker-compose.yml",
         "old": "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream",
