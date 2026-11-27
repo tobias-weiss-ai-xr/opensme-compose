@@ -248,5 +248,11 @@ OpenCloud/SOGo producers; Matrix/mail event consumers; WebSocket; removing the
    and `PollsPanel` merges deltas while preserving the session's local vote
    flag, reconciling on `portal.ready`. Pinned by
    `tests/00-static/check_polls_events.py` (design `32c7a10`, plan `445dfd4`,
-   commits `940d5db`, `53737bd`). Richer client state sync and a standalone
-   gateway remain optional.
+   commits `940d5db`, `53737bd`). Richer client state sync — DONE 2026-11-27:
+   the SSE reader peeks the newest Redis ID with `XREVRANGE`, `handle_events`
+   accepts `?since=` in addition to `Last-Event-ID`, the web proxy forwards the
+   query, and `useEventStream` deduplicates replayed frames by SSE ID with a
+   bounded `sessionStorage` set. Pinned by
+   `tests/00-static/check_event_sync.py` (design `16a9ec9`, plan `e074cbe`,
+   commits `d5571a8`, `f29f4cb`, `d23fc60`). A standalone gateway remains
+   optional.

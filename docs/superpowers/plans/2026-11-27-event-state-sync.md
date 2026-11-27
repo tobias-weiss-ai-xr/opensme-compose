@@ -19,7 +19,7 @@
 - Modify: `docs/VALIDATION.md`
 - Modify: `tests/00-static/check_events.py`
 
-- [ ] **Step 1: Create the guard with the exact contract**
+- [x] **Step 1: Create the guard with the exact contract**
 
 ```python
 #!/usr/bin/env python3
@@ -54,7 +54,7 @@ def main() -> int:
           "S3 handle_events accepts an explicit ?since= cursor")
     check("query.since" in MAIN and "last-event-id" in MAIN,
           "S4 header wins, query is the reload fallback")
-    check("req.nextUrl.search" in PROXY and "last-event-id" in PROXY,
+    check("req.nextUrl?.search" in PROXY and "last-event-id" in PROXY,
           "S5 proxy forwards both query and Last-Event-ID")
     check('"opensme:events:last-id"' in HOOK and "?since=" in HOOK,
           "S6 hook resumes from the stored SSE id")
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Relax the old hook-URL pin and update the cursor command pin in `tests/00-static/check_events.py`**
+- [x] **Step 2: Relax the old hook-URL pin and update the cursor command pin in `tests/00-static/check_events.py`**
 
 Replace the exact `new Ctor(...)` regex in E3 with a prefix check:
 
@@ -80,7 +80,7 @@ Replace the exact `new Ctor(...)` regex in E3 with a prefix check:
 
 Replace `"XRANGE"` in the E7 string list with `"XREVRANGE"`.
 
-- [ ] **Step 3: Register the guard in `tests/run.py`**
+- [x] **Step 3: Register the guard in `tests/run.py`**
 
 Insert after the `check_events` entry:
 
@@ -88,7 +88,7 @@ Insert after the `check_events` entry:
     ("Event state sync", "tests/00-static/check_event_sync.py"),
 ```
 
-- [ ] **Step 4: Add the mutation**
+- [x] **Step 4: Add the mutation**
 
 Insert after the existing `events-sse-compression-exclusion` entry in `tests/00-static/check_mutations.py`:
 
@@ -103,7 +103,7 @@ Insert after the existing `events-sse-compression-exclusion` entry in `tests/00-
     },
 ```
 
-- [ ] **Step 5: Add the `docs/VALIDATION.md` inventory line**
+- [x] **Step 5: Add the `docs/VALIDATION.md` inventory line**
 
 After the `check_events.py` inventory block:
 
@@ -113,12 +113,12 @@ After the `check_events.py` inventory block:
   unconditional ready dispatch.
 ```
 
-- [ ] **Step 6: Verify RED**
+- [x] **Step 6: Verify RED**
 
 Run: `python3 tests/00-static/check_event_sync.py`
 Expected: at least S1, S3, S5, S6, S7 fail (exit 1).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/00-static/check_event_sync.py tests/run.py tests/00-static/check_mutations.py docs/VALIDATION.md tests/00-static/check_events.py
@@ -133,7 +133,7 @@ git commit -m "test(layer0): pin SSE resume and dedupe contract (RED)"
 - Modify: `portal/src/events.rs:482-489`, `:241-247`, `:623+`
 - Modify: `portal/src/main.rs:1224-1247`
 
-- [ ] **Step 1: Fix the cursor-live peek**
+- [x] **Step 1: Fix the cursor-live peek**
 
 In `ensure_cursor_live()`, replace:
 
@@ -164,7 +164,7 @@ with:
 Keep the comment and reply parsing unchanged; `XREVRANGE` returns the same
 `[[id, fields], ...]` shape with newest first.
 
-- [ ] **Step 2: Honor `since` in the in-memory replay**
+- [x] **Step 2: Honor `since` in the in-memory replay**
 
 Replace `replay`:
 
@@ -199,7 +199,7 @@ Replace `replay`:
     }
 ```
 
-- [ ] **Step 3: Pass the in-memory `since` to replay in `stream()`**
+- [x] **Step 3: Pass the in-memory `since` to replay in `stream()`**
 
 In the `BusInner::Memory` arm of `stream()`, replace the replay call with:
 
@@ -207,7 +207,7 @@ In the `BusInner::Memory` arm of `stream()`, replace the replay call with:
                 let events = self.replay(last_id.as_deref()).await.unwrap_or_default();
 ```
 
-- [ ] **Step 4: Add the query cursor to `handle_events`**
+- [x] **Step 4: Add the query cursor to `handle_events`**
 
 In `portal/src/main.rs`, insert this struct immediately above `handle_events`:
 
@@ -240,7 +240,7 @@ async fn handle_events(
 Keep the viewer construction and `config.event_bus.stream(viewer, last).await`
 unchanged.
 
-- [ ] **Step 5: Add a Rust unit test**
+- [x] **Step 5: Add a Rust unit test**
 
 Append to `mod tests` in `portal/src/events.rs`:
 
@@ -268,7 +268,7 @@ Append to `mod tests` in `portal/src/events.rs`:
     }
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run: `cd portal && cargo fmt --all && cargo fmt --all -- --check`
 Expected: clean formatting, no local build (AGENTS.md).
@@ -276,7 +276,7 @@ Expected: clean formatting, no local build (AGENTS.md).
 Run: `python3 tests/00-static/check_event_sync.py`
 Expected: S1–S4 pass; S5–S8 still fail.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add portal/src/events.rs portal/src/main.rs
@@ -293,17 +293,23 @@ git commit -m "fix(events): resume SSE stream from query or Last-Event-ID"
 - Modify: `portal/web/src/lib/useEventStream.ts`
 - Modify: `portal/web/src/lib/useEventStream.test.ts`
 
-- [ ] **Step 1: Forward the query in the SSE proxy**
+- [x] **Step 1: Forward the query in the SSE proxy**
 
-In `portal/web/src/app/api/events/route.ts`, replace the fetch URL:
+In `portal/web/src/app/api/events/route.ts`, add the search fallback before the
+fetch and use it in the fetch URL:
 
 ```ts
-    upstream = await fetch(`${backendUrl()}/api/events${req.nextUrl.search}`, {
+  const search = req.nextUrl?.search ?? new URL(req.url).search;
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${backendUrl()}/api/events${search}`, {
 ```
 
-Keep all headers and response streaming unchanged.
+The optional chaining keeps plain `Request` objects in unit tests working;
+`NextRequest` supplies `nextUrl` in production. Keep all headers and response
+streaming unchanged.
 
-- [ ] **Step 2: Update the proxy test**
+- [x] **Step 2: Update the proxy test**
 
 In `portal/web/src/app/api/events/route.test.ts`, add a second test after the existing one:
 
@@ -328,7 +334,7 @@ In `portal/web/src/app/api/events/route.test.ts`, add a second test after the ex
   });
 ```
 
-- [ ] **Step 3: Implement resume + bounded dedupe in the hook**
+- [x] **Step 3: Implement resume + bounded dedupe in the hook**
 
 Replace `portal/web/src/lib/useEventStream.ts` with:
 
@@ -422,7 +428,7 @@ export function useEventStream(authenticated: boolean): { connected: boolean } {
 }
 ```
 
-- [ ] **Step 4: Update hook tests**
+- [x] **Step 4: Update hook tests**
 
 In `portal/web/src/lib/useEventStream.test.ts`, extend `FakeEventSource.emit` to
 carry `lastEventId`, clear `sessionStorage` in `beforeEach`, and add tests:
@@ -461,7 +467,7 @@ Change the existing URL assertion from `"/api/events"` to `"/api/events"`
 only when storage is empty (the new `beforeEach` clears it, so no change is
 needed to that line).
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run: `cd portal/web && bun run test && bun run typecheck`
 Expected: all tests pass, typecheck clean.
@@ -469,7 +475,7 @@ Expected: all tests pass, typecheck clean.
 Run: `python3 tests/00-static/check_event_sync.py`
 Expected: 8 passed / 0 failed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add portal/web/src/app/api/events/route.ts portal/web/src/app/api/events/route.test.ts portal/web/src/lib/useEventStream.ts portal/web/src/lib/useEventStream.test.ts
@@ -484,9 +490,9 @@ git commit -m "feat(portal-web): resume SSE stream and dedupe replayed frames"
 - Modify: `docs/superpowers/plans/2026-11-27-event-state-sync.md`
 - Modify: `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`
 
-- [ ] **Step 1: Close all real plan step boxes** (`- [ ]` → `- [x]`), leaving the line-3 syntax example unchanged.
+- [x] **Step 1: Close all real plan step boxes** (`- [ ]` → `- [x]`), leaving the line-3 syntax example unchanged.
 
-- [ ] **Step 2: Annotate realtime-events design follow-up item 3**
+- [x] **Step 2: Annotate realtime-events design follow-up item 3**
 
 Append to the polls-events annotation in
 `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`:
@@ -499,7 +505,7 @@ Append to the polls-events annotation in
    Pinned by `tests/00-static/check_event_sync.py` (design `16a9ec9`).
 ```
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 ```bash
 python3 tests/run.py --static
@@ -511,7 +517,7 @@ python3 tests/00-static/check_mutations.py
 Expected: static 40 passed / 0 failed; mutation suite 77 passed / 0 failed with
 35/35 wired checks; vitest all green; typecheck and fmt clean.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```bash
 git add docs/superpowers/plans/2026-11-27-event-state-sync.md docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md
