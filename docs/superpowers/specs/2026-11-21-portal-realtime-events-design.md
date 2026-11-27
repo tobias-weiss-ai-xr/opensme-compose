@@ -254,5 +254,12 @@ OpenCloud/SOGo producers; Matrix/mail event consumers; WebSocket; removing the
    query, and `useEventStream` deduplicates replayed frames by SSE ID with a
    bounded `sessionStorage` set. Pinned by
    `tests/00-static/check_event_sync.py` (design `16a9ec9`, plan `e074cbe`,
-   commits `d5571a8`, `f29f4cb`, `d23fc60`). A standalone gateway remains
-   optional.
+   commits `d5571a8`, `f29f4cb`, `d23fc60`). Standalone gateway — DONE
+   2026-11-27: an opt-in `gateway/` crate (`opensme-events-gateway`) reuses
+   `portal/src/events.rs` by path module, verifies
+   `OPENSMEPORTALSESSION` itself with the portal's HMAC format, and serves
+   only read-only `GET /api/events`; publishing stays in the portal. The
+   compose service is gated by profile `events-gateway`, with runbook
+   `docs/EVENTS-GATEWAY.md`. Pinned by
+   `tests/00-static/check_events_gateway.py` (design `033209d`, plan `d990071`,
+   commits `5f9e265`, `94bb3c7`, `b099e20`).

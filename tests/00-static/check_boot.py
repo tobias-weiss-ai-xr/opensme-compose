@@ -102,7 +102,7 @@ SETUID_IMAGES = {
 # nothing inside the container performs a privilege transition.
 # vc-room is the same profile: python-slim with setuid bits stripped in
 # the Dockerfile, runs `user: "1000:1000"`, flask needs no caps.
-CAP_DROP_ALL_OK = {"traefik", "seaweedfs", "portal", "portal-web", "dev-agent", "vc-room"}
+CAP_DROP_ALL_OK = {"traefik", "seaweedfs", "portal", "portal-web", "dev-agent", "vc-room", "events-gateway"}
 
 # Intentionally simplistic image<->service mapping used by the checks below.
 # Keyed by service name as defined in the compose files.

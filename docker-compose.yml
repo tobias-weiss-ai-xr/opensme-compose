@@ -516,6 +516,12 @@ services:
       LOGIN_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:?}
       GATEWAY_PORT: 8081
       RUST_LOG: ${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "/opensme-events-gateway", "--healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     depends_on:
       redis:
         condition: service_healthy

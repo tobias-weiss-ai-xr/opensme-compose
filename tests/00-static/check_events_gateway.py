@@ -34,7 +34,7 @@ def main() -> int:
           "G2 gateway reuses the portal events module via path")
     check('.route("/api/events", get(handle_events))' in main_rs,
           "G3 gateway exposes only GET /api/events")
-    check("verify_session" in main_rs and "UNAUTHORIZED" in main_rs,
+    check("session::verify_session(&state.secret, &token)" in main_rs and "UNAUTHORIZED" in main_rs,
           "G4 gateway verifies the session cookie before streaming")
     check('"OPENSMEPORTALSESSION"' in session_rs
           and "HmacSha256" in session_rs

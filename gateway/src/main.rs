@@ -69,6 +69,10 @@ fn unauthorized() -> Response {
 
 #[tokio::main]
 async fn main() {
+    // Distroless healthcheck: prove the binary starts without opening a port.
+    if std::env::args().any(|arg| arg == "--healthcheck") {
+        return;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),

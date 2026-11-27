@@ -18,7 +18,7 @@
 - Modify: `tests/00-static/check_mutations.py`
 - Modify: `docs/VALIDATION.md`
 
-- [ ] **Step 1: Write the guard**
+- [x] **Step 1: Write the guard**
 
 Create `tests/00-static/check_events_gateway.py` using the repo's `Result` helper and `return 0 if result.summary() else 1`. Pin:
 
@@ -33,7 +33,7 @@ G6: docs/EVENTS-GATEWAY.md exists and is linked from docs/README.md
 
 Use exact text gates similar to `check_event_sync.py`. Keep `Result.summary()` as the final expression and the correct shell exit code.
 
-- [ ] **Step 2: Register and wire the guard**
+- [x] **Step 2: Register and wire the guard**
 
 In `tests/run.py`, after the `("SSE resume and dedupe", "tests/00-static/check_event_sync.py")` entry, add:
 
@@ -58,7 +58,7 @@ In `tests/00-static/check_mutations.py`, add before the current last event mutat
 
 `// MUTANT` must make guard G3 fail; if it does not for a chosen anchor, change the mutation text to replace `verify_session` with `verify_sessionx` in a unique location and rerun.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 ```bash
 python3 tests/00-static/check_events_gateway.py
@@ -66,7 +66,7 @@ python3 tests/00-static/check_events_gateway.py
 
 Expected: all G1–G6 fail because the crate, docs and compose service do not exist yet.
 
-- [ ] **Step 4: Commit RED**
+- [x] **Step 4: Commit RED**
 
 ```bash
 git add tests/00-static/check_events_gateway.py tests/run.py tests/00-static/check_mutations.py docs/VALIDATION.md
@@ -81,7 +81,7 @@ git commit -m "test(layer0): pin standalone events gateway (RED)"
 - Create: `gateway/src/main.rs`
 - Create: `gateway/Dockerfile`
 
-- [ ] **Step 1: Create the manifest**
+- [x] **Step 1: Create the manifest**
 
 ```toml
 [package]
@@ -103,7 +103,7 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp"] 
 tokio-stream = "0.1"
 ```
 
-- [ ] **Step 2: Create session verification with unit tests**
+- [x] **Step 2: Create session verification with unit tests**
 
 `gateway/src/session.rs` mirrors the portal cookie format exactly:
 
@@ -160,7 +160,7 @@ pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 
 Add `#[cfg(test)] mod tests` with a helper that signs a payload with a 32-byte secret and tests: valid token passes; tampered payload rejected; expired token rejected; weak secret rejected; `cookie_value` extracts `OPENSMEPORTALSESSION` from a Cookie header. Never log token contents.
 
-- [ ] **Step 3: Create the server**
+- [x] **Step 3: Create the server**
 
 `gateway/src/main.rs`:
 
@@ -214,7 +214,7 @@ async fn main() {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
     let cfg = events::StreamConfig::from_env(|key| std::env::var(key).ok());
     let tenant = std::env::var("OPENSME_DOMAIN").unwrap_or_else(|_| "opensme.graphwiz.ai".into());
-    let secret = session::secret_from_env();
+    let session_key = session::secret_from_env();
     let bus = events::EventBus::from_config(cfg.clone());
     let state = Arc::new(AppState { cfg: cfg.clone(), secret, tenant, bus });
     let app = Router::new().route("/api/events", get(handle_events)).with_state(state);
@@ -227,7 +227,7 @@ async fn main() {
 
 Add `#[cfg(test)] mod tests` using `axum::Router::into_service` with `tower::ServiceExt` only if a dev-dependency is added; otherwise test the session module and keep HTTP contract testing in the Layer-0 guard. Add `AppState.cfg` use via `let _ = &state.cfg;` if the compiler warns about an unused field, or remove the field from the struct entirely and keep only `secret`, `tenant`, `bus`. Prefer removing it.
 
-- [ ] **Step 4: Create the Dockerfile**
+- [x] **Step 4: Create the Dockerfile**
 
 ```dockerfile
 FROM rust:1.98-slim-bookworm AS builder
@@ -246,7 +246,7 @@ CMD ["/opensme-events-gateway"]
 
 The build context is the repo root so the shared `portal/src/events.rs` path resolves.
 
-- [ ] **Step 5: Format and check the guard**
+- [x] **Step 5: Format and check the guard**
 
 ```bash
 cd gateway && cargo fmt --all && cargo fmt --all -- --check
@@ -255,7 +255,7 @@ python3 tests/00-static/check_events_gateway.py
 
 Expected: fmt clean; G1–G4 pass, G5–G6 still fail before Task 3.
 
-- [ ] **Step 6: Commit the crate**
+- [x] **Step 6: Commit the crate**
 
 ```bash
 git add gateway
@@ -269,7 +269,7 @@ git commit -m "feat(events): add opt-in read-only events gateway crate"
 - Create: `docs/EVENTS-GATEWAY.md`
 - Modify: `docs/README.md`
 
-- [ ] **Step 1: Add the compose service**
+- [x] **Step 1: Add the compose service**
 
 Add after the `portal:` service (before `redis:`):
 
@@ -313,15 +313,15 @@ Add after the `portal:` service (before `redis:`):
 
 No publish endpoint is exposed; the only route is the read-only `/api/events`.
 
-- [ ] **Step 2: Write the runbook**
+- [x] **Step 2: Write the runbook**
 
 Create `docs/EVENTS-GATEWAY.md` with: purpose, exactly why it is opt-in, required env table, enable command (`COMPOSE_PROFILES=events-gateway docker compose up -d events-gateway`), verification with a valid `OPENSMEPORTALSESSION` cookie (`curl -N -H 'Cookie: OPENSMEPORTALSESSION=...' https://events.<domain>/api/events`), expected 401/204 responses, and rollback (`COMPOSE_PROFILES=events-gateway docker compose stop events-gateway`; portal `/api/events` remains the default). State explicitly that publishing stays in the portal.
 
-- [ ] **Step 3: Link the runbook**
+- [x] **Step 3: Link the runbook**
 
 Add `- [Events gateway](EVENTS-GATEWAY.md)` to the documentation list in `docs/README.md`, in the event/operations section.
 
-- [ ] **Step 4: Verify compose and the guard**
+- [x] **Step 4: Verify compose and the guard**
 
 ```bash
 docker compose config --quiet
@@ -330,7 +330,7 @@ python3 tests/00-static/check_events_gateway.py
 
 Expected: compose parses; G1–G6 all pass.
 
-- [ ] **Step 5: Commit compose + docs**
+- [x] **Step 5: Commit compose + docs**
 
 ```bash
 git add docker-compose.yml docs/EVENTS-GATEWAY.md docs/README.md
@@ -343,15 +343,15 @@ git commit -m "feat(events): add opt-in events-gateway compose service and runbo
 - Modify: `docs/superpowers/plans/2026-11-27-events-gateway.md`
 - Modify: `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`
 
-- [ ] **Step 1: Close the plan**
+- [x] **Step 1: Close the plan**
 
 Replace every `- [ ]` step in this plan with `- [x]`, except the line-3 syntax example.
 
-- [ ] **Step 2: Annotate the follow-up**
+- [x] **Step 2: Annotate the follow-up**
 
 In `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`, add to follow-up item 3 that the standalone gateway landed 2026-11-27: design `033209d`, plan `e074cbe`, commits from this task, and that the gateway is opt-in and read-only.
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 ```bash
 python3 tests/run.py --static
@@ -362,7 +362,7 @@ cd ../portal/web && bun run test && bun run typecheck
 
 Expected: static gate green, mutation suite green with the new gateway mutation targeted, fmt clean, vitest and typecheck unchanged. Do **not** run `cargo build`/`cargo test` locally (AGENTS.md); `vhrz2392` was unreachable earlier, so CI/remote is the compile gate.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```bash
 git add docs/superpowers/plans/2026-11-27-events-gateway.md docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md

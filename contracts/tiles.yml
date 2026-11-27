@@ -161,6 +161,7 @@ excluded:
                      # path-routed (/rtc, /twirp) on the same vc host
   - id: portal       # the catalog itself
   - id: portal-web   # the catalog itself (Next.js frontend in front of `portal`)
+  - id: events-gateway # opt-in read-only SSE stream endpoint — infrastructure
   - id: traefik      # edge router (dashboard)
   - id: zitadel      # IdP — transparent SSO, never a tile
   - id: zitadel-login # the IdP's login page (path-routed on the same host)
