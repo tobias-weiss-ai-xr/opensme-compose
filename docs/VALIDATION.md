@@ -94,6 +94,10 @@ CI step or on its documented allowlist.
       publish endpoint, `broadcast.requested` with team visibility, no inline
       fanout in the web route, portal-web stream consumer with XACK/XAUTOCLAIM,
       queued UI status
+- [x] `check_polls_events.py` — polls realtime events: `poll.created` (create +
+      upload) and `poll.voted` published with Team visibility and a viewer-neutral
+      payload, hook listens to both kinds, panel merges deltas and reconciles on
+      `portal.ready`
 - [x] `check_cloud_bridge.py` — portal cloud-file bridge: mkdir + path-delete routes, both behind the session firewall, caller path validated, DAV client scoped to the session user, all four cloud error helpers used, catch-all proxy forwards cookie/body, browser calls both endpoints
 - [x] `check_docs_index.py` — docs-as-contract: every top-level docs/*.md is linked from docs/README.md or the README documentation table, and every link in both places resolves
 - [x] `check_portal_cors.py` — same-origin CORS contract: scoped edge middleware for direct DAV/OCS, no permissive CORS in the Rust portal, Next.js catch-all proxy as the single browser entry point

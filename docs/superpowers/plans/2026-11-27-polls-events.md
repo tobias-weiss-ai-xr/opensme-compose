@@ -14,7 +14,7 @@
 
 **Files:** Create `tests/00-static/check_polls_events.py`; modify `tests/run.py`, `tests/00-static/check_mutations.py`, `docs/VALIDATION.md`.
 
-- [ ] **Step 1: create the check**
+- [x] **Step 1: create the check**
 
 ```python
 #!/usr/bin/env python3
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: register in runner, mutation table, inventory**
+- [x] **Step 2: register in runner, mutation table, inventory**
 
 In `tests/run.py`, after the `("Portal event producers (cloud + session)", "tests/00-static/check_event_producers.py"),` line add:
 
@@ -103,7 +103,7 @@ In `docs/VALIDATION.md`, after the `check_event_producers.py` inventory line add
       Team-visible events; SSE hook + panel subscription and ready reconciliation
 ```
 
-- [ ] **Step 3: prove RED and commit**
+- [x] **Step 3: prove RED and commit**
 
 Run: `python3 tests/00-static/check_polls_events.py` → expect failures for all three publish sites, hook and panel.
 Run: `git add tests/00-static/check_polls_events.py tests/run.py tests/00-static/check_mutations.py docs/VALIDATION.md && git commit -m "test(layer0): pin polls realtime events (RED)"`
@@ -112,7 +112,7 @@ Run: `git add tests/00-static/check_polls_events.py tests/run.py tests/00-static
 
 **Files:** `portal/src/main.rs`
 
-- [ ] **Step 1: publish poll.created from both creation paths**
+- [x] **Step 1: publish poll.created from both creation paths**
 
 In `handle_polls_create`, replace the final response line `Ok(Json(poll.public(None))) => ...` style success arm with:
 
@@ -134,7 +134,7 @@ In `handle_polls_create`, replace the final response line `Ok(Json(poll.public(N
 
 In `handle_polls_upload`, after `let poll = state.store.create(...)?;` insert the same publish block before building the response.
 
-- [ ] **Step 2: publish poll.voted after a successful vote**
+- [x] **Step 2: publish poll.voted after a successful vote**
 
 In `handle_polls_vote`, on the `Ok(poll)` branch insert:
 
@@ -151,7 +151,7 @@ In `handle_polls_vote`, on the `Ok(poll)` branch insert:
                 .await;
 ```
 
-- [ ] **Step 3: add a Rust unit test**
+- [x] **Step 3: add a Rust unit test**
 
 Append to the `#[cfg(test)]` module:
 
@@ -186,7 +186,7 @@ Append to the `#[cfg(test)]` module:
 
 (Adjust the struct literal fields to the exact `polls::Poll` definition if it differs.)
 
-- [ ] **Step 4: verify and commit**
+- [x] **Step 4: verify and commit**
 
 Run: `python3 tests/00-static/check_polls_events.py` → producer checks pass, hook/panel still fail.
 Run: `cargo fmt --all -- --check` (workdir `portal/`; no local build per AGENTS.md).
@@ -196,7 +196,7 @@ Run: `git add portal/src/main.rs && git commit -m "feat(events): publish poll cr
 
 **Files:** `portal/web/src/lib/useEventStream.ts`, `portal/web/src/components/PollsPanel.tsx`, `portal/web/src/lib/useEventStream.test.ts`, `portal/web/src/components/PollsPanel.test.tsx`
 
-- [ ] **Step 1: add kinds to the hook**
+- [x] **Step 1: add kinds to the hook**
 
 In `useEventStream.ts`, extend `LISTENED_KINDS` with:
 
@@ -205,7 +205,7 @@ In `useEventStream.ts`, extend `LISTENED_KINDS` with:
   "poll.voted",
 ```
 
-- [ ] **Step 2: subscribe in PollsPanel**
+- [x] **Step 2: subscribe in PollsPanel**
 
 Add imports:
 
@@ -245,11 +245,11 @@ Inside `PollsPanel`, after `refresh` is defined:
   }, [refresh]);
 ```
 
-- [ ] **Step 3: add vitest coverage**
+- [x] **Step 3: add vitest coverage**
 
 In `PollsPanel.test.tsx`, add a test that dispatches `poll.voted` with an updated poll and asserts the new vote count appears without a new fetch; add a test that `portal.ready` triggers `refresh`. In `useEventStream.test.ts`, assert the hook forwards `poll.created` and `poll.voted` payloads to listeners.
 
-- [ ] **Step 4: verify and commit**
+- [x] **Step 4: verify and commit**
 
 Run: `python3 tests/00-static/check_polls_events.py` → all pins pass.
 Run: `cd portal/web && bun run test` → all suites pass; `bun run typecheck` clean.
@@ -259,11 +259,11 @@ Run: `git add portal/web/src && git commit -m "feat(portal-web): apply polls eve
 
 **Files:** this plan, `docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md`
 
-- [ ] **Step 1: close plan and annotate follow-up**
+- [x] **Step 1: close plan and annotate follow-up**
 
 Mark all real `- [ ]` steps in this plan `- [x]` (keep the line-3 syntax example). In the realtime-events design, annotate follow-up 3's polls item as done on 2026-11-27 with the spec/plan/commit ids; richer sync and standalone gateway remain optional.
 
-- [ ] **Step 2: full gate**
+- [x] **Step 2: full gate**
 
 Run: `python3 tests/run.py --static` → all suites PASS, 0 failed.
 Run: `python3 tests/00-static/check_mutations.py` → all mutations caught, including `polls-vote-publish-removed`.
@@ -271,7 +271,7 @@ Run: `cd portal/web && bun run test && bun run typecheck` → green.
 Run: `cd portal && cargo fmt --all -- --check` → clean. Remote `cargo test` only if `vhrz2392` resolves (AGENTS.md).
 Run: `git status --short` → clean.
 
-- [ ] **Step 3: commit and push**
+- [x] **Step 3: commit and push**
 
 ```bash
 git add docs/superpowers/plans/2026-11-27-polls-events.md docs/superpowers/specs/2026-11-21-portal-realtime-events-design.md

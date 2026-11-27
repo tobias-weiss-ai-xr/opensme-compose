@@ -242,3 +242,11 @@ OpenCloud/SOGo producers; Matrix/mail event consumers; WebSocket; removing the
    `dc9bd15`, commits `4b91fd6`, `a80e58c`, `1fd5385`, `6e3e8a3`).
 3. Optional: add polls events, richer client state sync, extract the bus into a
    standalone gateway if suite-wide load demands it.
+   Polls events — DONE 2026-11-27: the backend publishes `poll.created` (create
+   and upload) and `poll.voted` with Team visibility and a viewer-neutral
+   `PollPublic` payload (no `voted_by`); `useEventStream` forwards both kinds
+   and `PollsPanel` merges deltas while preserving the session's local vote
+   flag, reconciling on `portal.ready`. Pinned by
+   `tests/00-static/check_polls_events.py` (design `32c7a10`, plan `445dfd4`,
+   commits `940d5db`, `53737bd`). Richer client state sync and a standalone
+   gateway remain optional.
