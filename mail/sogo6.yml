@@ -12,7 +12,8 @@ services:
     restart: unless-stopped
     volumes:
       - sogo6-redis-data:/data
-    network_mode: service:sogo6-server
+    networks:
+      - opensme-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -31,7 +32,8 @@ services:
     volumes:
       - sogo6-postgres-data:/var/lib/postgresql/data
       - ./sogo6-users-init.sql:/docker-entrypoint-initdb.d/10-users.sql:ro
-    network_mode: service:sogo6-server
+    networks:
+      - opensme-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sogo -d sogo"]
       interval: 30s
@@ -93,16 +95,11 @@ services:
       # Agent (optional)
       SOGO_P_AGENT_WORKER_CONCURRENCY: "2"
     networks:
-      opensme-net:
-        aliases:
-          - sogo6-postgres
-          - sogo6-redis
-          - opensme-sogo6-postgres
-          - opensme-sogo6-redis
+      - opensme-net
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/user/v1/health"]
+      test: ["CMD-SHELL", "curl -s http://localhost:5000/api/user/v1/health | python3 -c \"import sys,json; d=json.load(sys.stdin); exit(0 if d.get('dependencies',{}).get('database',{}).get('status')=='ok' and d.get('dependencies',{}).get('redis',{}).get('status')=='ok' else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -152,10 +149,11 @@ services:
       - "traefik.http.routers.sogo6-ui.tls.certresolver=mytlschallenge"
       - "traefik.http.services.sogo6-ui.loadbalancer.server.port=3000"
     healthcheck:
-      # Through the UI's own /api proxy (catch-all -> API_PROXY_TARGET),
-      # so a green health check proves proxy AND backend. The backend's
-      # health route lives under /api/user/v1 — /api/health is a 404.
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/user/v1/health"]
+      # The UI serves the SPA at / (root). The backend's /api/user/v1/health
+      # returns 503 "degraded" (LDAP disabled fleet-wide), so it can't be
+      # used as a happy-path probe — checking / proves the Next.js process
+      # is up; backend connectivity is proven separately by the API proxy.
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -163,3 +161,7 @@ services:
 volumes:
   sogo6-redis-data:
   sogo6-postgres-data:
+
+networks:
+  traefik-web:
+    external: true
