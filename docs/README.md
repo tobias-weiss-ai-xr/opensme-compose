@@ -73,6 +73,9 @@ directories:
 | [operaton-sso.md](operaton-sso.md) | Operaton BPMN login via Zitadel OIDC |
 | [registry-mirror.md](registry-mirror.md) | Local registry mirror / pull-through cache setup |
 | [nix.md](nix.md) | Nix-built replacement images, local tags and CI publication to ghcr.io |
+
+- [Events gateway](EVENTS-GATEWAY.md) — opt-in read-only SSE gateway runbook
+
 | [vc.md](vc.md) | LiveKit video-meeting service, room creation and edge routing |
 
 ### Quality & verification

@@ -488,6 +488,55 @@ services:
           cpus: "0.1"
           memory: 32M
 
+  # ── Opt-in standalone SSE gateway ────────────────
+  # Read-only stream reader for the portal event bus. Publishing stays in
+  # `portal`; this service only verifies the portal session cookie and reads
+  # Redis. Disabled by default: enable with COMPOSE_PROFILES=events-gateway.
+  events-gateway:
+    <<: *service-defaults
+    profiles: ["events-gateway"]
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: opensme-events-gateway
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      EVENTS_ENABLED: ${EVENTS_ENABLED:-}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379
+      EVENTS_STREAM: ${EVENTS_STREAM:-opensme:events}
+      EVENTS_MAXLEN: ${EVENTS_MAXLEN:-10000}
+      OPENSME_DOMAIN: ${OPENSME_DOMAIN:-opensme.graphwiz.ai}
+      LOGIN_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET:?}
+      GATEWAY_PORT: 8081
+      RUST_LOG: ${LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - opensme-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.events-gateway.rule=Host(`events.${OPENSME_DOMAIN:-opensme.graphwiz.ai}`) && PathPrefix(`/api/events`)"
+      - "traefik.http.routers.events-gateway.entrypoints=websecure"
+      - "traefik.http.routers.events-gateway.tls=true"
+      - "traefik.http.routers.events-gateway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.events-gateway.loadbalancer.server.port=8081"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
   # ── Next.js Portal Web UI ─────────────────────────
   # Frontend in front of the Rust API (portal service). Rendered with Next.js
   # 15 in openEduSuite style; every /api|/health|/metrics request is proxied

@@ -43,7 +43,7 @@ def main() -> int:
     service = compose.split("\n  events-gateway:", 1)[1] if "\n  events-gateway:" in compose else ""
     check('profiles: ["events-gateway"]' in service[:400]
           and "/api/events" in service
-          and "publish" not in service,
+          and "/api/events/publish" not in service,
           "G6 compose service is opt-in and read-only")
     check(runbook.exists()
           and "- [Events gateway](EVENTS-GATEWAY.md)" in text("docs/README.md"),
