@@ -117,6 +117,31 @@ def main() -> bool:
     except Exception as e:
         r.fail(f"parse_health unavailable: {e}")
 
+    r.header("T5: TUD plain/markdown-wrapped responses are parsed as JSON")
+    try:
+        llm = load("llm")
+        analyzer = llm.LLMAnalyzer(llm.LLMBackend.TUD, "https://x", "GLM")
+        cases = {
+            "```json\n{\"analysis\":\"root cause A\",\"severity\":\"high\",\"action\":\"restart\",\"command\":\"docker restart x\"}\n```": "root cause A",
+            "Here is the result: {\"analysis\":\"root cause B\",\"severity\":\"medium\",\"action\":\"monitor\",\"command\":\"\"}": "root cause B",
+        }
+        bad = False
+        for raw, want in cases.items():
+            parsed = analyzer.parse_response(raw)
+            if parsed.get("analysis") != want:
+                r.fail(f"parse_response did not extract JSON: {parsed.get('analysis')!r}")
+                bad = True
+        if not bad:
+            r.ok("markdown fences and leading prose are parsed")
+    except Exception as e:
+        r.fail(f"LLM parse check failed: {e}")
+
+    prompt = analyzer.build_prompt("issue", "context", {"risk_score": 0.8}) if 'analyzer' in locals() else ""
+    if '"analysis"' not in prompt and "analysis" not in prompt:
+        r.fail("prompt does not require structured JSON output")
+    else:
+        r.ok("prompt requests structured analysis fields")
+
     print()
     if r.failed:
         print(f"❌ {r.failed} failure(s)")

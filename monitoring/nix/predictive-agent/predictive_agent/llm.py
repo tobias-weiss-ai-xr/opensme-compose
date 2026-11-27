@@ -64,11 +64,9 @@ class LLMAnalyzer:
             if "memory_trend" in prediction:
                 prompt_parts.append(f"  Memory trend: {prediction['memory_trend']}")
         
-        prompt_parts.append("\nAnalyze the issue and provide:")
-        prompt_parts.append("- analysis: Brief analysis of the root cause")
-        prompt_parts.append("- severity: high, medium, or low")
-        prompt_parts.append("- action: Recommended action")
-        prompt_parts.append("- command: kubectl command to execute (if applicable)")
+        prompt_parts.append("\nReturn exactly one JSON object with these keys:") 
+        prompt_parts.append('{"analysis": "brief root-cause analysis", "severity": "high|medium|low", "action": "recommended action", "command": "docker/kubectl command if applicable, else empty string"}')
+        prompt_parts.append("Do not wrap the JSON in markdown fences and do not add prose outside the JSON object.")
         
         return "\n".join(prompt_parts)
 
@@ -137,19 +135,15 @@ class LLMAnalyzer:
     def parse_response(self, response):
         """Parse LLM JSON response with fallback for invalid JSON.
         
-        Args:
-            response: Raw LLM response string
-            
-        Returns:
-            Parsed dict with fallback for invalid JSON
+        Models may return JSON wrapped in markdown fences or prefixed with
+        prose; extract the first JSON object rather than requiring the whole
+        response to be pure JSON.
         """
         try:
-            parsed = json.loads(response)
-            # Ensure required fields exist
+            parsed = self._extract_json(response)
             if not isinstance(parsed, dict):
                 return self._fallback_response()
             
-            # Add missing required fields with defaults
             if "analysis" not in parsed:
                 parsed["analysis"] = "Unknown issue"
             if "severity" not in parsed:
@@ -162,6 +156,20 @@ class LLMAnalyzer:
             return parsed
         except (json.JSONDecodeError, TypeError, AttributeError):
             return self._fallback_response()
+
+    @staticmethod
+    def _extract_json(response):
+        """Extract the first JSON object from a possibly fenced/prose response."""
+        if not isinstance(response, str):
+            return None
+        text = response.strip()
+        start = text.find("{")
+        if start < 0:
+            return None
+        try:
+            return json.JSONDecoder().raw_decode(text[start:])[0]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
 
     def _fallback_response(self):
         """Generate fallback response for invalid JSON."""
