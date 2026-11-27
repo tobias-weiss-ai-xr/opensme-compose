@@ -1763,6 +1763,16 @@ async fn handle_polls_create(
             Err(e) => return bad(&e).into_response(),
         };
     let poll = store.create(question, options, attachment, Some(session.name.clone()));
+    let _ = config
+        .event_bus
+        .publish(&events::Event::new(
+            "poll.created",
+            &session.sub,
+            &config.opensme_domain,
+            events::Visibility::Team,
+            serde_json::json!({ "poll": poll.public(None) }),
+        ))
+        .await;
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "poll": poll.public(None) })),
@@ -1848,6 +1858,16 @@ async fn handle_polls_upload(
         }
     };
     let poll = store.create(question, options, attachment, Some(session.name.clone()));
+    let _ = config
+        .event_bus
+        .publish(&events::Event::new(
+            "poll.created",
+            &session.sub,
+            &config.opensme_domain,
+            events::Visibility::Team,
+            serde_json::json!({ "poll": poll.public(None) }),
+        ))
+        .await;
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "poll": poll.public(None) })),
@@ -1872,10 +1892,22 @@ async fn handle_polls_vote(
             .into_response();
     }
     match store.vote(id, post.option as usize, Some(&session.sub)) {
-        Ok(poll) => Json(serde_json::json!({
-            "poll": poll.public(Some(&session.sub))
-        }))
-        .into_response(),
+        Ok(poll) => {
+            let _ = config
+                .event_bus
+                .publish(&events::Event::new(
+                    "poll.voted",
+                    &session.sub,
+                    &config.opensme_domain,
+                    events::Visibility::Team,
+                    serde_json::json!({ "poll": poll.public(None) }),
+                ))
+                .await;
+            Json(serde_json::json!({
+                "poll": poll.public(Some(&session.sub))
+            }))
+            .into_response()
+        }
         Err(e) => {
             // "already voted" is a conflict (the poll state is fine, the
             // request just cannot be applied) — clients show a friendly
@@ -4871,6 +4903,42 @@ mod tests {
             sub: "bob".into(),
             email: "".into(),
             name: "".into(),
+            tenant: "example.org".into(),
+        }));
+    }
+
+    #[tokio::test]
+    async fn poll_event_payload_stays_viewer_neutral() {
+        let poll = polls::Poll {
+            id: 7,
+            question: "Lunch?".into(),
+            options: vec!["Pasta".into(), "Salad".into()],
+            votes: vec![1, 0],
+            closed: false,
+            created_at: "2026-11-27T00:00:00Z".into(),
+            created_by: Some("Alice".into()),
+            attachment: None,
+            voted_by: vec!["alice".into()],
+        };
+        let payload = serde_json::json!({ "poll": poll.public(None) });
+        let bus = events::EventBus::memory();
+        let e = events::Event::new(
+            "poll.voted",
+            "alice",
+            "example.org",
+            events::Visibility::Team,
+            payload.clone(),
+        );
+        bus.publish(&e).await.unwrap();
+        let all = bus.replay(None).await.unwrap();
+        assert_eq!(all[0].kind, "poll.voted");
+        assert_eq!(all[0].payload["poll"]["votes"][0], 1);
+        assert!(all[0].payload["poll"].get("voted_by").is_none());
+        assert!(all[0].payload["poll"].get("voted").is_none());
+        assert!(all[0].visibility.visible_to(&events::Viewer {
+            sub: "bob".into(),
+            email: "bob@example.org".into(),
+            name: "Bob".into(),
             tenant: "example.org".into(),
         }));
     }
