@@ -30,7 +30,7 @@ def main() -> int:
 
     check('name = "opensme-events-gateway"' in manifest,
           "G1 gateway crate is named opensme-events-gateway")
-    check('#[path = "../portal/src/events.rs"]' in main_rs and "mod events;" in main_rs,
+    check('#[path = "../../portal/src/events.rs"]' in main_rs and "mod events;" in main_rs,
           "G2 gateway reuses the portal events module via path")
     check('.route("/api/events", get(handle_events))' in main_rs,
           "G3 gateway exposes only GET /api/events")

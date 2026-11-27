@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-in, read-only SSE gateway crate that reuses the portal's event module and verifies portal session cookies itself.
 
-**Architecture:** `gateway/` is a small axum binary using `#[path = "../portal/src/events.rs"] mod events;`, so SSE framing, cursor sanitisation, XREVRANGE resume, visibility filtering and stream limits stay identical. A local session module verifies `OPENSMEPORTALSESSION` with the same HMAC format as the portal. Compose exposes the service only under the `events-gateway` profile.
+**Architecture:** `gateway/` is a small axum binary using `#[path = "../../portal/src/events.rs"] mod events;`, so SSE framing, cursor sanitisation, XREVRANGE resume, visibility filtering and stream limits stay identical. A local session module verifies `OPENSMEPORTALSESSION` with the same HMAC format as the portal. Compose exposes the service only under the `events-gateway` profile.
 
 **Tech Stack:** Rust/axum 0.7, Redis Streams via the shared events module, Docker Compose, Layer-0 Python static guards.
 
@@ -24,7 +24,7 @@ Create `tests/00-static/check_events_gateway.py` using the repo's `Result` helpe
 
 ```python
 G1: gateway/Cargo.toml exists and contains 'name = "opensme-events-gateway"'
-G2: gateway/src/main.rs contains '#[path = "../portal/src/events.rs"] mod events;'
+G2: gateway/src/main.rs contains '#[path = "../../portal/src/events.rs"] mod events;'
 G3: main.rs has '.route("/api/events", get(handle_events))' and 'verify_session' + '401'
 G4: session.rs has 'OPENSMEPORTALSESSION', 'HmacSha256', 'LOGIN_SESSION_COOKIE_SECRET'
 G5: docker-compose.yml has 'events-gateway:' with 'profiles: ["events-gateway"]' and no publish route
@@ -165,7 +165,7 @@ Add `#[cfg(test)] mod tests` with a helper that signs a payload with a 32-byte s
 `gateway/src/main.rs`:
 
 ```rust
-#[path = "../portal/src/events.rs"]
+#[path = "../../portal/src/events.rs"]
 mod events;
 mod session;
 

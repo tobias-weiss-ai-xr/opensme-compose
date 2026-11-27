@@ -23,7 +23,7 @@ be movable without rewriting framing, visibility, or resume behaviour.
   `Cargo.toml`, `src/main.rs`, and multi-stage `Dockerfile` (rust builder →
   debian-slim runtime, non-root user).
 - `gateway/src/main.rs` includes `portal/src/events.rs` as a path module:
-  `#[path = "../portal/src/events.rs"] mod events;`. This makes `EventBus`,
+  `#[path = "../../portal/src/events.rs"] mod events;`. This makes `EventBus`,
   `Viewer`, `Visibility`, `sanitize_cursor`, `XREVRANGE` resume, SSE framing,
   visibility filtering, heartbeats, and the per-viewer stream cap the same
   code in both processes. No changes to `portal/src/events.rs` are part of
