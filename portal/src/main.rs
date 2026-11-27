@@ -1219,12 +1219,18 @@ async fn handle_intercom_list(
     }))
 }
 
+#[derive(serde::Deserialize)]
+struct EventsQuery {
+    since: Option<String>,
+}
+
 /// SSE stream of real-time events. Registered on the protected subrouter, so
 /// the session firewall runs first and the handler sees a verified `sub`.
 async fn handle_events(
     State(config): State<Arc<AppConfig>>,
     axum::extract::Extension(session): axum::extract::Extension<session::Session>,
     headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<EventsQuery>,
 ) -> impl IntoResponse {
     if config.event_bus.is_disabled() {
         return StatusCode::NO_CONTENT.into_response();
@@ -1232,7 +1238,8 @@ async fn handle_events(
     let last = headers
         .get("last-event-id")
         .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
+        .map(str::to_string)
+        .or(query.since);
     // Stores identify authors/assignees by email (or display name), while the
     // auth layer supplies the OIDC sub. Matching all of them keeps scoped task
     // events deliverable to their real recipients; unrelated users still don't

@@ -238,10 +238,30 @@ impl EventBus {
     }
 
     /// Used by tests and by the SSE reader for backfill on reconnect.
-    pub async fn replay(&self, _since: Option<&str>) -> Result<Vec<Event>, String> {
+    pub async fn replay(&self, since: Option<&str>) -> Result<Vec<Event>, String> {
         match &self.0 {
             BusInner::Disabled => Ok(Vec::new()),
-            BusInner::Memory { events, .. } => Ok(events.lock().await.clone()),
+            BusInner::Memory { events, .. } => {
+                let all = events.lock().await.clone();
+                // The in-memory backend assigns `m-<n>` IDs; Redis IDs are
+                // handled by EventReader, not by replay.
+                let Some(since) = since
+                    .and_then(|id| id.strip_prefix("m-"))
+                    .and_then(|n| n.parse::<u128>().ok())
+                else {
+                    return Ok(all);
+                };
+                Ok(all
+                    .into_iter()
+                    .filter(|event| {
+                        event
+                            .id
+                            .strip_prefix("m-")
+                            .and_then(|n| n.parse::<u128>().ok())
+                            .is_some_and(|n| n > since)
+                    })
+                    .collect())
+            }
             BusInner::Redis { .. } => Ok(Vec::new()), // live reads use EventReader
         }
     }
@@ -257,7 +277,7 @@ impl EventBus {
             BusInner::Disabled => StatusCode::NO_CONTENT.into_response(),
             BusInner::Memory { .. } => {
                 // In-process contract tests can exercise replay; production uses Redis.
-                let events = self.replay(None).await.unwrap_or_default();
+                let events = self.replay(last_id.as_deref()).await.unwrap_or_default();
                 let body = filter_visible(events, &viewer)
                     .iter()
                     .map(sse_frame)
@@ -479,7 +499,7 @@ impl EventReader {
         let Some(conn) = self.conn.as_mut() else {
             return false;
         };
-        let reply: redis::RedisResult<redis::Value> = redis::cmd("XRANGE")
+        let reply: redis::RedisResult<redis::Value> = redis::cmd("XREVRANGE")
             .arg(&self.config.stream)
             .arg("+")
             .arg("-")
@@ -848,5 +868,33 @@ mod tests {
         assert!(parse_entries(Ok(redis::Value::Nil))
             .expect("Nil reply is not an error")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_since_filters_in_memory_events_by_stream_id() {
+        let bus = EventBus::memory();
+        let first = Event::new(
+            "task.created",
+            "alice",
+            "t",
+            Visibility::Team,
+            serde_json::json!({ "id": 1 }),
+        );
+        let second = Event::new(
+            "task.created",
+            "alice",
+            "t",
+            Visibility::Team,
+            serde_json::json!({ "id": 2 }),
+        );
+        let first_id = bus.publish(&first).await.unwrap();
+        let second_id = bus.publish(&second).await.unwrap();
+
+        let after = bus.replay(Some(&first_id)).await.unwrap();
+        assert_eq!(after.len(), 1, "cursor must be exclusive");
+        assert_eq!(after[0].id, second_id);
+
+        let invalid = bus.replay(Some("not-an-id")).await.unwrap();
+        assert_eq!(invalid.len(), 2, "invalid cursor falls back to full replay");
     }
 }
