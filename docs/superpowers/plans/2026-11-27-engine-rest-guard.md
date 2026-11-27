@@ -16,7 +16,7 @@
 - Create: `tests/00-static/check_engine_rest_guard.py`
 - Modify: `tests/run.py`, `docs/VALIDATION.md`, `tests/00-static/check_mutations.py`
 
-- [ ] **Step 1: Write `check_engine_rest_guard.py`**
+- [x] **Step 1: Write `check_engine_rest_guard.py`**
 
 Read `services/camunda.yml` and `bootstrap/README.md`. Use `Result("engine-rest-guard")` and check:
 
@@ -40,7 +40,7 @@ Derive `block_rule` from the line containing
 `traefik.http.routers.camunda-rest-block.rule`, and `normal_rule` from the
 line containing `traefik.http.routers.camunda.rule`.
 
-- [ ] **Step 2: Wire the guard**
+- [x] **Step 2: Wire the guard**
 
 Register in `tests/run.py` after the CalDAV check:
 
@@ -56,7 +56,7 @@ Add an inventory line in `docs/VALIDATION.md` after `check_caldav_portal.py`:
       host-only, bootstrap docs state internal-only access
 ```
 
-- [ ] **Step 3: Add mutation teeth**
+- [x] **Step 3: Add mutation teeth**
 
 In `tests/00-static/check_mutations.py`, add after the polls mutation:
 
@@ -71,7 +71,7 @@ In `tests/00-static/check_mutations.py`, add after the polls mutation:
 },
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
@@ -92,6 +92,6 @@ git commit -m "test(layer0): pin public engine-rest block"
 
 ### Task 2: Closeout
 
-- [ ] Mark all Task 1 steps `[x]`.
-- [ ] Re-run full static + mutation suite.
-- [ ] Commit docs closeout and push `main`.
+- [x] Mark all Task 1 steps `[x]`.
+- [x] Re-run full static + mutation suite.
+- [x] Commit docs closeout and push `main`.

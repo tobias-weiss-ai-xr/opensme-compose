@@ -153,8 +153,12 @@ To grant BPM admin to another user: give it the `operaton-admin` role in the
 
 ## Documented gaps / follow-ups
 
-* `/engine-rest/**` stays unauthenticated in CE — put an auth-forward (Tailscale
-  / Traefik forwardAuth) in front of the engine REST API.
+* `/engine-rest/**` stays unauthenticated in CE — public access is blocked by
+  the fleet-edge file-provider router and the compose-internal
+  `camunda-rest-block` router (`noop@internal`); use `docker exec` / the compose
+  network for first-party calls. The block is pinned by
+  `tests/00-static/check_engine_rest_guard.py`. An auth-forward (Tailscale /
+  Traefik forwardAuth) would only be needed if public REST access were wanted.
 * Org-member roles are not mapped to groups (ZITADEL REST gap) — project-role
   grants only.
 * `camunda-data` volume already contains the demo DB users (17) — they become

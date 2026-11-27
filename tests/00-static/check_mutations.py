@@ -611,6 +611,15 @@ MUTATIONS = [
                "the Layer-0 guard",
     },
     {
+        "name": "camunda-rest-block-service-removed",
+        "file": "services/camunda.yml",
+        "old": '"traefik.http.routers.camunda-rest-block.service=noop@internal"',
+        "new": '"traefik.http.routers.camunda-rest-block.service=camunda"',
+        "check": "tests/00-static/check_engine_rest_guard.py",
+        "why": "engine-rest-guard — restoring the camunda service would expose "
+               "the unauthenticated REST API on the public host",
+    },
+    {
         "name": "events-sse-compression-exclusion",
         "file": "docker-compose.yml",
         "old": "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream",
