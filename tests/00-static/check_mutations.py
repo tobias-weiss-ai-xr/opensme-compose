@@ -630,6 +630,14 @@ MUTATIONS = [
                "EventSource and stalls live intercom/task updates",
     },
     {
+        "name": "gateway-session-verification-removed",
+        "file": "gateway/src/main.rs",
+        "old": "    let Some(s) = session::verify_session(&state.secret, &token) else {",
+        "new": "    let Some(s) = session::verify_sessionx(&state.secret, &token) else {",
+        "check": "tests/00-static/check_events_gateway.py",
+        "why": "events-gateway — an unverified /api/events stream must fail Layer 0",
+    },
+    {
         "name": "sse-resume-cursor-broken",
         "file": "portal/src/events.rs",
         "old": 'redis::cmd("XREVRANGE")',

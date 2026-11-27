@@ -92,6 +92,9 @@ CI step or on its documented allowlist.
 - [x] `check_event_sync.py` — SSE resume cursor uses XREVRANGE, `?since=` fallback
       with header precedence, proxy query forwarding, bounded SSE-id dedupe,
       unconditional ready dispatch.
+- [x] `check_events_gateway.py` — opt-in read-only gateway: crate name, shared
+      `portal/src/events.rs` path module, verified cookie before SSE, portal
+      HMAC cookie format, compose profile/read-only route, linked runbook.
 - [x] `check_event_producers.py` — cloud + SSO event producers: actor-scoped pubs in upload/mkdir/delete/share, session.login callback, session.logout with verified cookie, no team-wide or byte-carrying payloads
 - [x] `check_broadcast_consumer.py` — queued broadcast contract: cookie-gated
       publish endpoint, `broadcast.requested` with team visibility, no inline

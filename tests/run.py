@@ -69,6 +69,7 @@ LAYERS = {
             ("Docs index contract (docs-as-contract)", "tests/00-static/check_docs_index.py"),
             ("Portal real-time events (contract)", "tests/00-static/check_events.py"),
             ("Event state sync", "tests/00-static/check_event_sync.py"),
+            ("Events gateway", "tests/00-static/check_events_gateway.py"),
             ("Portal event producers (cloud + session)", "tests/00-static/check_event_producers.py"),
             ("Broadcast event consumer", "tests/00-static/check_broadcast_consumer.py"),
     ("Polls realtime events", "tests/00-static/check_polls_events.py"),
