@@ -34,6 +34,20 @@ describe("useEventStream", () => {
     expect(received).toHaveLength(1);
   });
 
+  it("forwards poll.created and poll.voted frames to subscribers", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const kinds: string[] = [];
+    subscribeEvents((e) => kinds.push(e.kind));
+    renderHook(() => useEventStream(true));
+    act(() => FakeEventSource.last?.emit("poll.created", {
+      id: "1-0", kind: "poll.created", payload: { poll: { id: 7 } },
+    }));
+    act(() => FakeEventSource.last?.emit("poll.voted", {
+      id: "1-1", kind: "poll.voted", payload: { poll: { id: 7 } },
+    }));
+    expect(kinds).toEqual(["poll.created", "poll.voted"]);
+  });
+
   it("does not open a stream for anonymous visitors", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     renderHook(() => useEventStream(false));

@@ -5,6 +5,7 @@ import { humanSize, markVoted, votedSet } from "@/lib/format";
 import LoginRequired from "@/components/LoginRequired";
 import { postCloudShare } from "@/lib/api";
 import { useSlot } from "@/lib/bridge";
+import { subscribeEvents } from "@/lib/events";
 import type { Poll, SurveySummary, SurveysListResponse } from "@/lib/types";
 
 /**
@@ -82,6 +83,30 @@ export default function PollsPanel() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // SSE deltas: the payload is a viewer-neutral Poll, so keep the local
+  // `voted` flag — it is session-specific and must not be overwritten by a
+  // broadcast from another session.
+  useEffect(() => subscribeEvents((event) => {
+    const incoming = event.payload.poll as Poll | undefined;
+    if (!incoming || typeof incoming.id !== "number") return;
+    if (event.kind === "poll.created") {
+      setPolls((prev) => {
+        if (!prev || prev.some((p) => p.id === incoming.id)) return prev;
+        return [incoming, ...prev];
+      });
+    } else if (event.kind === "poll.voted") {
+      setPolls((prev) => prev?.map((p) => p.id === incoming.id
+        ? { ...incoming, voted: p.voted ?? incoming.voted }
+        : p) ?? null);
+    }
+  }), []);
+
+  // SSE just became live: reconcile with the authoritative list so a lost
+  // fail-soft XADD cannot leave stale tallies behind.
+  useEffect(() => subscribeEvents((event) => {
+    if (event.kind === "portal.ready") void refresh();
+  }), [refresh]);
 
   // Only render anything once we know the feature exists server-side.
   if (polls === null && authRequired) {

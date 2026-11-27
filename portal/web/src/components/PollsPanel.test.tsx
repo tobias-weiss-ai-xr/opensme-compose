@@ -1,7 +1,8 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import PollsPanel from "./PollsPanel";
 import { markVoted, votedSet } from "@/lib/format";
 import { registerProvider, resetBridgeForTests } from "@/lib/bridge";
+import { dispatchEvent, resetEventsForTests } from "@/lib/events";
 import type { Poll, PollListResponse } from "@/lib/types";
 
 const { mockedShare } = vi.hoisted(() => ({ mockedShare: vi.fn() }));
@@ -42,6 +43,7 @@ describe("PollsPanel", () => {
     mockedVotedSet.mockReset().mockReturnValue({});
     vi.stubGlobal("fetch", fetchMock);
     resetBridgeForTests();
+    resetEventsForTests();
     mockedShare.mockReset();
   });
   afterEach(() => {
@@ -108,6 +110,36 @@ describe("PollsPanel", () => {
     expect(
       screen.queryByRole("button", { name: /stimmen/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("merges poll.created and poll.voted deltas, keeping the local vote flag", async () => {
+    mockedVotedSet.mockReturnValue({ 7: true });
+    fetchMock.mockResolvedValue(res(true, pollList([poll])));
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+
+    act(() => dispatchEvent({
+      id: "sse-1", kind: "poll.created",
+      payload: { poll: { ...poll, id: 8, question: "Neue Frage?" } },
+    }));
+    expect(await screen.findByText("Neue Frage?")).toBeInTheDocument();
+
+    act(() => dispatchEvent({
+      id: "sse-2", kind: "poll.voted",
+      payload: { poll: { ...poll, votes: [4, 1] } },
+    }));
+    expect(await screen.findByText("4 · 80%")).toBeInTheDocument();
+    // Only the newly created poll still offers a vote button; the local
+    // voted flag on poll 7 survives the viewer-neutral delta.
+    expect(screen.getAllByRole("button", { name: /Für „Blau“ stimmen/ })).toHaveLength(1);
+  });
+
+  it("refreshes the authoritative list when SSE becomes ready", async () => {
+    fetchMock.mockResolvedValue(res(true, pollList([poll])));
+    render(<PollsPanel />);
+    await screen.findByText("Welches Logo?");
+    act(() => dispatchEvent({ id: "ready", kind: "portal.ready", payload: {} }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("renders the author when the poll carries one", async () => {

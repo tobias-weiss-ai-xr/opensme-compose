@@ -12,6 +12,7 @@ export function resetEventSourceForTests() {
 const LISTENED_KINDS = [
   "intercom.created", "intercom.deleted",
   "task.created", "task.updated", "task.deleted",
+  "poll.created", "poll.voted",
 ];
 
 /**
