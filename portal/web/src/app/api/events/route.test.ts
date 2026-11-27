@@ -38,4 +38,23 @@ describe("SSE proxy", () => {
     expect((call.headers as Headers).get("cookie")).toBe("OPENSMEPORTALSESSION=abc");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("http://backend.test/api/events");
   });
+
+  it("forwards a since cursor to the backend", async () => {
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.close(); },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: upstream,
+      headers: new Headers({ "content-type": "text/event-stream" }),
+    }));
+    const req = new Request("http://localhost/api/events?since=42-1", {
+      headers: { cookie: "OPENSMEPORTALSESSION=abc" },
+    });
+    await GET(req as never);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
+      "http://backend.test/api/events?since=42-1",
+    );
+  });
 });

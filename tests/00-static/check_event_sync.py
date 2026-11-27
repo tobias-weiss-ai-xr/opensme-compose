@@ -30,7 +30,7 @@ def main() -> int:
           "S3 handle_events accepts an explicit ?since= cursor")
     check("query.since" in MAIN and "last-event-id" in MAIN,
           "S4 header wins, query is the reload fallback")
-    check("req.nextUrl.search" in PROXY and "last-event-id" in PROXY,
+    check("req.nextUrl?.search" in PROXY and "last-event-id" in PROXY,
           "S5 proxy forwards both query and Last-Event-ID")
     check('"opensme:events:last-id"' in HOOK and "?since=" in HOOK,
           "S6 hook resumes from the stored SSE id")

@@ -18,9 +18,10 @@ export async function GET(req: NextRequest) {
   }
   headers.set("accept", "text/event-stream");
 
+  const search = req.nextUrl?.search ?? new URL(req.url).search;
   let upstream: Response;
   try {
-    upstream = await fetch(`${backendUrl()}/api/events`, {
+    upstream = await fetch(`${backendUrl()}/api/events${search}`, {
       headers,
       cache: "no-store",
       signal: req.signal,

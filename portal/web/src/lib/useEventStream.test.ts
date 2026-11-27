@@ -14,13 +14,21 @@ class FakeEventSource {
     this.listeners[type] = cb;
   }
   close() {}
-  emit(type: string, data: unknown) {
-    this.listeners[type]?.(new MessageEvent(type, { data: JSON.stringify(data) }));
+  emit(type: string, data: unknown, lastEventId = "") {
+    this.listeners[type]?.(new MessageEvent(type, {
+      data: JSON.stringify(data),
+      lastEventId,
+    }));
   }
   ready() { this.emit("ready", {}); }
 }
 
-beforeEach(() => { resetEventSourceForTests(); resetEventsForTests(); FakeEventSource.last = null; });
+beforeEach(() => {
+  resetEventSourceForTests();
+  resetEventsForTests();
+  FakeEventSource.last = null;
+  window.sessionStorage.clear();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("useEventStream", () => {
@@ -74,5 +82,24 @@ describe("useEventStream", () => {
     act(() => FakeEventSource.last?.onerror?.());
     expect(result.current.connected).toBe(false);
     dispatchEvent({ id: "x", kind: "x", payload: {} }); // no throw
+  });
+
+  it("resumes from the stored SSE id after a remount", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    window.sessionStorage.setItem("opensme:events:last-id", "42-1");
+    const { unmount } = renderHook(() => useEventStream(true));
+    expect(FakeEventSource.last?.url).toBe("/api/events?since=42-1");
+    unmount();
+  });
+
+  it("drops replayed frames with the same SSE id", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const received: unknown[] = [];
+    subscribeEvents((e) => received.push(e));
+    renderHook(() => useEventStream(true));
+    const frame = { id: "7-0", kind: "poll.voted", payload: { poll: { id: 7 } } };
+    act(() => FakeEventSource.last?.emit("poll.voted", frame, "7-0"));
+    act(() => FakeEventSource.last?.emit("poll.voted", frame, "7-0"));
+    expect(received).toHaveLength(1);
   });
 });
