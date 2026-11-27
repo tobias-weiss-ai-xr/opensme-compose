@@ -630,6 +630,14 @@ MUTATIONS = [
                "EventSource and stalls live intercom/task updates",
     },
     {
+        "name": "sse-resume-cursor-broken",
+        "file": "portal/src/events.rs",
+        "old": 'redis::cmd("XREVRANGE")',
+        "new": 'redis::cmd("XRANGE")',
+        "check": "tests/00-static/check_event_sync.py",
+        "why": "event-sync — inverting the newest-entry peek silently drops resume cursors",
+    },
+    {
         "name": "events-task-delete-recipients-dropped",
         "file": "portal/src/main.rs",
         "old": "events::Visibility::Recipients(recipients_for_task(&task, &session.sub)),",

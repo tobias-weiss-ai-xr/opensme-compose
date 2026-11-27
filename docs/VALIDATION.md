@@ -89,6 +89,9 @@ CI step or on its documented allowlist.
 - [x] `check_suite_coverage.py` — this inventory's keeper; CI static job must be single-entry (`tests/run.py --static` only — any direct `tests/00-static/*.py` call in ci.yml is a failure)
 - [x] `check_bridge.py` — portal-web component bridge: typed registry contract (slots share.open/cloud.pick/task.create), every slot consumed outside the registry, shell wires share.open → notes tab + task.create → Aufgaben tab, composer posts via existing note API, feed/notes/cloud „Als Aufgabe anlegen“ forward title+link through task.create
 - [x] `check_events.py` — portal real-time events: Event/Visibility/EventBus + XADD/XREAD, /api/events behind the session firewall, SSE proxy forwards cookie/last-event-id as a ReadableStream with same-origin EventSource, explicit recipient-scoped task events, polling fallback + Traefik compression exclusion
+- [x] `check_event_sync.py` — SSE resume cursor uses XREVRANGE, `?since=` fallback
+      with header precedence, proxy query forwarding, bounded SSE-id dedupe,
+      unconditional ready dispatch.
 - [x] `check_event_producers.py` — cloud + SSO event producers: actor-scoped pubs in upload/mkdir/delete/share, session.login callback, session.logout with verified cookie, no team-wide or byte-carrying payloads
 - [x] `check_broadcast_consumer.py` — queued broadcast contract: cookie-gated
       publish endpoint, `broadcast.requested` with team visibility, no inline

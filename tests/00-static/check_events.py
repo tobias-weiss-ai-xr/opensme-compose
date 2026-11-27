@@ -61,7 +61,7 @@ def main():
     client = client.read_text() if client.exists() else ""
     check(not re.search(r'new\s+(?:EventSource|Ctor)\(\s*["\']https?://', client),
           "E3 no cross-origin EventSource (CSP connect-src 'self')")
-    check(re.search(r'new\s+Ctor\(\s*["\']/api/events["\']\s*\)', client) is not None,
+    check('const es = new Ctor(' in client and '"/api/events' in client,
           "E3 EventSource opens the same-origin /api/events route")
     # E4 — pin each PRODUCTION task publish; main.rs has a fourth
     # Visibility::Recipients in a unit test, so a total count would let a
@@ -97,7 +97,7 @@ def main():
     check(all(t in events for t in [
         "errors >= 3", "std::io::Error::other", "event: ready", "sanitize_cursor(last_id)",
         "e.tenant == viewer.tenant", "StreamSlot", "get_multiplexed_async_connection",
-        "reader.ensure_cursor_live().await", "stream_id_key", "XRANGE", "newest < cursor",
+        "reader.ensure_cursor_live().await", "stream_id_key", "XREVRANGE", "newest < cursor",
         "if !ready && cursor_checked",
     ]), "E7 reader: error propagation, ready frame, cursor/cap/tenant guards")
     hook = (WEB / "lib" / "useEventStream.ts")
