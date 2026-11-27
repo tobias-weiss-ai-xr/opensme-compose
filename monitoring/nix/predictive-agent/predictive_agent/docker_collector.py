@@ -107,11 +107,28 @@ def collect_container_stats():
     return stats
 
 
+def parse_health(status):
+    """Derive health from docker ps status text.
+
+    The docker ps health template field is not supported, so health
+    must be parsed from the status column, e.g.
+    "Up 2 minutes (healthy)" / "(health: starting)" / "(unhealthy)".
+    """
+    status = status or ""
+    if "(healthy)" in status:
+        return "healthy"
+    if "(unhealthy)" in status:
+        return "unhealthy"
+    if "health: starting" in status:
+        return "starting"
+    return ""
+
+
 def get_containers():
     """List all containers (running and stopped) as JSON-like dicts."""
     rc, stdout, _ = run_cmd(
         ["docker", "ps", "-a", "--format",
-         "{{.ID}}|{{.Names}}|{{.Status}}|{{.Image}}|{{.State}}|{{.Health}}"],
+         "{{.ID}}|{{.Names}}|{{.Status}}|{{.Image}}|{{.State}}"],
         timeout=10
     )
     if rc != 0 or not stdout:
@@ -122,16 +139,16 @@ def get_containers():
         if not line.strip():
             continue
         parts = line.split("|")
-        if len(parts) < 6:
+        if len(parts) < 5:
             continue
-        cid, name, status, image, state, health = parts[:6]
+        cid, name, status, image, state = parts[:5]
         containers.append({
             "id": cid,
             "name": name,
             "status": status,
             "image": image,
             "state": state,
-            "health": health if health != "none" else "",
+            "health": parse_health(status),
         })
     return containers
 

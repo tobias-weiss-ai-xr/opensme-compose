@@ -37,6 +37,7 @@ from predictive_agent.docker_collector import (
 )
 from predictive_agent.llm import LLMAnalyzer, LLMBackend
 from predictive_agent.persistence import StateStore
+from predictive_agent.privacy import scrub
 from predictive_agent.predictor import Predictor
 from predictive_agent.state_model import StateModel
 
@@ -328,6 +329,11 @@ def _analyze_with_llm(name, container, logs, prediction, markov_state):
             "markov_state": markov_state,
             "memory_trend": prediction.memory_trend,
         }
+        if _llm.backend in (LLMBackend.TUD, LLMBackend.SAIA, LLMBackend.OPENAI):
+            # AE1 privacy gate: never leak secrets/IPs/hostnames/user paths
+            # to an external LLM.
+            issue = scrub(issue)
+            context = scrub(context)
         analysis = _llm.analyze(issue, context, pred_data)
         analysis["container"] = name
         analysis["timestamp"] = _now_iso()

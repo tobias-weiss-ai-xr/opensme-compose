@@ -25,7 +25,7 @@ OPENAI_API_URL = os.environ.get("OPENAI_API_URL", "https://api.openai.com/v1")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
-TUD_API_URL = os.environ.get("TUD_API_URL", "https://api.tud-llm.de/v1")
+TUD_API_URL = os.environ.get("TUD_API_URL", "https://llm-service.ai.tu-darmstadt.de/v1")
 TUD_API_KEY = os.environ.get("TUD_API_KEY", "")
 TUD_MODEL = os.environ.get("TUD_MODEL", "GLM-5.2-AWQ-INT4")
 

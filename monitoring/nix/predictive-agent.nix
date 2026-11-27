@@ -85,5 +85,15 @@ pkgs.dockerTools.buildLayeredImage {
     };
   };
 
+  # Nix dockerTools symlinks /etc/{passwd,group} into /nix/store. Some
+  # container runtimes (e.g. the openedusuite.org host) reject `docker exec`
+  # and compose healthchecks with "openat etc/group: path escapes from parent".
+  # Replace those symlinks with regular files so exec/healthchecks work.
+  extraCommands = ''
+    rm -f etc/group etc/passwd
+    cp ${etcFiles}/etc/group etc/group
+    cp ${etcFiles}/etc/passwd etc/passwd
+  '';
+
   maxLayers = 50;
 }

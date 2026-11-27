@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../.."
 
 PY="${PYTHON:-python3}"
 ok=1
-for t in yaml_lint check_env scan_secrets check_artifacts check_perf check_agent check_bootstrap check_backup check_oidc check_monitoring check_events; do
+for t in yaml_lint check_env scan_secrets check_artifacts check_perf check_agent check_bootstrap check_backup check_oidc check_monitoring check_events check_predictive_agent; do
   echo "── $t ──"
   "$PY" "tests/00-static/$t.py" || ok=0
   echo
