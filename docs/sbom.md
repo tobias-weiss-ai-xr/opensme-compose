@@ -63,10 +63,20 @@ nix/script changes. Committed evidence is validated by
 
 ## Artifact hygiene
 
-The static gate scans `docs/sbom/*.json` for RFC1918 addresses, internal
-hostnames, credential-like tokens, and user-home paths. Do not commit internal
-hostnames, private IPs, API keys, or absolute workstation paths into SBOM/VEX
-evidence.
+The static gate scans `docs/sbom/*.json` for RFC1918/link-local addresses,
+split-horizon hostname markers, credential-like tokens, and user-home paths.
+Do not commit internal hostnames, private IPs, API keys, or absolute
+workstation paths into SBOM/VEX evidence. Project brand/registry hostnames are
+public and tracked, so they are not treated as leaks.
+
+## Committed vs regenerated evidence
+
+The small authoritative reports are git-tracked: `fleet-inventory.tsv`, the
+aggregate `fleet.cdx.json`, `openvex.json` and `vex-report.json`. Heavy
+per-image CycloneDX/SPDX and Trivy scan JSON are gitignored
+(`docs/sbom/scan/`, `docs/sbom/*.cdx.json`, `*.spdx.json`) and regenerated +
+uploaded by the CI workflow; `check_sbom.py` enforces aggregate coverage of
+every inventory image on the committed evidence alone.
 
 ## Rollback
 
