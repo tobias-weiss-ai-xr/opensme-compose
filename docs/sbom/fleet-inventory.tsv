@@ -50,4 +50,3 @@ vc-livekit	livekit/livekit-server:v1.13.11	-	upstream
 vc-room	vc-room:1.0.0	-	local-build
 zitadel	ghcr.io/zitadel/zitadel:v4.19.4	-	upstream
 zitadel-login	ghcr.io/zitadel/zitadel-login:v4.19.3	-	upstream
-live gate: no running containers; canonical inventory only

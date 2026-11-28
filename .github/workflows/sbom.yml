@@ -100,9 +100,20 @@ jobs:
       - name: OpenVEX / triage gate
         run: |
           if [ "${SBOM_BASELINE}" = "1" ]; then
-            python3 scripts/build_vex.py --baseline
+            python3 scripts/build_vex.py \
+              --scan-dir docs/sbom/artifacts/scan \
+              --inventory docs/sbom/fleet-inventory.tsv \
+              --triage sbom-triage.json \
+              --openvex docs/sbom/openvex.json \
+              --report docs/sbom/vex-report.json \
+              --baseline
           else
-            python3 scripts/build_vex.py
+            python3 scripts/build_vex.py \
+              --scan-dir docs/sbom/artifacts/scan \
+              --inventory docs/sbom/fleet-inventory.tsv \
+              --triage sbom-triage.json \
+              --openvex docs/sbom/openvex.json \
+              --report docs/sbom/vex-report.json
           fi
 
       - name: Freshness / inventory-delta gate
