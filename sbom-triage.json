@@ -1,4 +1,6 @@
 {
-  "schema": 1,
-  "exceptions": []
+    "schema": 1,
+    "generated_at": "2026-11-28T15:58:00Z",
+    "note": "Baseline mode active (SBOM_BASELINE=1). 2358 CRITICAL/HIGH findings are untriaged and cause a WARN. Add VEX statements here (justification required) to mark specific CVEs as not_affected, then set SBOM_BASELINE=0 in CI to enforce the gate.",
+    "exceptions": []
 }
