@@ -61,6 +61,15 @@ nix/script changes. Committed evidence is validated by
 `tests/00-static/check_sbom.py`; freshness is enforced in CI with
 `SBOM_STRICT_FRESH=1`.
 
+## Image security audit
+
+`scripts/image_security_audit.py` produces a consolidated `docs/sbom/image-security-audit.json`
+report that cross-references the canonical inventory with per-image Trivy scans.
+It tallies pinning status (digest vs tagged vs allowlisted vs mutable FAIL),
+scan coverage, and CVE totals by severity, with actionable recommendations
+(e.g., images to pin, images missing scans, or images to triage). The
+audit runs in CI; the report is committed as informative evidence.
+
 ## Artifact hygiene
 
 The static gate scans `docs/sbom/*.json` for RFC1918/link-local addresses,

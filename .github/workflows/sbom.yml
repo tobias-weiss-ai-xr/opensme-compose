@@ -129,6 +129,9 @@ jobs:
           SBOM_STRICT_FRESH: "1"
         run: python3 tests/00-static/check_sbom.py
 
+      - name: Image security audit
+        run: python3 scripts/image_security_audit.py
+
       - name: Upload SBOM/VEX evidence
         uses: actions/upload-artifact@v4
         with:
