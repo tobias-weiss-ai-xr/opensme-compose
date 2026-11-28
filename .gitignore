@@ -85,3 +85,6 @@ docs/sbom/scan/
 docs/sbom/*.cdx.json
 !docs/sbom/fleet.cdx.json
 docs/sbom/*.spdx.json
+
+# CI-generated per-image SBOM/scan artifacts
+docs/sbom/artifacts/

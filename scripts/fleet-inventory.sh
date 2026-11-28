@@ -26,8 +26,8 @@ done
 
 mkdir -p "$(dirname "$OUT")"
 args=()
-if (( LIVE )); then args+=(--live); fi
-if (( RESOLVE )); then args+=(--resolve-local); fi
+if [ "$LIVE" -ne 0 ]; then args+=(--live); fi
+if [ "$RESOLVE" -ne 0 ]; then args+=(--resolve-local); fi
 python3 "$ROOT/scripts/compose_images.py" "${args[@]}" > "$OUT"
 
 echo "fleet inventory: $OUT"

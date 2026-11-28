@@ -14,8 +14,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${SBOM_OUT_DIR:-$ROOT/docs/sbom}"
+OUT_DIR="${SBOM_OUT_DIR:-$ROOT/docs/sbom/artifacts}"
 INVENTORY="${SBOM_INVENTORY:-$ROOT/docs/sbom/fleet-inventory.tsv}"
+AGG_OUT="${SBOM_AGG_OUT:-$ROOT/docs/sbom/fleet.cdx.json}"
 IMAGES=""
 LIMIT=0
 ALLOW_MISSING=0
@@ -62,7 +63,7 @@ else
     images+=("$image")
   done < "$INVENTORY"
 fi
-if (( LIMIT > 0 )); then
+if [ "$LIMIT" -gt 0 ]; then
   images=("${images[@]:0:LIMIT}")
 fi
 
@@ -89,16 +90,17 @@ for image in "${images[@]}"; do
   fi
 done
 
-if (( failed > 0 && ! ALLOW_MISSING )); then
+if [ "$failed" -gt 0 ] && [ "$ALLOW_MISSING" -ne 1 ]; then
   echo "generate-sbom: $failed image(s) failed; refusing to publish partial set" >&2
   exit 1
 fi
 
+mkdir -p "$(dirname "${AGG_OUT}")"
 python3 "$ROOT/scripts/aggregate_sbom.py" \
   --dir "$OUT_DIR" \
   --inventory "$INVENTORY" \
   --images "${images[@]}" \
   --allow-missing \
-  --out "$OUT_DIR/fleet.cdx.json"
+  --out "${AGG_OUT}"
 
-echo "SBOM aggregate: $OUT_DIR/fleet.cdx.json ($generated image(s))"
+echo "SBOM aggregate: ${AGG_OUT} ($generated image(s))"

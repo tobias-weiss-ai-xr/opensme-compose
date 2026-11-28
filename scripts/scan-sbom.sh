@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${SBOM_SCAN_DIR:-$ROOT/docs/sbom/scan}"
+OUT_DIR="${SBOM_SCAN_DIR:-$ROOT/docs/sbom/artifacts/scan}"
 INVENTORY="${SBOM_INVENTORY:-$ROOT/docs/sbom/fleet-inventory.tsv}"
 IMAGES=""
 LIMIT=0
@@ -37,7 +37,7 @@ while (( i < ${#args[@]} )); do
       ;;
   esac
   i=$((i+1))
-done
+  done
 
 if ! command -v trivy >/dev/null 2>&1; then
   echo "scan-sbom: trivy not found" >&2
@@ -58,7 +58,7 @@ else
     images+=("$image")
   done < "$INVENTORY"
 fi
-if (( LIMIT > 0 )); then
+if [ "$LIMIT" -gt 0 ]; then
   images=("${images[@]:0:LIMIT}")
 fi
 
@@ -98,8 +98,8 @@ PY
   fi
 done
 
-if (( failed > 0 && ! ALLOW_MISSING )); then
+if [ "$failed" -gt 0 ] && [ "$ALLOW_MISSING" -ne 1 ]; then
   echo "scan-sbom: $failed image(s) failed" >&2
   exit 1
 fi
-echo "scan-sbom: $OUT_DIR ($(( ${#images[@]} - failed )) image(s))"
+echo "scan-sbom: $OUT_DIR ($((${#images[@]} - failed)) image(s))"

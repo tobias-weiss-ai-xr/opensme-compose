@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.7",
-  "serialNumber": "urn:uuid:8d943a7c-bd96-4dbd-804a-e36862e3f7ed",
+  "serialNumber": "urn:uuid:e8eea71b-e3ea-465d-8e4c-1eafaf8b4c70",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-28T12:43:08.259075+00:00",
+    "timestamp": "2026-11-28T15:01:59.769091+00:00",
     "tools": [
       {
         "type": "application",
@@ -122,25 +122,6 @@
         {
           "name": "openSME:image",
           "value": "cryptpad/cryptpad:latest"
-        },
-        {
-          "name": "openSME:digest",
-          "value": "-"
-        },
-        {
-          "name": "openSME:sbom",
-          "value": "missing"
-        }
-      ]
-    },
-    {
-      "type": "container",
-      "name": "gate:",
-      "bom-ref": "gate:",
-      "properties": [
-        {
-          "name": "openSME:image",
-          "value": "gate:"
         },
         {
           "name": "openSME:digest",

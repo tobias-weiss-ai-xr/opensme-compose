@@ -271,8 +271,15 @@ def main() -> int:
             failures.append(str(exc))
 
     # ── 6. artifact hygiene ────────────────────────────────────────────
+    # Only scan the committed authoritative JSON reports; per-image SBOM/scan
+    # files are CI-regenerated in gitignored locations (docs/sbom/scan/
+    # and docs/sbom/artifacts/) and may contain upstream noise (RFC1918
+    # examples in SBOMs, token-shaped string literals in open-source deps).
     patterns = build_internal_patterns()
+    committed_jsons = {"fleet.cdx.json", "openvex.json", "vex-report.json"}
     for path in sorted(SBOM_DIR.glob("*.json")):
+        if path.name not in committed_jsons:
+            continue  # CI artifact, not committed; skip hygiene here
         text = path.read_text()
         for pat in patterns:
             if pat.search(text):
