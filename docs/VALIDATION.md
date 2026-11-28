@@ -11,6 +11,7 @@ How the openSME Compose distribution is validated before release.
 | 0 · Boot contracts | `tests/00-static/check_boot.py` — image pins, entrypoints, Traefik routers, healthcheck binaries | ✅ |
 | 0 · BPMN compensation | `tests/00-static/check_bpmn_compensation.py` — every AI ServiceTask has a boundary event + compensation handler | ✅ |
 | 0 · Backup coverage | `tests/00-static/check_backup.py` — every stateful volume the fragments ship is in backup.sh (drift guard) | ✅ |
+| 0 · SBOM/VEX gate | `tests/00-static/check_sbom.py` — workflow wiring, pin allowlist, SBOM/VEX JSON, digest dedupe, freshness, artifact hygiene | ✅ |
 | 0 · Compose matrix | `tests/00-static/compose_config.py` — every overlay combination renders | ✅ |
 | 0 · Agent lint | `tests/00-static/check_agent.py` — dev-maintenance-bot knowledge/spec parity | ✅ |
 | 0 · Suite monitor guards | `tests/00-static/check_monitoring.py` — M1–M9 pin the cron suite monitor (health/edge probes/JWT/auth-errors/**edge-latency**); local Layer-0 sweep (`tests/00-static/run.sh`), deliberately not a `run.py` CI entry | — |
@@ -80,6 +81,7 @@ CI step or on its documented allowlist.
 - [x] `check_mail_backend.py` — mail backend switch (XOR)
 - [x] `check_monitoring.py` — suite-monitor guards M1–M9: cron monitor exists, guards (accessTokenType event-store, opaque-token signature, traefik edge-latency C5, container health, mail alerting + cooldown, cron wiring); forbids opencloud access-log durations as a latency signal (M9 — they measure the upstream TCP connection age)
 - [x] `check_mutations.py` — every wired check has teeth (mutation-flipped red) or a documented shadow-incompat reason; prints `mutation-coverage: N/M` and fails on any uncovered wired check
+- [x] `check_predictive_agent.py` — predictive-agent privacy/parse gate: TUD gateway default, outbound scrub before external LLM calls, docker-ps format avoids `{{.Health}}`, status-derived health, fenced/prose TUD JSON parsing
 - [x] `check_oidc.py` — Zitadel OIDC client registration
 - [x] `check_outbound_patterns.py` — outbound LLM payload pattern catalog still detects secrets/IPs/paths/hosts (teeth for AE1)
 - [x] `check_notes_broker.py` — notes celery broker URL uses DJANGO_ prefix + REDIS_PASSWORD (no passwordless default)
@@ -87,6 +89,7 @@ CI step or on its documented allowlist.
 - [x] `check_perf.py` — budgets, limits, log caps, healthchecks
 - [x] `check_platform.py` — platform versions (k3s/docker)
 - [x] `check_suite_coverage.py` — this inventory's keeper; CI static job must be single-entry (`tests/run.py --static` only — any direct `tests/00-static/*.py` call in ci.yml is a failure)
+- [x] `check_sbom.py` — SBOM/VEX supply-chain gate: workflow wiring, pin allowlist, SBOM/VEX JSON, digest dedupe, freshness, artifact hygiene
 - [x] `check_bridge.py` — portal-web component bridge: typed registry contract (slots share.open/cloud.pick/task.create), every slot consumed outside the registry, shell wires share.open → notes tab + task.create → Aufgaben tab, composer posts via existing note API, feed/notes/cloud „Als Aufgabe anlegen“ forward title+link through task.create
 - [x] `check_events.py` — portal real-time events: Event/Visibility/EventBus + XADD/XREAD, /api/events behind the session firewall, SSE proxy forwards cookie/last-event-id as a ReadableStream with same-origin EventSource, explicit recipient-scoped task events, polling fallback + Traefik compression exclusion
 - [x] `check_event_sync.py` — SSE resume cursor uses XREVRANGE, `?since=` fallback

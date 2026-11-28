@@ -1,0 +1,916 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:8d943a7c-bd96-4dbd-804a-e36862e3f7ed",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-28T12:43:08.259075+00:00",
+    "tools": [
+      {
+        "type": "application",
+        "name": "openSME-sbom-aggregate"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "openSME fleet",
+      "bom-ref": "openSME-fleet"
+    }
+  },
+  "components": [
+    {
+      "type": "container",
+      "name": "apache/tika:latest",
+      "bom-ref": "apache/tika:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "apache/tika:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "bitnamilegacy/pgbouncer:latest",
+      "bom-ref": "bitnamilegacy/pgbouncer:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "bitnamilegacy/pgbouncer:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "calrs:1.6.0",
+      "bom-ref": "calrs:1.6.0",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "calrs:1.6.0"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "casbin/casdoor:latest",
+      "bom-ref": "casbin/casdoor:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "casbin/casdoor:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "collabora/code:latest",
+      "bom-ref": "collabora/code:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "collabora/code:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "cryptpad/cryptpad:latest",
+      "bom-ref": "cryptpad/cryptpad:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "cryptpad/cryptpad:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "gate:",
+      "bom-ref": "gate:",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "gate:"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/berriai/litellm:main-stable",
+      "bom-ref": "ghcr.io/berriai/litellm:main-stable",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/berriai/litellm:main-stable"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/dkluhzeb/crap-cms:latest",
+      "bom-ref": "ghcr.io/dkluhzeb/crap-cms:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/dkluhzeb/crap-cms:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/ggml-org/llama.cpp:server-b11223",
+      "bom-ref": "ghcr.io/ggml-org/llama.cpp:server-b11223",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/ggml-org/llama.cpp:server-b11223"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/nosdesk/nosdesk:1.0.12",
+      "bom-ref": "ghcr.io/nosdesk/nosdesk:1.0.12",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/nosdesk/nosdesk:1.0.12"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/open-webui/open-webui:main",
+      "bom-ref": "ghcr.io/open-webui/open-webui:main",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/open-webui/open-webui:main"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/tobias-weiss-ai-xr/dev-agent:latest",
+      "bom-ref": "ghcr.io/tobias-weiss-ai-xr/dev-agent:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/tobias-weiss-ai-xr/dev-agent:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest",
+      "bom-ref": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/tobias-weiss-ai-xr/taskfleet:latest",
+      "bom-ref": "ghcr.io/tobias-weiss-ai-xr/taskfleet:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/tobias-weiss-ai-xr/taskfleet:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/zitadel/zitadel-login:v4.19.3",
+      "bom-ref": "ghcr.io/zitadel/zitadel-login:v4.19.3",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/zitadel/zitadel-login:v4.19.3"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ghcr.io/zitadel/zitadel:v4.19.4",
+      "bom-ref": "ghcr.io/zitadel/zitadel:v4.19.4",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ghcr.io/zitadel/zitadel:v4.19.4"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "gotenberg/gotenberg:latest",
+      "bom-ref": "gotenberg/gotenberg:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "gotenberg/gotenberg:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "invoiceninja-pg:5",
+      "bom-ref": "invoiceninja-pg:5",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "invoiceninja-pg:5"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "lasuite/impress-backend:latest",
+      "bom-ref": "lasuite/impress-backend:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "lasuite/impress-backend:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "lasuite/impress-frontend:latest",
+      "bom-ref": "lasuite/impress-frontend:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "lasuite/impress-frontend:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "lasuite/impress-y-provider:latest",
+      "bom-ref": "lasuite/impress-y-provider:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "lasuite/impress-y-provider:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "livekit/livekit-server:v1.13.11",
+      "bom-ref": "livekit/livekit-server:v1.13.11",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "livekit/livekit-server:v1.13.11"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "mariadb:11",
+      "bom-ref": "mariadb:11",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "mariadb:11"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "martialblog/limesurvey:6-apache",
+      "bom-ref": "martialblog/limesurvey:6-apache",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "martialblog/limesurvey:6-apache"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "matrixdotorg/synapse:latest",
+      "bom-ref": "matrixdotorg/synapse:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "matrixdotorg/synapse:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "memcached:alpine",
+      "bom-ref": "memcached:alpine",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "memcached:alpine"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "nginx:alpine",
+      "bom-ref": "nginx:alpine",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "nginx:alpine"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "ollama/ollama:latest",
+      "bom-ref": "ollama/ollama:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "ollama/ollama:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "opensme-dev-maintenance-bot:latest",
+      "bom-ref": "opensme-dev-maintenance-bot:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "opensme-dev-maintenance-bot:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "opensme/paperless-ngx:3.3.4-oidc",
+      "bom-ref": "opensme/paperless-ngx:3.3.4-oidc",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "opensme/paperless-ngx:3.3.4-oidc"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "operaton/operaton:2.1.5",
+      "bom-ref": "operaton/operaton:2.1.5",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "operaton/operaton:2.1.5"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "postgres:17",
+      "bom-ref": "postgres:17",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "postgres:17"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "python:3.12-alpine",
+      "bom-ref": "python:3.12-alpine",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "python:3.12-alpine"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "raisfast:0.4.2",
+      "bom-ref": "raisfast:0.4.2",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "raisfast:0.4.2"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "rclone/rclone:latest",
+      "bom-ref": "rclone/rclone:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "rclone/rclone:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "redis:alpine",
+      "bom-ref": "redis:alpine",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "redis:alpine"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "registry.hrz.uni-marburg.de/dockerio-cache/chrislusf/seaweedfs:latest",
+      "bom-ref": "registry.hrz.uni-marburg.de/dockerio-cache/chrislusf/seaweedfs:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "registry.hrz.uni-marburg.de/dockerio-cache/chrislusf/seaweedfs:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix",
+      "bom-ref": "registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "registry.openedusuite.org/openedusuite-nix/opencloud:9.1.0-nix"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "salvoxia/sogo:latest",
+      "bom-ref": "salvoxia/sogo:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "salvoxia/sogo:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "sogo6-server:latest",
+      "bom-ref": "sogo6-server:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "sogo6-server:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "sogo6-ui:latest",
+      "bom-ref": "sogo6-ui:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "sogo6-ui:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "stalwartlabs/stalwart:v0.15",
+      "bom-ref": "stalwartlabs/stalwart:v0.15",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "stalwartlabs/stalwart:v0.15"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "tomsquest/docker-radicale:3.9.0.0",
+      "bom-ref": "tomsquest/docker-radicale:3.9.0.0",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "tomsquest/docker-radicale:3.9.0.0"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "traefik:v3.7.13",
+      "bom-ref": "traefik:v3.7.13",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "traefik:v3.7.13"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "vc-room:1.0.0",
+      "bom-ref": "vc-room:1.0.0",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "vc-room:1.0.0"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "vectorim/element-web:latest",
+      "bom-ref": "vectorim/element-web:latest",
+      "properties": [
+        {
+          "name": "openSME:image",
+          "value": "vectorim/element-web:latest"
+        },
+        {
+          "name": "openSME:digest",
+          "value": "-"
+        },
+        {
+          "name": "openSME:sbom",
+          "value": "missing"
+        }
+      ]
+    }
+  ]
+}

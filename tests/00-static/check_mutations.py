@@ -783,6 +783,34 @@ MUTATIONS = [
                "still inconclusive pauses the poller on a possibly wedged "
                "cursor; E7 must pin the combined gate",
     },
+    {
+        "name": "sbom-pin-allowlist-entry-removed",
+        "file": "scripts/no-latest-allowlist.txt",
+        "old": "ollama/ollama:latest | upstream publishes rolling tags",
+        "new": "ollama/ollama:mutated | upstream publishes rolling tags",
+        "check": "tests/00-static/check_sbom.py",
+        "why": "SBOM pin gate — mutable images must be explicitly allowlisted; "
+               "a missing allowlist entry must fail the gate, not silently rot",
+    },
+    {
+        "name": "predictive-scrub-before-llm-removed",
+        "file": "monitoring/nix/predictive-agent/predictive_agent/main_docker.py",
+        "old": "            issue = scrub(issue)\n            context = scrub(context)",
+        "new": "            issue = issue\n            context = context",
+        "check": "tests/00-static/check_predictive_agent.py",
+        "why": "predictive-agent T3 — removing the scrub() calls before external "
+               "LLM calls would leak secrets/IPs/paths to the TUD backend; "
+               "the gate must pin the scrub wiring",
+    },
+    {
+        "name": "sbom-leak-internal-host-in-evidence",
+        "file": "docs/sbom/fleet.cdx.json",
+        "old": '"name": "openSME fleet",',
+        "new": '"name": "openSME fleet home.internal.opensme.test",',
+        "check": "tests/00-static/check_sbom.py",
+        "why": "SBOM hygiene — internal hostnames in committed evidence must fail "
+               "the gate, or the public artifact silently leaks infrastructure",
+    },
 ]
 
 

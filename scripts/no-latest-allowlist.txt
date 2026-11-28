@@ -1,0 +1,27 @@
+# Mutable-image allowlist for scripts/check_no_latest.py
+# Format: image-reference | reason
+# A bare :latest (or untagged) image is accepted only if it appears here.
+# These are upstream/local tags that have no reliable semver/digest pin yet.
+#
+bitnamilegacy/pgbouncer:latest | upstream legacy image; digest-pin via manifests/pinned-images.env
+casbin/casdoor:latest | upstream project publishes rolling tags
+salvoxia/sogo:latest | upstream legacy SOGo5 image (SOGo6 path uses local build)
+sogo6-server:latest | locally built fork image; digest is the local image ID
+sogo6-ui:latest | locally built fork image; digest is the local image ID
+ghcr.io/tobias-weiss-ai-xr/dev-agent:latest | owned rolling build; pin by digest when released
+opensme-dev-maintenance-bot:latest | local one-shot bot build
+ollama/ollama:latest | upstream publishes rolling tags
+ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest | owned rolling build; pin by digest when released
+ghcr.io/tobias-weiss-ai-xr/taskfleet:latest | owned rolling build; pin by digest when released
+registry.hrz.uni-marburg.de/dockerio-cache/chrislusf/seaweedfs:latest | upstream rolling image in optional minio overlay
+collabora/code:latest | upstream rolling image used by OpenCloud
+ghcr.io/dkluhzeb/crap-cms:latest | upstream publishes only :latest
+cryptpad/cryptpad:latest | upstream rolling image
+vectorim/element-web:latest | upstream rolling image
+rclone/rclone:latest | upstream rolling image used by archive/sync sidecars
+lasuite/impress-backend:latest | upstream rolling image
+lasuite/impress-frontend:latest | upstream rolling image
+lasuite/impress-y-provider:latest | upstream rolling image
+apache/tika:latest | upstream rolling image
+gotenberg/gotenberg:latest | upstream rolling image
+matrixdotorg/synapse:latest | upstream rolling image

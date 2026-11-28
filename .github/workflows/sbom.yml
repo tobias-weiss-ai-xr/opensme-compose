@@ -1,0 +1,127 @@
+name: SBOM and VEX
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - docker-compose.yml
+      - idm/*.yml
+      - opencloud/*.yml
+      - mail/*.yml
+      - services/*.yml
+      - monitoring/*.yml
+      - profiles/*.yml
+      - "**/Dockerfile"
+      - "**/Dockerfile.*"
+      - "**/*.nix"
+      - scripts/**
+      - docs/sbom/**
+      - sbom-triage.json
+      - .github/workflows/sbom.yml
+  pull_request:
+    paths:
+      - docker-compose.yml
+      - idm/*.yml
+      - opencloud/*.yml
+      - mail/*.yml
+      - services/*.yml
+      - monitoring/*.yml
+      - profiles/*.yml
+      - "**/Dockerfile"
+      - "**/Dockerfile.*"
+      - "**/*.nix"
+      - scripts/**
+      - docs/sbom/**
+      - sbom-triage.json
+      - .github/workflows/sbom.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SYFT_VERSION: "1.57.1"
+  TRIVY_VERSION: "0.76.2"
+  # Transitional baseline mode: warning-only until the initial fleet findings
+  # are triaged. Set to "0" to make CRITICAL/HIGH gates blocking.
+  SBOM_BASELINE: "1"
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install tooling (pinned)
+        run: |
+          python3 -m pip install --user pyyaml
+          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/v${SYFT_VERSION}/install.sh" \
+            | sh -s -- -b "$HOME/.local/bin" "v${SYFT_VERSION}"
+          curl -sSfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
+            | sh -s -- -b "$HOME/.local/bin" "v${TRIVY_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          syft --version
+          trivy --version
+
+      - name: Canonical inventory + live-subset gate
+        run: scripts/fleet-inventory.sh --live
+
+      - name: No-latest / digest-pin gate
+        run: python3 scripts/check_no_latest.py
+
+      - name: Generate per-image and aggregate SBOMs
+        run: |
+          if [ "${SBOM_BASELINE}" = "1" ]; then
+            scripts/generate-sbom.sh --allow-missing
+          else
+            scripts/generate-sbom.sh
+          fi
+
+      - name: Vulnerability scan
+        run: |
+          if [ "${SBOM_BASELINE}" = "1" ]; then
+            scripts/scan-sbom.sh --allow-missing
+          else
+            scripts/scan-sbom.sh
+          fi
+
+      - name: OpenVEX / triage gate
+        run: |
+          if [ "${SBOM_BASELINE}" = "1" ]; then
+            python3 scripts/build_vex.py --baseline
+          else
+            python3 scripts/build_vex.py
+          fi
+
+      - name: Freshness / inventory-delta gate
+        run: |
+          if [ "${SBOM_BASELINE}" = "1" ]; then
+            python3 scripts/check_sbom_freshness.py --baseline
+          else
+            python3 scripts/check_sbom_freshness.py
+          fi
+
+      - name: Static SBOM/VEX contract + hygiene gate
+        env:
+          SBOM_STRICT_FRESH: "1"
+        run: python3 tests/00-static/check_sbom.py
+
+      - name: Upload SBOM/VEX evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-vex
+          path: docs/sbom/
+          if-no-files-found: error
+          retention-days: 30

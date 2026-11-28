@@ -1,0 +1,1892 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "id": "urn:uuid:1b00f7b7-3ce6-41d2-b195-f1e7834b88f6",
+  "timestamp": "2026-11-28T11:25:24.970134+00:00",
+  "author": "openSME supply-chain gate",
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-25621",
+        "description": "github.com/containerd/containerd: containerd local privilege escalation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-40635",
+        "description": "containerd: containerd has an integer overflow in User ID handling"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-45337",
+        "description": "golang.org/x/crypto/ssh: Misuse of ServerConfig.PublicKeyCallback may cause authorization bypass in golang.org/x/crypto"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-45338",
+        "description": "golang.org/x/net/html: Non-linear parsing of case-insensitive content in golang.org/x/net/html"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-11065",
+        "description": "github.com/go-viper/mapstructure/v2: Go-viper's mapstructure May Leak Sensitive Information in Logs in github.com/go-viper/mapstructure"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-15558",
+        "description": "docker/cli: Docker CLI for Windows: Privilege escalation via malicious plugin binaries"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-22868",
+        "description": "golang.org/x/oauth2/jws: Unexpected memory consumption during token parsing in golang.org/x/oauth2/jws"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-22869",
+        "description": "golang.org/x/crypto/ssh: Denial of Service in the Key Exchange of golang.org/x/crypto/ssh"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-22870",
+        "description": "golang.org/x/net/proxy: golang.org/x/net/http/httpproxy: HTTP Proxy bypass using IPv6 Zone IDs in golang.org/x/net"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-22872",
+        "description": "golang.org/x/net/html: Incorrect Neutralization of Input During Web Page Generation in x/net in golang.org/x/net"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-27144",
+        "description": "go-jose: Go JOSE's Parsing Vulnerable to Denial of Service"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-30204",
+        "description": "golang-jwt/jwt: jwt-go allows excessive memory allocation during header parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-31133",
+        "description": "runc: container escape via 'masked path' abuse due to mount race conditions"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-47291",
+        "description": "containerd: containerd CRI plugin: Incorrect cgroup hierarchy assignment for containers running in usernamespaced Kubernetes pods."
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-47911",
+        "description": "golang.org/x/net/html: Quadratic parsing complexity in golang.org/x/net/html"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-47913",
+        "description": "golang.org/x/crypto/ssh/agent: golang.org/x/crypto/ssh/agent: SSH client panic due to unexpected SSH_AGENT_SUCCESS"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-47914",
+        "description": "golang.org/x/crypto/ssh/agent: SSH Agent servers: Denial of Service due to malformed messages"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-52565",
+        "description": "runc: container escape with malicious config due to /dev/console mount and related races"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-52881",
+        "description": "runc: opencontainers/selinux: container escape and denial of service due to arbitrary write gadgets and procfs write redirects"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-54410",
+        "description": "github.com/moby/moby: Moby's Firewalld reload removes bridge network isolation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-58181",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via unbounded memory consumption in GSSAPI authentication"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-58190",
+        "description": "golang.org/x/net/html: Infinite parsing loop in golang.org/x/net"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-61726",
+        "description": "golang: net/url: Memory exhaustion in query parameter parsing in net/url"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-61727",
+        "description": "golang: crypto/x509: excluded subdomain constraint does not restrict wildcard SANs"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-61728",
+        "description": "golang: archive/zip: Excessive CPU consumption when building archive index in archive/zip"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-61729",
+        "description": "crypto/x509: golang: Denial of Service due to excessive resource consumption via crafted certificate"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-61730",
+        "description": "crypto/tls: Handshake messages may be processed at the incorrect encryption level in crypto/tls"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-64329",
+        "description": "github.com/containerd/containerd: containerd: Memory exhaustion via CRI Attach implementation goroutine leaks"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-67499",
+        "description": "CNI portmap plugin: github.com/containernetworking/plugins/plugins/meta/portmap: CNI portmap plugin: HostPort forwarding vulnerability allows traffic interception"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-68121",
+        "description": "crypto/tls: crypto/tls: Incorrect certificate validation during TLS session resumption"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-10722",
+        "description": "github.com/cilium/ebpf: Cilium ebpf: Denial of Service via integer overflow"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-107496",
+        "description": "openssl: openssl: Denial of Service via crafted EC certificate in CMS encryption"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-111943",
+        "description": "crypto/x509: golang: crypto/x509: Man-in-the-middle attacks via untrusted intermediate certificates"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-116585",
+        "description": "github.com/go-jose/go-jose: go-jose: Denial of Service via empty ciphertext buffer during JWE decryption"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-116586",
+        "description": "github.com/go-jose/go-jose: go-jose: Denial of Service via deeply nested JSON parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-116587",
+        "description": "github.com/go-jose/go-jose: go-jose: Denial of Service via crafted RSA parameters in JWKs"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119346",
+        "description": "next: Next.js: Information disclosure via internal cookie header exposure"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119347",
+        "description": "next: Next.js: Denial of Service via improper SVG processing"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119348",
+        "description": "next: Next.js: Information disclosure via HTTP response desynchronization"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119349",
+        "description": "next: Next.js: Information disclosure via improper cache key generation for binary arguments"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119350",
+        "description": "next: Next.js: Shared fallback shell cache poisoning via crafted route parameter request"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119351",
+        "description": "next: Next.js: information disclosure via improper cache key generation"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119790",
+        "description": "next: Next.js: Information disclosure via cross-request cache deduplication race condition"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-128085",
+        "description": "go.opentelemetry.io/otel/sdk: go.opentelemetry.io/otel/sdk/log: go.opentelemetry.io/otel/trace: OpenTelemetry-Go: Denial of Service via attribute truncation bypass using Unicode replacement characters"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-17106",
+        "description": "github.com/moby/go-archive: moby/go-archive: Arbitrary file write via link following in tar extraction"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-24051",
+        "description": "opentelemetry-go: OpenTelemetry-Go Affected by Arbitrary Code Execution via PATH Hijacking"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25679",
+        "description": "net/url: Incorrect parsing of IPv6 host literals in net/url"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25680",
+        "description": "golang.org/x/net/html: golang.org/x/net/html: Denial of Service due to excessive HTML parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-25681",
+        "description": "golang.org/x/net/html: golang.org/x/net/html: Arbitrary code execution via Cross-Site Scripting"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27136",
+        "description": "golang.org/x/net/html: golang: golang.org/x/net/html: Cross-Site Scripting via HTML parsing bypass"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27139",
+        "description": "os: FileInfo can escape from a Root in golang os module"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27142",
+        "description": "html/template: URLs in meta content attribute actions are not escaped in html/template"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27145",
+        "description": "crypto/x509: golang: golang crypto/x509: Denial of Service via excessive processing of DNS SAN entries"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32280",
+        "description": "crypto/x509: crypto/tls: golang: Go: Denial of Service vulnerability in certificate chain building"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32281",
+        "description": "crypto/x509: golang: Go crypto/x509: Denial of Service via inefficient certificate chain validation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32282",
+        "description": "golang: internal/syscall/unix: Root.Chmod can follow symlinks out of the root"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32283",
+        "description": "crypto/tls: golang: Go crypto/tls: Denial of Service via multiple TLS 1.3 key update messages"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32288",
+        "description": "archive/tar: golang: Go's archive/tar package: Denial of Service via maliciously-crafted archive"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-32289",
+        "description": "html/template: golang: html/template: Cross-Site Scripting (XSS) via improper context and brace depth tracking in JS template literals"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33186",
+        "description": "google.golang.org/grpc/grpc-go: google.golang.org/grpc/authz: gRPC-Go: Authorization bypass due to improper HTTP/2 path validation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33747",
+        "description": "BuildKit: github.com/moby/buildkit: BuildKit: Arbitrary file write and code execution via untrusted frontend"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33748",
+        "description": "github.com/moby/buildkit: BuildKit: Unauthorized file access via Git URL fragment subdir components"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33811",
+        "description": "net: golang: Go net package: Denial of Service via long CNAME response in LookupCNAME"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33814",
+        "description": "net/http/internal/http2: golang: golang.org/x/net: Go HTTP/2: Denial of Service via malformed SETTINGS_MAX_FRAME_SIZE frame"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33818",
+        "description": "encoding/asn1: golang: Go encoding/asn1: Denial of Service via excessive recursion in Unmarshal"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33997",
+        "description": "moby: docker: github.com/moby/moby: Moby: Privilege validation bypass during plugin installation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-34986",
+        "description": "github.com/go-jose/go-jose/v3: github.com/go-jose/go-jose/v4: Go JOSE: Denial of Service via crafted JSON Web Encryption (JWE) object"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-35469",
+        "description": "Kubelet: CRI-O: kube-apiserver: Kubelet, CRI-O, kube-apiserver: Denial of Service via SPDY streaming code"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39820",
+        "description": "net/mail: golang: Go net/mail: Denial of Service via crafted email inputs"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39821",
+        "description": "golang.org/x/net/idna: golang: net/http: golang.org/x/net/idna: Privilege escalation via incorrect Punycode label processing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39822",
+        "description": "golang: Go os.Root: Symlink following vulnerability allows directory traversal"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39823",
+        "description": "html/template: golang: Go html/template: Cross-Site Scripting via improper URL escaping in meta tag content"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39824",
+        "description": "Invoking integer overflow in NewNTUnicodeString in golang.org/x/sys/windows"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39825",
+        "description": "net/http/httputil: golang: net/http/httputil: ReverseProxy forwards hidden query parameters, potentially bypassing security controls"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39826",
+        "description": "html/template: golang: html/template: Cross-site scripting due to incorrect script tag escaping"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39827",
+        "description": "golang.org/x/crypto/ssh: golang: golang.org/x/crypto/ssh: Denial of Service via repeated rejected channel openings"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39828",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Unauthorized command execution via discarded SSH permissions"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39829",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via crafted public key with excessive parameters"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39830",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via resource leak from unsolicited SSH responses"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39831",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Security key bypass due to missing user presence check"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39832",
+        "description": "golang.org/x/crypto/ssh/agent: golang.org/x/crypto/ssh/agent: Security bypass due to improper handling of key restrictions"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39833",
+        "description": "golang.org/x/crypto/ssh/agent: golang.org/x/crypto/ssh/agent: Security bypass due to unenforced key confirmation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39834",
+        "description": "golang.org/x/crypto/ssh: golang: golang.org/x/crypto/ssh: Denial of Service due to integer overflow in SSH channel write"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39835",
+        "description": "golang.org/x/crypto/ssh: golang: golang.org/x/crypto/ssh: Denial of Service via crafted SSH certificate"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39836",
+        "description": "net: golang: Go net package: Denial of Service via NUL byte in Dial and LookupPort on Windows"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39882",
+        "description": "github.com/open-telemetry/opentelemetry-go: OpenTelemetry-Go: Memory exhaustion via uncapped HTTP response body reading"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39883",
+        "description": "github.com/open-telemetry/opentelemetry-go: OpenTelemetry-Go: Arbitrary code execution via PATH hijacking on BSD/Solaris"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41567",
+        "description": "docker: Moby/Docker Engine: Arbitrary Code Execution via malicious container image and compressed archive upload"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41568",
+        "description": "github.com/docker/docker: github.com/moby/moby: Moby: Denial of Service via race condition in docker cp mount setup"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-41579",
+        "description": "runc: runc: Host filesystem integrity compromised by malicious container images"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42306",
+        "description": "github.com/docker/docker: github.com/moby/moby: Moby container framework: Host file overwrite via race condition in docker cp mount setup"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42499",
+        "description": "net/mail: golang: net/mail: Denial of Service via pathological email address parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42502",
+        "description": "golang.org/x/net/html: golang: golang.org/x/net/html: Cross-Site Scripting via unexpected HTML tree rendering"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42504",
+        "description": "mime: golang: Golang MIME: Denial of Service via maliciously-crafted MIME header"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42505",
+        "description": "crypto/tls: golang: Go crypto/tls: Information disclosure in Encrypted Client Hello"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42506",
+        "description": "golang.org/x/net/html: golang.org/x/net/html: Cross-Site Scripting (XSS) via arbitrary HTML parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42507",
+        "description": "net/textproto: golang: Golang net/textproto: Misleading error messages via input injection"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42508",
+        "description": "golang.org/x/crypto/ssh/knownhosts: golang: golang.org/x/crypto/ssh/knownhosts: Revocation bypass via unchecked SignatureKey"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46597",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via crafted AES-GCM packet decoder inputs"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46598",
+        "description": "golang.org/x/crypto/ssh/agent: golang: golang.org/x/crypto/ssh/agent: Denial of Service via malformed input"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46600",
+        "description": "golang.org/x/net/dns/dnsmessage: golang.org/x/net/dns/dnsmessage: Denial of Service via invalid DNS record parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46680",
+        "description": "github.com/containerd/containerd: containerd: Privilege escalation via incorrect user ID handling"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-47262",
+        "description": "github.com/containerd/containerd: containerd: Denial of Service via maliciously crafted image leading to unbounded group parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4738",
+        "description": "Improper Restriction of Operations within the Bounds of a Memory Buffe ..."
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53488",
+        "description": "github.com/containerd/containerd: containerd: Host-root command execution via unvalidated image config labels in CRI plugin"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53493",
+        "description": "github.com/containerd/containerd: containerd: Denial of Service via crafted OCI image index"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53495",
+        "description": "github.com/containerd/containerd: containerd: Denial of Service via CRI ExecSync goroutine leak"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56851",
+        "description": "golang.org/x/text: golang.org/x/text: Denial of Service via out-of-bounds slice error in Nickname profile"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56852",
+        "description": "golang.org/x/text: golang.org/x/text: Denial of Service via invalid UTF-8 input"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56853",
+        "description": "net/http: golang: Go net/http: Unencrypted HTTP/2 connections vulnerable to Denial of Service"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56854",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Authentication bypass due to unenforced source-address restrictions"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56855",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via crafted messages"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56857",
+        "description": "os: golang: golang: Directory traversal via Windows junction handling"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56858",
+        "description": "html/template: golang: Go html/template: Cross-Site Scripting via pathological input"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56859",
+        "description": "encoding/xml: golang: Go: Denial of Service via XML decoding recursion depth issue"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56860",
+        "description": "net/url: golang: golang net/url: Denial of Service from quadratic complexity in path resolution"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56862",
+        "description": "crypto/tls: golang: Golang crypto/tls: Denial of Service via indefinite KeyUpdate messages"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56864",
+        "description": "golang.org/x/mod/sumdb: golang.org/x/mod/sumdb: Integrity bypass via malicious GOSUMDB"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56865",
+        "description": "golang.org/x/mod/sumdb/tlog: golang.org/x/mod/sumdb/tlog: Supply chain compromise via transparency log tile verification bypass"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56866",
+        "description": "net/http: golang: golang: Cross-user response poisoning via desynchronized HTTP CONNECT connections"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-61711",
+        "description": "github.com/moby/buildkit: BuildKit: Security bypass allows disabling container protections"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-61712",
+        "description": "github.com/moby/buildkit: BuildKit: Denial of Service via unbounded group parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-61801",
+        "description": "github.com/moby/sys/user: moby/sys/user: Denial of Service via crafted user or group database files"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-63209",
+        "description": "github.com/klauspost/compress: klauspost/compress: Denial of Service via integer overflow in dictionary processing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78659",
+        "description": "net/http: golang.org/x/net/http2: golang: net/http: Denial of Service via HTTP/2 trailer header memory exhaustion"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78660",
+        "description": "net/http: golang: golang.org/x/net/http2: net/http: HTTP response smuggling via malformed HTTP/2 framing headers"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78661",
+        "description": "golang.org/x/net/html: golang.org/x/net/html: Denial of Service via crafted HTML input"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78662",
+        "description": "golang.org/x/crypto/ssh: golang.org/x/crypto/ssh: Denial of Service via channel request flooding"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78663",
+        "description": "net/http: net/http/internal/http2: golang: golang.org/x/net/http2: golang: flow control limit bypass via double refund in HTTP/2 server"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78667",
+        "description": "net/http: golang: golang: Denial of Service via crafted HTTP Range headers"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78669",
+        "description": "net/http: net/http/internal/http2: golang.org/x/net/http2: net/http: Denial of Service via excessive HTTP/2 SETTINGS frames"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-81869",
+        "description": "OpenTelemetry-Go is the Go implementation of OpenTelemetry. From versi ..."
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-81870",
+        "description": "github.com/open-telemetry/opentelemetry-go: OpenTelemetry-Go: Information disclosure via exporter configuration logging"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84303",
+        "description": "github.com/grpc/grpc-go: gRPC-Go: RBAC policy bypass and validation evasion via mixed-case header matching"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84304",
+        "description": "google.golang.org/grpc: gRPC-Go: Denial of Service via HTTP/2 DATA Frame Fragmentation"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84445",
+        "description": "google.golang.org/grpc: gRPC-Go: Denial of Service via malformed RPC requests"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-85747",
+        "description": "github.com/distribution/distribution: distribution: Arbitrary container manifest substitution via missing digest verification"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-88822",
+        "description": "openssl: openssl: Information disclosure via uninitialized memory in QUIC peer detection"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-88823",
+        "description": "openssl: OpenSSL: Message authentication bypass via zero-length AAD update"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-94439",
+        "description": "net/http: golang: net/http: HTTP request smuggling via improper handling of HTTP/1 CONNECT responses"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-94440",
+        "description": "net/textproto: mime/multipart: golang: golang: Denial of Service via memory limit bypass in multipart form parsing"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-94448",
+        "description": "html/template: golang: golang: cross-site scripting via consecutive expressions in JavaScript template literals"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-95691",
+        "description": "openssl: openssl: Denial of Service via overlapping QUIC CRYPTO frame processing"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-95692",
+        "description": "openssl: OpenSSL: Denial of Service via out-of-bounds read in AES-GCM-SIV"
+      },
+      "products": [
+        {
+          "@id": "sogo6-ui:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-95838",
+        "description": "github.com/containerd/containerd: containerd: Denial of Service via repeated directory traversals during layer unpacking"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-97030",
+        "description": "html/template: golang: html/template: Cross-site scripting via improper escaping of yield keyword"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-97031",
+        "description": "crypto/tls: golang: crypto/tls: Denial of Service via multiple ECH outer extension references"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-97032",
+        "description": "net/http: net/http/internal/http2: golang: golang.org/x/net/http2: net/http: Denial of Service via concurrent HPACK encoder modification"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-97045",
+        "description": "golang.org/x/net/html: golang.org/x/net/html: Cross-Site Scripting via improper namespace handling during HTML rendering"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-97054",
+        "description": "net/http: golang: net/http: Denial of Service via race condition when handling oversized HTTP/1 requests"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-fv92-fjc5-jj9h",
+        "description": "mapstructure May Leak Sensitive Information in Logs When Processing Malformed Data"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-hrxh-6v49-42gf",
+        "description": "gRPC-Go: xDS RBAC and HTTP/2 Vulnerabilities"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-jp3c-6v3g-mpxv",
+        "description": "github.com/insomniacslk/dhcp permits denial of service through a malformed IPv4 payload length"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "affected"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-pmwq-pjrm-6p5r",
+        "description": "in-toto-golang and in-toto-python have inconsistent negation behavior"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-w67g-5rqw-f597",
+        "description": "Gorilla WebSocket Uses Cryptographically Weak PRNG for WebSocket Mask Key"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-xmrv-pmrh-hhx2",
+        "description": "Denial of Service due to Panic in AWS SDK for Go v2 SDK EventStream Decoder"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932",
+        "description": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+      },
+      "products": [
+        {
+          "@id": "ghcr.io/tobias-weiss-ai-xr/predictive-agent:latest"
+        }
+      ],
+      "status": "under_investigation"
+    }
+  ]
+}
